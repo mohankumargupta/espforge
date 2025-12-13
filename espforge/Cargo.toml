@@ -2,12 +2,22 @@
 name = "espforge"
 version = "0.1.0"
 include = [
-    "src/**/*", 
-    "templates/**/*", 
-    "components/**/*",
-    "devices/**/*",
-    "globals/**/*",
-    "platform/**/*",    
+    "src", 
+    "templates", 
+    "components",
+    "devices",
+    "globals",
+    "platform",
+    "config",
+    "generate",
+    "nibblers",
+    "resolver",
+    "build.rs",
+    "lib.rs",
+    "compile.rs",
+    "export.rs",
+    "manifest.rs",
+    "template_utils.rs",        
     "LICENSE", 
     "README.md",
 

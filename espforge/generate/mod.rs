@@ -169,21 +169,19 @@ fn update_cargo_manifest(project_name: &str) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("'dependencies' in Cargo.toml is not a table"))?;
 
     for subdir in DEVICES_DIR.dirs() {
-        // CHANGED: Find Cargo.toml by iterating files instead of using get_file().
-        // get_file() can be flaky with relative paths in embedded dirs.
         let cargo_file_opt = subdir
             .files()
-            .find(|f| f.path().file_name().and_then(|n| n.to_str()) == Some("Cargo.toml"));
+            .find(|f| f.path().file_name().and_then(|n| n.to_str()) == Some("Cargo.toml.tera"));
 
         if let Some(cargo_file) = cargo_file_opt {
             let device_toml_str = cargo_file
                 .contents_utf8()
-                .ok_or_else(|| anyhow::anyhow!("Device Cargo.toml is not valid UTF-8"))?;
+                .ok_or_else(|| anyhow::anyhow!("Device Cargo.toml.tera is not valid UTF-8"))?;
 
             // Parse the device manifest
             let device_manifest: toml::Value =
                 toml::from_str(device_toml_str).with_context(|| {
-                    format!("Failed to parse Cargo.toml for device {:?}", subdir.path())
+                    format!("Failed to parse Cargo.toml.tera for device {:?}", subdir.path())
                 })?;
 
             // If it has dependencies, merge them into the root dependencies
