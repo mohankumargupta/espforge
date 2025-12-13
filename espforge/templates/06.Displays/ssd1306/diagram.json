@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "author": "Raspberry Pi",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-c3-devkitm-1", "id": "esp", "top": -9.9, "left": -138.18, "attrs": {} },
+    {
+      "type": "board-ssd1306",
+      "id": "oled1",
+      "top": -6.46,
+      "left": 57.83,
+      "attrs": { "i2cAddress": "0x3c" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "esp:GND.10", "oled1:GND", "black", [ "h37.12", "v-38.4", "h105.6" ] ],
+    [ "esp:3V3.2", "oled1:VCC", "red", [ "h-9.6", "v-76.8", "h259.2" ] ],
+    [ "oled1:SCL", "esp:5", "yellow", [ "v-48", "h77.1", "v144", "h-240" ] ],
+    [ "oled1:SDA", "esp:6", "green", [ "v-38.4", "h57.67", "v124.8" ] ]
+  ],
+  "dependencies": {}
+}

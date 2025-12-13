@@ -1,0 +1,18 @@
+espforge:
+  name: i2c_scanner
+  platform: esp32c3
+
+esp32:
+  i2c:
+    i2c0: { sda: 6, scl: 7 }
+
+components:
+  my_i2c:
+    using: i2c
+    with:
+      i2c: $i2c0
+
+
+
+
+

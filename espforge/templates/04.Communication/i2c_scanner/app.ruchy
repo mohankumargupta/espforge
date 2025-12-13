@@ -1,0 +1,32 @@
+// Global state variable (inferred as u8/i32 by usage, mapped to Rust variable)
+let mut address = 1
+let mut found = false
+
+fun setup() {
+    log.info("Starting I2C Scanner")
+
+    while address <= 127 {
+        if my_i2c.probe(address) {
+            log.info("Found I2C device at address:")
+            log.print_hex(address)
+            found = true
+        }
+        address = address + 1
+        delay.delay_millis(10)
+    }
+    if !found {
+        log.info("No i2c devices found")
+    }
+}
+
+fun forever() {
+    delay.delay_millis(1000)
+}
+
+fun main() {
+    setup()
+    loop() {
+        forever()
+    }
+}
+

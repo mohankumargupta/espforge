@@ -1,0 +1,3 @@
+[workspace]
+resolver = "2"
+members = ["espforge", "espforge_macros"]

@@ -1,0 +1,13 @@
+fun setup() {
+}
+
+fun forever() {
+    delay.delay_millis(1000)
+}
+
+fun main() {
+    setup()
+    loop() {
+        forever()
+    }
+}

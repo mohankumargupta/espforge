@@ -1,0 +1,20 @@
+//there must be a function called setup and forever
+
+fun setup() {
+    red_led.off() 
+    log.info("Hello LED Ruchy")
+}
+
+fun forever() {
+    red_led.toggle()
+    delay.delay_millis(500)
+}
+
+
+// DO NOT TOUCH
+fun main() {
+    setup()
+    loop() {
+        forever()
+    }
+}

@@ -1,0 +1,28 @@
+(
+  name: "LED",
+
+  requires: [],
+
+  parameters: [
+    (
+      name: "gpio",
+      param_type: GpioRef,
+      required: true,
+    ),
+  ],
+
+  setup_template: "let mut {{ name }} = LED::new({{ params.gpio.pin }});",
+
+  methods: {
+    "toggle": (
+      template: "{{ target }}.toggle();",
+    ),
+    "on": (
+      template: "{{ target }}.on();",
+    ),
+    "off": (
+      template: "{{ target }}.off();",
+    ),
+  },
+)
+

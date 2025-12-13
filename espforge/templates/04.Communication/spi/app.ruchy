@@ -1,0 +1,19 @@
+fun setup() {
+    log.info("SPI Example");
+    let received = my_spi.write_read(3);
+    log.info("Sent for value of register 0x03");
+    log.info("received:");
+    log.info(received);
+}
+
+fun forever() {
+    delay.delay_millis(1000)
+}
+
+fun main() {
+    setup()
+    loop() {
+        forever()
+    }
+}
+

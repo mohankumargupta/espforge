@@ -1,0 +1,79 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "name": "Debug unit tests in library 'espforge_lib'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test"
+                ]
+            }
+        },
+        {
+            "name": "blink example",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=espforge",
+                    "--",
+                    "examples",
+                    "download",
+                    "blink",
+                ]
+            },
+            "args": []
+        },
+        {
+            "name": "example download spi",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=espforge",
+                    "--",
+                    "examples",
+                    "download",
+                    "spi",
+                ]
+            },
+            "args": []
+        },
+        {
+            "name": "example compile spi",
+            "type": "lldb",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/spi",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=espforge",
+                ]
+            },
+            "program": "${cargo:program}",
+            "args": [
+                "compile",
+                "spi.yaml"
+            ]
+        },
+        {
+            "name": "Debug unit tests in executable 'espforge'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bin=espforge"
+                ]
+            }
+        }
+    ]
+}

@@ -1,0 +1,19 @@
+[package]
+name = "espforge_macros"
+version = "0.1.0"
+edition = "2024"
+description = "Procedural macros for espforge"
+license = "MIT"
+repository = "https://github.com/mohankumargupta/espforge"
+readme = "../README.md"
+keywords = ["esp32", "macros"]
+categories = ["embedded", "no-std"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2"
+quote = "1"
+proc-macro2 = "1"
+

@@ -1,0 +1,20 @@
+espforge:
+  name: spi
+  platform: esp32c3
+
+esp32:
+  spi:
+    spi2: {miso: 6, mosi: 7, sck: 8, cs:  9}
+
+components:
+  my_spi:
+    using: spi
+    with:
+      spi: $spi2
+
+
+
+
+
+
+

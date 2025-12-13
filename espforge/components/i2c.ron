@@ -1,0 +1,24 @@
+(
+  name: "i2c",
+
+  requires: [],
+
+  parameters: [
+    (
+      name: "i2c",
+      param_type: I2cRef,
+      required: true,
+    ),
+  ],
+
+  setup_template: "let {{ name }} = I2C::new({{ params.i2c.sda }}, {{ params.i2c.scl }});",
+
+  methods: {
+    "probe": (
+      template: "{{ target }}.probe({{ args }})",
+    ),
+    "write": (
+      template: "{{ target }}.write({{ args }});",
+    )
+  },
+)

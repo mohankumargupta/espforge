@@ -1,0 +1,4 @@
+espforge:
+  name: helloworld
+  platform: esp32c3
+

@@ -1,0 +1,42 @@
+#![no_std]
+#![no_main]
+
+use esp_backtrace as _;
+use esp_hal::main;
+use {{ espforge.name }}::prelude::*;
+
+{% for include in includes -%}
+{{ include | safe }}
+{% endfor -%}
+
+esp_bootloader_esp_idf::esp_app_desc!();
+
+#[main]
+fn main() -> ! {
+    let log = EspforgeLog::new();
+    let _peripherals = esp_hal::init(esp_hal::Config::default());
+    let delay = EspforgeDelay::new();
+
+    {% for init_code in initializations -%}
+    {{ init_code | safe }}
+    {% endfor -%}
+
+    {% if variables %}
+    // Application Variables
+    {% for var in variables -%}
+    {{ var | safe }}
+    {% endfor -%}
+    {% endif %}    
+
+    {% for code in setup_code -%}
+    {{ code | safe }}
+    {% endfor -%}
+
+    loop {
+        {% for code in loop_code -%}
+        {{ code | safe }}
+        {% endfor -%}
+
+    }
+}
+

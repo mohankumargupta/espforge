@@ -1,0 +1,27 @@
+(
+  name: "spi",
+
+  requires: [],
+
+  parameters: [
+    (
+      name: "spi",
+      param_type: SpiRef,
+      required: true,
+    ),
+  ],
+
+  // Note: We cast CS to i8 to handle the case where it might be -1 (None), 
+  // though the Rust component expects u8. 
+  // We assume here the user defines CS in config if they want to use the default 'write' method of the component.
+  setup_template: "let mut {{ name }} = SPI::new({{ params.spi.sck }}, {{ params.spi.mosi }}, {{ params.spi.miso }}, {{ params.spi.cs }});",
+
+  methods: {
+    "write_read": (
+      // Usage: $my_spi.write_read: 0x55 (uses default CS from config)
+      // OR $my_spi.write_read: { cs: 10, data: 0x55 } (override, not implemented in this snippet for simplicity)
+      template: "{{ target }}.write_read({{ args }});",
+    ),
+  },
+)
+

@@ -1,0 +1,9 @@
+{
+  "name": "chip",
+  "author": "Raspberry Pi",
+  "pins": [
+    "SDA",
+    "SCL"
+  ],
+  "controls": []
+}

@@ -1,0 +1,22 @@
+(
+  name: "button",
+
+  requires: [],
+
+  parameters: [
+    (
+      name: "gpio",
+      param_type: GpioRef,
+      required: true,
+    ),
+  ],
+
+  setup_template: "let mut {{ name }} = Button::new({{ params.gpio.pin }}, {{ params.gpio.pullup }}, {{ params.gpio.pulldown }});",
+
+  methods: {
+    "is_button_pressed": (
+      template: "{{ target }}.is_button_pressed();",
+    ),
+  },
+)
+

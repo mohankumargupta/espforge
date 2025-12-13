@@ -1,0 +1,44 @@
+(
+  name: "ili9341",
+
+  requires: [],
+
+  parameters: [
+    (
+      name: "spi",
+      param_type: SpiComponentRef,
+      required: true,
+    ),
+    (
+      name: "cs",
+      param_type: GpioRef,
+      required: true,
+    ),
+    (
+      name: "dc",
+      param_type: GpioRef,
+      required: true,
+    ),
+    (
+      name: "rst",
+      param_type: GpioRef,
+      required: true,
+    ),
+  ],
+
+  // CHANGE: Define a buffer variable on the stack and pass a mutable reference to it
+  setup_template: "let mut {{ name }}_buffer = [0u8; 1024];\n    let mut {{ name }} = ILI9341Device::new({{ params.spi }}, {{ params.cs.pin }}, {{ params.dc.pin }}, {{ params.rst.pin }}, &mut {{ name }}_buffer);",
+
+  methods: {
+    "init": (
+      template: "{{ target }}.init();",
+    ),
+    "clear": (
+      template: "{{ target }}.clear();",
+    ),
+    "print": (
+      // Arguments: x, y, text
+      template: "{{ target }}.print({{ args }});",
+    ),
+  },
+)

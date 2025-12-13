@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        // "*.rs.tera": "rust",
+        // "*.toml.tera": "toml",
+    }
+}
