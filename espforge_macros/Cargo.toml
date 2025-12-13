@@ -13,7 +13,7 @@ categories = ["embedded", "no-std"]
 proc-macro = true
 
 [dependencies]
-syn = "2"
+syn = {version = "2", features = ["full"]}
 quote = "1"
 proc-macro2 = "1"
 
