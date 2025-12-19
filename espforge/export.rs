@@ -57,13 +57,10 @@ pub fn export_example(options: ExportOptions, target_dir: &Path) -> Result<Strin
     let project_path_str = target_dir.to_string_lossy();
     let template_root_path = template_dir.path();
 
-    // Iterate over all files in the template directory recursively
     for entry in template_dir.find("**/*")? {
         if let Some(file) = entry.as_file() {
             let file_path = file.path();
             let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-            // Skip example.yaml as it is processed separately above
             if file_name == "example.yaml" {
                 continue;
             }
@@ -75,22 +72,20 @@ pub fn export_example(options: ExportOptions, target_dir: &Path) -> Result<Strin
                 continue;
             }
 
-            //let relative_path = file_path.strip_prefix(template_root_path).unwrap_or(file_path);
-
-            // Skip 'chip' directory
-            // if relative_path.components().any(|c| c.as_os_str() == "chip") {
-            //     continue;
-            // }
-
-            // Copy everything verbatim, including .tera files, preserving directory structure.
             // We do not render templates here; that happens during 'compile'.
             copy_verbatim(file, template_root_path, &project_path_str)?;
-
-            // Print the relative path of the created file for feedback
             let relative_path = file_path
                 .strip_prefix(template_root_path)
                 .unwrap_or(file_path);
             println!("Created file: {}", relative_path.display());
+        }
+    }
+
+    let target_cargo_tera = target_dir.join("Cargo.toml.tera");
+    if !target_cargo_tera.exists() {
+        if let Some(dynamic_cargo) = root.get_file("_dynamic/Cargo.toml.tera") {
+             copy_verbatim(dynamic_cargo, Path::new("_dynamic"), &project_path_str)?;
+             println!("Created file: Cargo.toml.tera (from _dynamic)");
         }
     }
 

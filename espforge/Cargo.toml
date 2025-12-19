@@ -48,7 +48,7 @@ tera = "1.20.1"
 toml = { version = "0.9", features = ["preserve_order"] }
 ron = "0.12"
 serde_yaml_ng = "0.10"
-ruchy = {version = "3", default-features = false, features = ["minimal"]}
+ruchy = {version = "3", default-features = false}
 inventory = "0.3"
 
 

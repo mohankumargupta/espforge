@@ -1,0 +1,40 @@
+(
+    name: "signal",
+
+    requires: [],
+
+    parameters: [],
+
+    // The signal is a static global defined in signal.rs, 
+    // so no runtime setup code is required in main().
+    setup_template: "",
+
+    methods: {
+        "signal": (
+            // Usage: signal.signal(1)
+            // Signals waiting tasks with the provided value.
+            template: "GLOBAL_SIGNAL.signal(());",
+        ),
+        "wait": (
+            // Usage: let val = signal.wait()
+            // Asynchronously waits for the signal to be triggered.
+            // Returns the signaled value.
+            template: "GLOBAL_SIGNAL.wait().await",
+        ),
+        "try_take": (
+            // Usage: let val = signal.try_take()
+            // Non-blocking. Returns Some(val) if signaled, or None.
+            template: "GLOBAL_SIGNAL.try_take()",
+        ),
+        "reset": (
+            // Usage: signal.reset()
+            // Clears the signal state.
+            template: "GLOBAL_SIGNAL.reset();",
+        ),
+        "signaled": (
+            // Usage: if signal.signaled() { ... }
+            // Checks if the signal has been triggered.
+            template: "GLOBAL_SIGNAL.signaled()",
+        ),
+    },
+)

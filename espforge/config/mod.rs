@@ -3,8 +3,6 @@ use std::{collections::HashMap, fmt};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
-pub mod parse;
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EspforgeConfiguration {
     pub espforge: EspforgeConfig,
@@ -31,6 +29,9 @@ pub struct EspforgeConfig {
     pub wokwi_board: Option<WokwiBoard>,
     #[serde(default)]
     pub wokwi: Option<WokwiConfig>,
+    #[serde(default)]
+    pub enable_async: bool,
+
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -121,9 +122,9 @@ pub struct Esp32Config {
     #[serde(default)]
     pub spi: HashMap<String, SpiConfig>,
     #[serde(default)]
-    pub i2c: HashMap<String, Value>, // Placeholder for I2C config struct
+    pub i2c: HashMap<String, Value>,
     #[serde(default)]
-    pub uart: HashMap<String, Value>, // Placeholder for UART config struct
+    pub uart: HashMap<String, Value>, 
 }
 
 impl Esp32Config {
@@ -131,10 +132,8 @@ impl Esp32Config {
     pub fn contains_resource(&self, name: &str) -> bool {
         self.gpio.contains_key(name) ||
         self.spi.contains_key(name) ||
-        // Since i2c and uart are already defined as HashMap<String, Value> in your struct:
         self.i2c.contains_key(name) ||
         self.uart.contains_key(name)
-        // Add future peripherals here (e.g., self.timer.contains_key(name))
     }
 }
 

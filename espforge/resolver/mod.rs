@@ -22,6 +22,8 @@ pub struct RenderContext {
     pub variables: Vec<String>,
     pub setup_code: Vec<String>,
     pub loop_code: Vec<String>,
+    pub task_definitions: Vec<String>,
+    pub task_spawns: Vec<String>,
 }
 
 pub struct ContextResolver {
@@ -74,6 +76,9 @@ impl ContextResolver {
         let setup_code = self.resolve_lifecycle_block(setup_actions, "setup", config, manifests)?;
         let loop_code = self.resolve_lifecycle_block(loop_actions, "loop", config, manifests)?;
 
+        let task_definitions = Vec::new();
+        let task_spawns = Vec::new();
+
         // Append initializations in order (components then devices)
         let mut initializations: Vec<String> = components_map.values().cloned().collect();
         initializations.extend(devices_map.values().cloned());
@@ -84,6 +89,8 @@ impl ContextResolver {
             variables: variables_code,
             setup_code,
             loop_code,
+            task_definitions,
+            task_spawns,
         })
     }
 

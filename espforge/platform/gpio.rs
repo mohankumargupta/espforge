@@ -93,5 +93,24 @@ impl GPIOInput {
     pub fn is_low(&self) -> bool {
         self.input.is_low()
     }
+
+     pub async fn wait_for_low(&mut self) {
+        self.input.wait_for_low().await;
+    }
+
+    /// Asynchronously wait for the pin to go high
+    pub async fn wait_for_high(&mut self) {
+        self.input.wait_for_high().await;
+    }
+
+    /// Asynchronously wait for a rising edge
+    pub async fn wait_for_rising_edge(&mut self) {
+        self.input.wait_for_rising_edge().await;
+    }
+
+    /// Asynchronously wait for a falling edge
+    pub async fn wait_for_falling_edge(&mut self) {
+        self.input.wait_for_falling_edge().await;
+    }
 }
 

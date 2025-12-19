@@ -1,5 +1,3 @@
-//use std::u8;
-
 use crate::register_strategy;
 use crate::resolver::ParameterType;
 use crate::resolver::strategies::{ParameterStrategy, ResolutionContext};
@@ -7,7 +5,7 @@ use anyhow::{Result, anyhow};
 use espforge_macros::auto_register_param_strategy;
 use serde_yaml_ng::Value;
 
-/// Strategy for Hardware References (GPIO, SPI, etc.)
+/// references in yaml configuration
 #[derive(Default)]
 #[auto_register_param_strategy(
     ParameterType::GpioRef,
@@ -29,6 +27,8 @@ impl ParameterStrategy for HardwareStrategy {
         if let Some(gpio_config) = hardware.gpio.get(ref_name) {
             let mut map = serde_yaml_ng::Mapping::new();
             map.insert(Value::from("pin"), Value::from(gpio_config.pin));
+            map.insert(Value::from("pullup"), Value::from(gpio_config.pullup));
+            map.insert(Value::from("pulldown"), Value::from(gpio_config.pulldown));
             return Ok(Value::Mapping(map));
         }
 

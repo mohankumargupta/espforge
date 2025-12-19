@@ -38,13 +38,13 @@ pub fn load_manifests() -> Result<HashMap<String, ComponentManifest>> {
     Ok(manifests)
 }
 
-pub fn generate(project_name: &str, chip: &str) -> Result<()> {
+pub fn generate(project_name: &str, chip: &str, enable_async : bool) -> Result<()> {
     if fs::metadata(project_name).is_ok() {
         anyhow::bail!("Directory {} already exists", project_name);
     }
 
-    let status = Command::new("esp-generate")
-        .arg("--headless")
+    let mut cmd = Command::new("esp-generate");
+    cmd.arg("--headless")
         .arg("--chip")
         .arg(chip)
         .arg("-o")
@@ -56,9 +56,12 @@ pub fn generate(project_name: &str, chip: &str) -> Result<()> {
         .arg("-o")
         .arg("wokwi")
         .arg("-o")
-        .arg("vscode")
-        .arg(project_name)
-        .output()?;
+        .arg("vscode");
+    if enable_async {
+        cmd.arg("-o").arg("embassy");
+    }
+
+    let status = cmd.arg(project_name).output()?;
 
     if !status.status.success() {
         anyhow::bail!(

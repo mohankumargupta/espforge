@@ -17,6 +17,10 @@
     "is_button_pressed": (
       template: "{{ target }}.is_button_pressed();",
     ),
+    // --- NEW ENTRY ---
+    "wait_for_press": (
+      // The .await is critical here so the generated Rust code yields to the executor
+      template: "{{ target }}.wait_for_press().await;",
+    ),
   },
 )
-

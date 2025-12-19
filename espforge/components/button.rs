@@ -7,19 +7,21 @@ pub struct Button {
 
 impl Button {
     pub fn new(pin: u8,  pullup: bool, pulldown: bool) -> Self {
-        let (final_up, final_down) = if !pullup && !pulldown {
-            (true, false)
-        } else {
-            (pullup, pulldown)
-        };
-
         Button {
-            input: GPIOInput::new(pin, final_up, final_down),
+            input: GPIOInput::new(pin, pullup, pulldown),
         }
     }
 
 
     pub fn is_button_pressed(&self) -> bool {
         self.input.is_low()
+    }
+
+    pub async fn wait_for_press(&mut self) {
+        self.input.wait_for_falling_edge().await;
+    }
+    
+    pub async fn wait_for_release(&mut self) {
+        self.input.wait_for_rising_edge().await;
     }
 }
