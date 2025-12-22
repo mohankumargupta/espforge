@@ -47,7 +47,7 @@ impl ParameterStrategy for HardwareStrategy {
         }
 
         if let Some(i2c_config) = hardware.i2c.get(ref_name) {
-            return Ok(i2c_config.clone());
+             return serde_yaml_ng::to_value(i2c_config).map_err(|e| anyhow::anyhow!(e));
         }
 
         if let Some(uart_config) = hardware.uart.get(ref_name) {
@@ -72,3 +72,4 @@ impl HardwareStrategy {
             .ok_or_else(|| anyhow!("Hardware reference must start with '$', got: {}", val_str))
     }
 }
+

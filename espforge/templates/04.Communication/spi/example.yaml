@@ -4,7 +4,7 @@ espforge:
 
 esp32:
   spi:
-    spi2: {miso: 6, mosi: 7, sck: 8, cs:  9}
+    spi2: {spi: 2, miso: 6, mosi: 7, sck: 8, cs: 9, frequency_khz: 100}
 
 components:
   my_spi:

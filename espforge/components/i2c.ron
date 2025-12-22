@@ -11,7 +11,7 @@
     ),
   ],
 
-  setup_template: "let {{ name }} = I2C::new({{ params.i2c.sda }}, {{ params.i2c.scl }});",
+  setup_template: "let {{ name }} = I2C::new({{ params.i2c.i2c }}, {{ params.i2c.sda }}, {{ params.i2c.scl }}, {{ params.i2c.frequency }});",
 
   methods: {
     "probe": (

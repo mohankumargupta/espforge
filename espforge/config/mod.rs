@@ -122,7 +122,7 @@ pub struct Esp32Config {
     #[serde(default)]
     pub spi: HashMap<String, SpiConfig>,
     #[serde(default)]
-    pub i2c: HashMap<String, Value>,
+    pub i2c: HashMap<String, I2cConfig>,
     #[serde(default)]
     pub uart: HashMap<String, Value>, 
 }
@@ -144,6 +144,20 @@ pub struct SpiConfig {
     pub sck: u8,
     #[serde(default)]
     pub cs: Option<u8>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct I2cConfig {
+    #[serde(default)]
+    pub i2c: u8,
+    pub sda: u8,
+    pub scl: u8,
+    #[serde(default = "default_i2c_frequency", alias = "frequency_kHz", alias = "frequency_khz")]
+    pub frequency: u32,
+}
+
+fn default_i2c_frequency() -> u32 {
+    100
 }
 
 #[derive(Debug, Deserialize, Serialize)]

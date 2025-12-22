@@ -1,67 +1,81 @@
+#![allow(unexpected_cfgs)]
 use esp_hal::{
     gpio::AnyPin,
     i2c::master::{Config, I2c},
-    peripherals::I2C0,
     time::Rate,
     Blocking,
 };
 use embedded_hal::i2c::{ErrorType, I2c as EmbeddedI2c, Operation};
 
-/// User-friendly I2C Master wrapper
+/// User-friendly I2C Master wrapper.
 ///
-/// Wraps the specific ESP-HAL driver and implements `embedded_hal` traits
-/// so it can be consumed by device drivers (like SSD1306, MPU6050, etc).
+/// Wraps the specific ESP-HAL driver and implements `embedded_hal` traits.
 pub struct I2CMaster {
+    // We use 'static here because the driver is created from stolen peripherals,
+    // which effectively live forever. This simplifies the high-level component types.
     i2c: I2c<'static, Blocking>,
 }
 
 impl I2CMaster {
-    /// Creates a new I2C Master with the specified SDA and SCL pins
+    /// Creates a new I2C Master with the specified parameters.
     ///
     /// # Arguments
-    /// * `sda` - The GPIO pin number for SDA
-    /// * `scl` - The GPIO pin number for SCL
-    /// * `frequency_khz` - The bus frequency in kHz
+    /// * `i2c_num` - The I2C bus number (0 or 1).
+    /// * `sda` - The GPIO pin number for SDA.
+    /// * `scl` - The GPIO pin number for SCL.
+    /// * `frequency_khz` - The bus frequency in kHz.
     ///
     /// # Panics
-    /// Panics if the pins are invalid or if I2C0 is not available
-    pub fn new(sda: u8, scl: u8, frequency_khz: u32) -> Self {
-        // Safety: We ensure only one instance exists by consuming the AnyPin
-        // In the context of generated code, this is called once per defined bus.
-        let i2c0 = unsafe { I2C0::steal() };
+    /// Panics if `i2c_num` is invalid for the selected chip or if configuration fails.
+    pub fn new(i2c_num: u8, sda: u8, scl: u8, frequency_khz: u32) -> Self {
+        // Safety: We ensure only one instance exists by consuming the AnyPin via steal
         let sda_pin = unsafe { AnyPin::steal(sda) };
         let scl_pin = unsafe { AnyPin::steal(scl) };
 
         let config = Config::default().with_frequency(Rate::from_khz(frequency_khz));
 
-        let i2c = I2c::new(i2c0, config)
-            .unwrap()
+        // Dynamically select the peripheral based on the bus number.
+        // We use fully qualified paths for peripherals to avoid "unused import" or "unresolved item"
+        // errors in rust-analyzer when compiling for chips that don't have I2C1 (like C3).
+        let i2c_driver: I2c<'static, Blocking> = match i2c_num {
+            0 => {
+                let peripheral = unsafe { esp_hal::peripherals::I2C0::steal() };
+                I2c::new(peripheral, config).unwrap()
+            },
+            // Enable I2C1 only for chips that have it (ESP32, S2, S3, H2)
+            #[cfg(any(feature = "esp32", feature = "esp32s2", feature = "esp32s3", feature = "esp32h2"))]
+            1 => {
+                let peripheral = unsafe { esp_hal::peripherals::I2C1::steal() };
+                I2c::new(peripheral, config).unwrap()
+            },
+            _ => panic!("Invalid or unsupported I2C bus number: {}", i2c_num),
+        };
+
+        // Attach pins after creation
+        let i2c = i2c_driver
             .with_sda(sda_pin)
             .with_scl(scl_pin);
 
         I2CMaster { i2c }
     }
 
-    // --- Inherent methods for simple internal use or legacy scripts ---
-
-    /// Writes bytes to the specified address
+    /// Writes bytes to the specified address.
     pub fn write(&mut self, address: u8, bytes: &[u8]) -> Result<(), esp_hal::i2c::master::Error> {
         self.i2c.write(address, bytes)
     }
 
-    /// Reads bytes from the specified address
+    /// Reads bytes from the specified address.
     pub fn read(&mut self, address: u8, buffer: &mut [u8]) -> Result<(), esp_hal::i2c::master::Error> {
         self.i2c.read(address, buffer)
     }
 
-    /// Writes bytes and then reads bytes from the specified address
+    /// Writes bytes and then reads bytes from the specified address.
     pub fn write_read(&mut self, address: u8, write_buffer: &[u8], read_buffer: &mut [u8]) -> Result<(), esp_hal::i2c::master::Error> {
         self.i2c.write_read(address, write_buffer, read_buffer)
     }
 }
 
 // --- embedded-hal Implementation ---
-// This allows this struct to be passed to external drivers (like ssd1306)
 
 impl ErrorType for I2CMaster {
     type Error = esp_hal::i2c::master::Error;
@@ -69,9 +83,6 @@ impl ErrorType for I2CMaster {
 
 impl EmbeddedI2c for I2CMaster {
     fn transaction(&mut self, address: u8, operations: &mut [Operation<'_>]) -> Result<(), Self::Error> {
-        // We delegate the transaction implementation directly to the underlying ESP-HAL driver,
-        // which already implements embedded-hal 1.0.0
-        // Use the trait method explicitly to resolve type mismatch with inherent method
         EmbeddedI2c::transaction(&mut self.i2c, address, operations)
     }
 }

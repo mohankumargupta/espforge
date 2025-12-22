@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use include_dir::{Dir, include_dir};
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path; // Added Path import
 use std::process::Command;
 use toml;
 
@@ -122,22 +123,36 @@ pub fn generate(project_name: &str, chip: &str, enable_async : bool) -> Result<(
     }
     fs::write(format!("{}/mod.rs", devices_path), devices_mod_content)?;
 
-    let mut globals_mod_exists = false;
+    let mut global_modules = Vec::new();
+
     for file in GLOBALS_DIR.files() {
         let file_path_str = file.path().to_str().unwrap();
+        
+        // Skip async_signal if not enabled
+        if !enable_async && file_path_str.starts_with("async_signal") {
+            continue;
+        }
+
+        if file_path_str == "mod.rs" {
+            continue;
+        }
+
         let path = format!("{}/{}", globals_path, file_path_str);
         if path.ends_with(".rs") {
-            if file_path_str == "mod.rs" {
-                globals_mod_exists = true;
-            }
             fs::write(&path, file.contents())?;
+            if let Some(stem) = Path::new(file_path_str).file_stem().and_then(|s| s.to_str()) {
+                global_modules.push(stem.to_string());
+            }
         }
     }
 
-    // Ensure mod.rs exists for globals so compilation doesn't fail if directory is empty
-    if !globals_mod_exists {
-        fs::write(format!("{}/mod.rs", globals_path), "")?;
+    // Generate mod.rs dynamically based on copied files
+    // CHANGE: Added #![allow(unused_imports)] to suppress warnings for unused global modules
+    let mut globals_mod_content = String::from("#![allow(unused_imports)]\n");
+    for mod_name in global_modules {
+        globals_mod_content.push_str(&format!("pub mod {};\npub use {}::*;\n", mod_name, mod_name));
     }
+    fs::write(format!("{}/mod.rs", globals_path), globals_mod_content)?;
 
     // Update Cargo.toml: Merge device dependencies and add [workspace]
     update_cargo_manifest(project_name)?;
@@ -205,3 +220,4 @@ fn update_cargo_manifest(project_name: &str) -> Result<()> {
 
     Ok(())
 }
+

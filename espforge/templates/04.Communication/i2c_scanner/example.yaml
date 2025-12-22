@@ -4,7 +4,7 @@ espforge:
 
 esp32:
   i2c:
-    i2c0: { sda: 6, scl: 7 }
+    i2c0: { i2c: 0, sda: 6, scl: 7, frequency_kHz: 100 }
 
 components:
   my_i2c:

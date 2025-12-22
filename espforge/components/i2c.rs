@@ -6,15 +6,14 @@ pub struct I2C {
 }
 
 impl I2C {
-    pub fn new(sda: u8, scl: u8) -> Self {
+    pub fn new(i2c_bus: u8, sda: u8, scl: u8, frequency: u32) -> Self {
         I2C {
             // Default to 100kHz standard mode
-            master: RefCell::new(I2CMaster::new(sda, scl, 100)),
+            master: RefCell::new(I2CMaster::new(i2c_bus, sda, scl, frequency)),
         }
     }
 
     /// Probes an I2C address to see if a device acknowledges it.
-    /// Useful for I2C scanning.
     pub fn probe(&self, address: u8) -> bool {
         let mut buffer = [0u8; 1];
         // Attempt to read 1 byte. If successful, the device exists.
