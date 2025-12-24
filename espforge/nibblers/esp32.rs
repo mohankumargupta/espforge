@@ -38,11 +38,14 @@ impl ConfigNibbler for HardwareNibbler {
 
             // Check SPIs
             for (name, spi_config) in &esp32.spi {
+                let miso = match spi_config.miso {
+                    Some(pin) => pin.to_string(),
+                    None => "None".to_string(),
+                };
                 findings.push(format!(
                     "SPI '{}' configured (SCK:{}, MOSI:{}, MISO:{})",
-                    name, spi_config.sck, spi_config.mosi, spi_config.miso
+                    name, spi_config.sck, spi_config.mosi, miso
                 ));
-                // Simple overlap check could go here
             }
         }
 

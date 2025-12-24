@@ -51,12 +51,17 @@ impl SPIMaster {
         };
 
         let sck = unsafe { AnyPin::steal(sck_pin) };
-        let miso = unsafe { AnyPin::steal(miso_pin) };
+        //let miso = unsafe { AnyPin::steal(miso_pin) };
         let mosi = unsafe { AnyPin::steal(mosi_pin) };
 
         let mut driver = driver.with_sck(sck)
-            .with_miso(miso)
+            //.with_miso(miso)
             .with_mosi(mosi);
+
+        if miso_pin != u8::MAX {
+            let miso = unsafe { AnyPin::steal(miso_pin) };
+            driver = driver.with_miso(miso);
+        }
 
         if cs_pin != u8::MAX {
              let cs = unsafe { AnyPin::steal(cs_pin) };

@@ -150,8 +150,9 @@ impl Esp32Config {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SpiConfig {
     #[serde(default)]
-    pub spi: u8,    
-    pub miso: u8,
+    pub spi: u8, 
+     #[serde(default)]   
+    pub miso: Option<u8>,
     pub mosi: u8,
     pub sck: u8,
     #[serde(default)]

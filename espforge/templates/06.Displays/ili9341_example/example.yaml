@@ -5,11 +5,12 @@ espforge:
 esp32:
   spi:
     # MISO is not connected for ili9341
-    spi2: { sck: 3, mosi: 4, cs: 5 }
+    spi2: { spi: 2, sck: 3, mosi: 4, frequency_kHz: 10000 }
   
   gpio:
     pin_dc:  { pin: 6, direction: output }
     pin_rst: { pin: 7, direction: output }
+    pin_cs:  { pin: 5, direction: output }
 
 components:
   main_spi:
@@ -24,4 +25,4 @@ devices:
       spi: $main_spi
       dc: $pin_dc
       rst: $pin_rst
-
+      cs: $pin_cs
