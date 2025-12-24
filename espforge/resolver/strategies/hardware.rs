@@ -54,7 +54,7 @@ impl ParameterStrategy for HardwareStrategy {
         }
 
         if let Some(uart_config) = hardware.uart.get(ref_name) {
-            return Ok(uart_config.clone());
+            return serde_yaml_ng::to_value(uart_config).map_err(|e| anyhow::anyhow!(e));
         }
 
         Err(anyhow!(

@@ -141,16 +141,29 @@ pub fn generate(project_name: &str, chip: &str, enable_async : bool) -> Result<(
         globals_mod_content.push_str(&format!("pub mod {};\npub use {}::*;\n", mod_name, mod_name));
     }
     fs::write(format!("{}/mod.rs", globals_path), globals_mod_content)?;
-    update_cargo_manifest(project_name)?;
+    update_cargo_manifest(project_name, chip)?;
     Ok(())
 }
 
-fn update_cargo_manifest(project_name: &str) -> Result<()> {
+fn update_cargo_manifest(project_name: &str, chip: &str) -> Result<()> {
     let cargo_path = format!("{}/Cargo.toml", project_name);
     let cargo_content = fs::read_to_string(&cargo_path)
         .with_context(|| format!("Failed to read {}", cargo_path))?;
     let mut root_manifest: toml::Table =
         toml::from_str(&cargo_content).with_context(|| "Failed to parse generated Cargo.toml")?;
+
+    let mut features = toml::Table::new();
+    let mut default = Vec::new();
+    default.push(toml::Value::String(chip.to_string()));
+    features.insert("default".to_string(), toml::Value::Array(default));
+    features.insert(chip.to_string(), toml::Value::Array(Vec::new()));
+
+    if let Some(f) = root_manifest.get_mut("features").and_then(|v| v.as_table_mut()) {
+        f.insert("default".to_string(), features["default"].clone());
+        f.insert(chip.to_string(), features[chip].clone());
+    } else {
+        root_manifest.insert("features".to_string(), toml::Value::Table(features));
+    }
 
     if !root_manifest.contains_key("workspace") {
         root_manifest.insert(

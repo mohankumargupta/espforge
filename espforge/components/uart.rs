@@ -3,15 +3,14 @@ use core::str;
 
 pub struct Uart {
     driver: UartDriver,
-    // Add a buffer to store incoming characters
     rx_buffer: [u8; 128], 
     rx_len: usize,
 }
 
 impl Uart {
-    pub fn new(tx: u8, rx: u8, baud: u32) -> Self {
+    pub fn new(uart: u8, tx: u8, rx: u8, baud: u32) -> Self {
         Self {
-            driver: UartDriver::new(tx, rx, baud),
+            driver: UartDriver::new(uart, tx, rx, baud),
             rx_buffer: [0u8; 128],
             rx_len: 0,
         }
@@ -39,17 +38,12 @@ impl Uart {
         None
     }
 
-    // --- NEW METHODS FOR BUFFERING ---
-
-    /// Reads available bytes. Returns true if a newline ('\n') was received.
     pub fn buffer_until_newline(&mut self) -> bool {
         if let Some(byte) = self.read_byte() {
-            // Check for newline
             if byte == b'\n' {
                 return true; 
             }
             
-            // Store byte if we have space
             if self.rx_len < self.rx_buffer.len() {
                 self.rx_buffer[self.rx_len] = byte;
                 self.rx_len += 1;
@@ -58,7 +52,6 @@ impl Uart {
         false
     }
 
-    /// Returns the buffered string as a slice
     pub fn get_buffered_string(&mut self) -> &str {
         match str::from_utf8(&self.rx_buffer[0..self.rx_len]) {
             Ok(s) => s,
@@ -66,7 +59,6 @@ impl Uart {
         }
     }
 
-    /// Resets the buffer index to 0
     pub fn clear_buffer(&mut self) {
         self.rx_len = 0;
     }

@@ -4,7 +4,7 @@ espforge:
 
 esp32:
   uart:
-    uart0: { tx: 6, rx: 5 }
+    uart0: { uart: 1, tx: 6, rx: 5 }
 
 components:
   my_uart:

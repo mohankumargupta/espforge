@@ -124,7 +124,17 @@ pub struct Esp32Config {
     #[serde(default)]
     pub i2c: HashMap<String, I2cConfig>,
     #[serde(default)]
-    pub uart: HashMap<String, Value>, 
+    pub uart: HashMap<String, UartConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UartConfig {
+    #[serde(default)]
+    pub uart: u8,
+    pub tx: u8,
+    pub rx: u8,
+    #[serde(default = "default_uart_baud")]
+    pub baud: u32,    
 }
 
 impl Esp32Config {
@@ -164,6 +174,10 @@ pub struct I2cConfig {
 
 fn default_i2c_frequency() -> u32 {
     100
+}
+
+fn default_uart_baud() -> u32 {
+    9600
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -14,8 +14,7 @@
     ),
   ],
 
-  setup_template: "let mut {{ name }} = Uart::new({{ params.uart.tx }}, {{ params.uart.rx }}, {{ params.baud }});",
-
+  setup_template: "let mut {{ name }} = Uart::new({{ params.uart.uart }}, {{ params.uart.tx }}, {{ params.uart.rx }}, {{ params.baud }});",
   methods: {
     "write": (
       template: "{{ target }}.write({{ args }});",

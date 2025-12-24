@@ -1,36 +1,27 @@
 espforge:
-  name: ili9341_demo
+  name: ili9341_example
   platform: esp32c3
 
-# Hardware Definitions
 esp32:
   spi:
     # MISO is not connected for ili9341
-    spi2: { sck: 3, mosi: 4, miso: 2 }
+    spi2: { sck: 3, mosi: 4, cs: 5 }
   
   gpio:
-    # Define the control pins
-    pin_cs:  { pin: 5, direction: output }
     pin_dc:  { pin: 6, direction: output }
     pin_rst: { pin: 7, direction: output }
 
-# Component Layer
 components:
-  # The raw SPI bus wrapper
   main_spi:
     using: spi
     with:
       spi: $spi2
 
-# Device Layer
 devices:
   display:
     using: ili9341
     with:
-      # Pass the SPI component
       spi: $main_spi
-      # Pass the control pins
-      cs: $pin_cs
       dc: $pin_dc
       rst: $pin_rst
 
