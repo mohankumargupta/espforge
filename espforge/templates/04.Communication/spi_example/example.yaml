@@ -1,10 +1,10 @@
 espforge:
-  name: spi
+  name: spi_example
   platform: esp32c3
 
 esp32:
   spi:
-    spi2: {spi: 2, miso: 6, mosi: 7, sck: 8, cs: 9, frequency_khz: 100}
+    spi2: {spi: 2, mode: 0, miso: 6, mosi: 7, sck: 8, cs: 9, frequency_khz: 100}
 
 components:
   my_spi:

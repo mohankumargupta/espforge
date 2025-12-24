@@ -14,7 +14,7 @@
   // Note: We cast CS to i8 to handle the case where it might be -1 (None), 
   // though the Rust component expects u8. 
   // We assume here the user defines CS in config if they want to use the default 'write' method of the component.
-  setup_template: "let mut {{ name }} = SPI::new({{ params.spi.sck }}, {{ params.spi.mosi }}, {{ params.spi.miso }}, {{ params.spi.cs }});",
+  setup_template: "let mut {{ name }} = SPI::new({{ params.spi.spi }}, {{ params.spi.sck }}, {{ params.spi.mosi }}, {{ params.spi.miso }}, {{ params.spi.cs }}, {{ params.spi.frequency }}, {{ params.spi.mode }});",
 
   methods: {
     "write_read": (

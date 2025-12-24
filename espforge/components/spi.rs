@@ -7,9 +7,9 @@ pub struct SPI {
 impl SPI {
     // We take cs as i64 because generic numbers in templates might be wider, but u8 is fine.
     // If cs is > 255 (e.g. -1 cast to unsigned), we assume no CS.
-    pub fn new(sck: u8, mosi: u8, miso: u8, cs: u8) -> Self {
+    pub fn new(spi_bus: u8, sck: u8, mosi: u8, miso: u8, cs: u8, frequency: u32, mode: u8) -> Self {
         SPI {
-            master: SPIMaster::new(sck, mosi, miso, cs)
+            master: SPIMaster::new(spi_bus, sck, mosi, miso, cs, frequency, mode)
         }
     }
 

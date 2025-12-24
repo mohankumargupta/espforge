@@ -12,7 +12,9 @@
    ```
 
   It should behave as expected.
-3. We are currently lacking discoverability for yaml configuration and variables in ruchy scripting. Some ideas:
+3. There are name clashes for example project the same name as component 
+
+4. We are currently lacking discoverability for yaml configuration and variables in ruchy scripting. Some ideas:
    - for yaml, have a menuconfig like thing, so I know what options are available
    - for ruchy, might need a subcommand that reads the yaml file and discovers what variables,
      components, devices, and global objects and methods are available.

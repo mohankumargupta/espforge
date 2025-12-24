@@ -35,9 +35,12 @@ impl ParameterStrategy for HardwareStrategy {
         // Try to find it in SPI
         if let Some(spi_config) = hardware.spi.get(ref_name) {
             let mut map = serde_yaml_ng::Mapping::new();
+            map.insert(Value::from("spi"), Value::from(spi_config.spi));
             map.insert(Value::from("miso"), Value::from(spi_config.miso));
             map.insert(Value::from("mosi"), Value::from(spi_config.mosi));
             map.insert(Value::from("sck"), Value::from(spi_config.sck));
+            map.insert(Value::from("frequency"), Value::from(spi_config.frequency));
+            map.insert(Value::from("mode"), Value::from(spi_config.mode));
             if let Some(cs) = spi_config.cs {
                 map.insert(Value::from("cs"), Value::from(cs));
             } else {

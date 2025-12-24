@@ -139,11 +139,17 @@ impl Esp32Config {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SpiConfig {
+    #[serde(default)]
+    pub spi: u8,    
     pub miso: u8,
     pub mosi: u8,
     pub sck: u8,
     #[serde(default)]
     pub cs: Option<u8>,
+    #[serde(default = "default_i2c_frequency", alias = "frequency_kHz", alias = "frequency_khz")]
+    pub frequency: u32,
+    #[serde(default)]
+    pub mode: u8,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
