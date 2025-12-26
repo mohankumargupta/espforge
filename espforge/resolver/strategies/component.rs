@@ -8,18 +8,16 @@ use serde_yaml_ng::Value;
 /// Strategy for resolving I2C Component references.
 #[derive(Default)]
 #[auto_register_param_strategy(ParameterType::I2cComponentRef, ParameterType::SpiComponentRef)]
-pub struct I2CComponentRefStrategy;
+pub struct ComponentRefStrategy;
 
-impl ParameterStrategy for I2CComponentRefStrategy {
+impl ParameterStrategy for ComponentRefStrategy {
     fn resolve(&self, value: &Value, _ctx: &ResolutionContext) -> Result<Value> {
         let ref_name = self.extract_name(value)?;
-
-        // Return the variable name string
         Ok(Value::String(ref_name.to_string()))
     }
 }
 
-impl I2CComponentRefStrategy {
+impl ComponentRefStrategy {
     fn extract_name<'a>(&self, value: &'a Value) -> Result<&'a str> {
         let val_str = value
             .as_str()

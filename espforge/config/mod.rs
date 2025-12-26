@@ -157,7 +157,7 @@ pub struct SpiConfig {
     pub sck: u8,
     #[serde(default)]
     pub cs: Option<u8>,
-    #[serde(default = "default_i2c_frequency", alias = "frequency_kHz", alias = "frequency_khz")]
+    #[serde(default = "default_spi_frequency", alias = "frequency_kHz", alias = "frequency_khz")]
     pub frequency: u32,
     #[serde(default)]
     pub mode: u8,
@@ -177,11 +177,15 @@ fn default_i2c_frequency() -> u32 {
     100
 }
 
+fn default_spi_frequency() -> u32 {
+    1000
+}
+
 fn default_uart_baud() -> u32 {
     9600
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize,Clone, Copy)]
 pub struct GpioPinConfig {
     pub pin: u8,
     pub direction: PinDirection,
@@ -191,7 +195,7 @@ pub struct GpioPinConfig {
     pub pulldown: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq,  Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum PinDirection {
     Input,

@@ -7,16 +7,17 @@ use espforge_macros::auto_register_param_strategy;
 use serde_yaml_ng::Value;
 
 #[derive(Default)]
-#[auto_register_param_strategy(ParameterType::GpioRef)]
-pub struct GpioStrategy;
+#[auto_register_param_strategy(ParameterType::UartRef)]
+pub struct UartStrategy;
 
-impl ParameterStrategy for GpioStrategy {
+impl ParameterStrategy for UartStrategy {
     fn resolve(&self, value: &Value, ctx: &ResolutionContext) -> Result<Value> {
         resolve_hardware_resource(
             value,
             ctx,
-            |hw| &hw.gpio,
+            |hw| &hw.uart,
             |c| c.clone()
         )
     }
 }
+
