@@ -157,7 +157,7 @@ pub struct SpiConfig {
     pub sck: u8,
     #[serde(default)]
     pub cs: Option<u8>,
-    #[serde(default = "default_i2c_frequency", alias = "frequency_kHz", alias = "frequency_khz")]
+    #[serde(default = "default_spi_frequency", alias = "frequency_kHz", alias = "frequency_khz")]
     pub frequency: u32,
     #[serde(default)]
     pub mode: u8,
@@ -175,6 +175,10 @@ pub struct I2cConfig {
 
 fn default_i2c_frequency() -> u32 {
     100
+}
+
+fn default_spi_frequency() -> u32 {
+    1000
 }
 
 fn default_uart_baud() -> u32 {

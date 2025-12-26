@@ -5,7 +5,7 @@ espforge:
 # 1. ESP32 Peripherals
 esp32:
   i2c:
-    i2c0: { sda: 6, scl: 5 }
+    i2c0: { i2c: 0, sda: 6, scl: 5, frequency_khz: 100 }
 
 # 2. Component Layer
 components:
