@@ -185,7 +185,7 @@ fn default_uart_baud() -> u32 {
     9600
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize,Clone, Copy)]
 pub struct GpioPinConfig {
     pub pin: u8,
     pub direction: PinDirection,
@@ -195,7 +195,7 @@ pub struct GpioPinConfig {
     pub pulldown: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq,  Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum PinDirection {
     Input,
