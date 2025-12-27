@@ -1,3 +1,6 @@
+#![allow(unexpected_cfgs)]
+#![cfg(feature = "async")]
+
 use embassy_sync::signal::Signal;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 

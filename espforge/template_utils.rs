@@ -76,12 +76,17 @@ pub fn process_template_directory(
             // Get path relative to the specific template folder
             let relative_path = path.strip_prefix(template_path).unwrap_or(path);
             let dest_path = Path::new(project_name).join(relative_path);
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+            // SKIP Cargo.toml.tera to prevent overwriting the generated Cargo.toml
+            // This is handled by generate::cargo::update_manifest
+            if name == "Cargo.toml.tera" {
+                continue;
+            }
 
             if let Some(parent) = dest_path.parent() {
                 fs::create_dir_all(parent)?;
             }
-
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             if name.ends_with(".tera") {
                 let content = file
@@ -124,3 +129,4 @@ pub fn write_template(path: &Path, content: &str) -> Result<()> {
     fs::write(path, content)?;
     Ok(())
 }
+

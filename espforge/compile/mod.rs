@@ -21,11 +21,28 @@ pub fn compile<P: AsRef<Path>>(path: P) -> Result<(), Error> {
     )?;
 
     let project_path = PathBuf::from(project_name);
+    let src_path = project_path.join("src");
+
+    // Copy necessary infrastructure files
+    crate::generate::operations::copy_components(&src_path)?;
+    crate::generate::operations::copy_platform_files(&src_path)?;
+    crate::generate::operations::copy_globals_files(&src_path)?;
+    crate::generate::operations::copy_devices(&src_path)?;
 
     let mut tera_context = context::prepare_tera_context(&config)?;
     context::resolve_application_logic(&config, config_dir, &mut tera_context)?;    
     template::apply_templates(&config, &project_path, &tera_context)?;
+    
+    // Update Cargo.toml (Merge dependencies)
+    crate::generate::cargo::update_manifest(
+        &project_path,
+        config_dir,
+        config.espforge.platform.target(), 
+        &tera_context
+    )?;
+
     postprocess::refine_project_files(&project_path, config_dir, &tera_context)?;
 
     Ok(())
 }
+

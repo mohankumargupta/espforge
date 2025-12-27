@@ -2,25 +2,24 @@
 name = "espforge"
 version = "0.1.2"
 include = [
+    "build.rs",
+    "compile.rs",
+    "components",
+    "config",
+    "devices",
+    "export.rs",
+    "generate",
+    "globals",
+    "lib.rs",
+    "LICENSE", 
+    "manifest.rs",
+    "nibblers",
+    "platform",
+    "README.md",
+    "resolver",
     "src", 
     "templates", 
-    "components",
-    "devices",
-    "globals",
-    "platform",
-    "config",
-    "generate",
-    "nibblers",
-    "resolver",
-    "build.rs",
-    "lib.rs",
-    "compile.rs",
-    "export.rs",
-    "manifest.rs",
-    "template_utils.rs",        
-    "LICENSE", 
-    "README.md",
-
+    "template_utils.rs",
 ]
 edition = "2024"
 description = "A scaffolding++ project generator for bare-metal ESP32 projects"
@@ -50,7 +49,8 @@ ron = "0.12"
 serde_yaml_ng = "0.10"
 ruchy = {version = "3", default-features = false}
 inventory = "0.3"
-
+toml_edit = "0.23"
+log = "0.4"
 
 # CLI Specific Dependencies (Optional)
 clap = { version = "4.5", features = ["derive"], optional = true }
