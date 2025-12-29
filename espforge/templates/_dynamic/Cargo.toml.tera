@@ -1,6 +1,0 @@
-[features]
-default = [{% if espforge.enable_async %}"async"{% endif %}]
-async = ["dep:embassy-sync"]
-
-[dependencies]
-embassy-sync = { version = "0.6.0", optional = true }

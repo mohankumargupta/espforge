@@ -1,0 +1,20 @@
+use anyhow::Result;
+use espforge_common::GpioPinConfig;
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
+use std::collections::HashMap;
+
+pub fn generate_gpio_pins(
+    gpio_configs: &HashMap<String, GpioPinConfig>,
+    fields: &mut Vec<TokenStream>,
+    struct_init: &mut Vec<TokenStream>,
+) -> Result<()> {
+    for (name, cfg) in gpio_configs {
+        let field = format_ident!("{}", name);
+        let pin_num = format_ident!("GPIO{}", cfg.pin);
+
+        fields.push(quote! { pub #field: RefCell<Option<AnyPin<'static>>> });
+        struct_init.push(quote! { #field: RefCell::new(Some(p.#pin_num.degrade())) });
+    }
+    Ok(())
+}

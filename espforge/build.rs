@@ -1,92 +1,34 @@
-use std::{env, fs, io::Write, path::Path};
+use anyhow::{Result, anyhow};
+use std::{env, fs, path::Path};
+use toml_edit::{DocumentMut};
 
-fn main() {
-    let out_dir = env::var_os("OUT_DIR").unwrap();
-    let dest_path = Path::new(&out_dir).join("generated_templates.rs");
-    let mut file = fs::File::create(&dest_path).unwrap();
+pub fn main() -> Result<()> {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
+    if let Some(path) = Path::new(&manifest_dir).parent() {
+        let get_dep_version = |doc: DocumentMut| -> Result<String> {
+            doc.get("package")
+                .and_then(|p| p.get("version"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .ok_or_else(|| anyhow!("Field [package] version not found in Cargo.toml"))
+        };
 
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let templates_dir_path = Path::new(&manifest_dir).join("templates");
+        let espforge_platform = path.join("espforge_platform");
+        let espforge_platform_cargo = espforge_platform.join("Cargo.toml");
+        let espforge_platform_cargo_content = fs::read_to_string(espforge_platform_cargo)?;
+        let espforge_platform_doc = espforge_platform_cargo_content.parse::<DocumentMut>()?;
 
-    let mut module_declarations = Vec::new();
-    let mut match_arms = Vec::new();
+        let espforge_devices = path.join("espforge_devices");
+        let espforge_devices_cargo = espforge_devices.join("Cargo.toml");
+        let espforge_devices_cargo_content = fs::read_to_string(espforge_devices_cargo)?;
+        let espforge_devices_doc = espforge_devices_cargo_content.parse::<DocumentMut>()?;
 
-    if templates_dir_path.exists() {
-        find_templates(
-            &templates_dir_path,
-            &mut module_declarations,
-            &mut match_arms,
-        );
+        let platform_version = get_dep_version(espforge_platform_doc)?;
+        let devices_version = get_dep_version(espforge_devices_doc)?;
+        // println!("cargo:warning={platform_ver}!");
+        // println!("cargo:warning={devices_ver}!");
+        println!("cargo:rustc-env=ESPFORGE_PLATFORM_VERSION={}", platform_version);
+        println!("cargo:rustc-env=ESPFORGE_DEVICES_VERSION={}", devices_version);
     }
-
-    // 3. Write the combined, fully dynamic code to the output file
-    write!(
-        &mut file,
-        r#"
-        use anyhow::Result;
-        use std::collections::HashMap;
-        use serde_yaml_ng::Value;
-
-        // --- Generated Module Declarations ---
-        {modules}
-
-        // --- Generated Context Creation Function ---
-        /// Create a type-safe Tera context from template name and properties
-        pub fn create_context(
-            name: &str, 
-            example_properties: &HashMap<String, Value>
-        ) -> Result<tera::Context> {{
-            
-            match name {{
-                {match_arms}
-                _ => {{
-                    // Template has no configuration or its config.rs is missing
-                }}
-            }}
-            Ok(tera::Context::new())
-        }}
-    "#,
-        modules = module_declarations.join("\n"),
-        match_arms = match_arms.join("\n")
-    )
-    .unwrap();
-
-    println!("cargo:rerun-if-changed=templates");
-}
-
-// Recursively find directories containing config.rs
-fn find_templates(dir: &Path, modules: &mut Vec<String>, arms: &mut Vec<String>) {
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                // If this directory has a config.rs, it is a template
-                if path.join("config.rs").exists() {
-                    let template_name = path.file_name().unwrap().to_str().unwrap();
-                    let config_path = path.join("config.rs");
-
-                    // We use the directory name as the module name.
-                    // This assumes template names are unique across categories.
-                    modules.push(format!(
-                        r#"#[path = r"{}"] pub mod {};"#,
-                        config_path.display(),
-                        template_name
-                    ));
-
-                    arms.push(format!(
-                        r#""{template_name}" => {{
-                            let value = serde_yaml_ng::to_value(example_properties)?;
-                            let config: self::{template_name}::Config = 
-                                serde_yaml_ng::from_value(value)?;
-                            
-                            return tera::Context::from_serialize(&config).map_err(anyhow::Error::from);
-                        }},"#
-                    ));
-                }
-
-                // Continue recursing to check subdirectories
-                find_templates(&path, modules, arms);
-            }
-        }
-    }
+    Ok(())
 }

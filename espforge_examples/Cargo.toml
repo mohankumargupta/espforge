@@ -1,0 +1,10 @@
+[package]
+name = "espforge_examples"
+version = "0.1.0"
+edition = "2024"
+description = "Embedded examples for espforge"
+license = "MIT"
+
+[dependencies]
+include_dir = { version = "0.7.4", features = ["glob"] }
+

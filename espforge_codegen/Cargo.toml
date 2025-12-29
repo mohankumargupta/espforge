@@ -1,0 +1,14 @@
+[package]
+name = "espforge_codegen"
+version = "0.1.0"
+edition = "2024"
+description = "code generation for espforge"
+license = "MIT"
+
+[dependencies]
+espforge_common = { path = "../espforge_common" }
+quote = "1.0"
+proc-macro2 = "1.0"
+prettyplease = "0.2" 
+syn = { version = "2.0", features = ["full", "parsing"] }
+anyhow = "1.0"

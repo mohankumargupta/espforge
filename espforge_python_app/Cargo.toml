@@ -1,0 +1,9 @@
+[package]
+name = "espforge_python_app"
+version = "0.1.0"
+edition = "2024"
+description = "Module for espforge"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
