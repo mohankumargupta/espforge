@@ -22,7 +22,7 @@ include = [
     "template_utils.rs",
 ]
 edition = "2024"
-description = "A scaffolding++ project generator for bare-metal ESP32 projects"
+description = "A scaffolding++ project generator for ESP32 projects"
 license = "MIT"
 keywords     = ["esp32", "template"]
 categories   = ["command-line-utilities", "template-engine"]
