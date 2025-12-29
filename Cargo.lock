@@ -686,6 +686,7 @@ dependencies = [
  "assert_fs",
  "clap",
  "dialoguer",
+ "espforge_examples",
  "espforge_macros",
  "include_dir",
  "inventory",
@@ -699,6 +700,13 @@ dependencies = [
  "tera",
  "toml",
  "toml_edit",
+]
+
+[[package]]
+name = "espforge_examples"
+version = "0.1.0"
+dependencies = [
+ "include_dir",
 ]
 
 [[package]]

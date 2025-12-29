@@ -24,6 +24,7 @@ path = "src/bin/main.rs"
 required-features = ["cli"]
 
 [dependencies]
+espforge_examples = { version = "0.1.0", path = "../espforge_examples" }
 espforge_macros = { version = "0.1.0", path = "../espforge_macros" }
 anyhow = "1.0"
 miette = "7.6"
