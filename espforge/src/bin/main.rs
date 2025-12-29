@@ -32,10 +32,8 @@ pub fn main() -> miette::Result<()> {
         } => {
             if name.is_empty() {
                 interactive_dialog();
-            } else {
-                if let (Some(pn), Some(c)) = (&project_name, &chip) {
-                    println!("{} {} {}", name, pn, c);
-                }
+            } else if let (Some(pn), Some(c)) = (&project_name, &chip) {
+                println!("{} {} {}", name, pn, c);
             }
         }
     }
