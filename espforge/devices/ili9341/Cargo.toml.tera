@@ -1,7 +1,0 @@
-[dependencies]
-mipidsi = "0.9"
-embedded-graphics = "0.8.1"
-embedded-hal = "1.0.0"
-embedded-hal-bus = "0.3"
-
-

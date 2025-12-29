@@ -1,9 +1,0 @@
-{
-  "name": "chip",
-  "author": "Raspberry Pi",
-  "pins": [
-    "TX",
-    "RX"
-  ],
-  "controls": []
-}

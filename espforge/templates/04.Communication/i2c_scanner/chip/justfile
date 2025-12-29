@@ -1,5 +1,0 @@
-set shell := ["sh", "-c"]
-set windows-shell := ["powershell", "-c"]
-
-build:
-    zig build

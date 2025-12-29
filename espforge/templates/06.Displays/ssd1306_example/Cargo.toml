@@ -1,4 +1,0 @@
-[dependencies]
-ssd1306 = "0.10"
-embedded-graphics = "0.8"
-

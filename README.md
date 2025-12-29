@@ -19,6 +19,11 @@ A scaffolding++ tool for esp32 no_std rust projects.
   
 
 ## Installation
+```shell
+cargo binstall espforge
+```
+
+ALternatively
 
 ```shell
 cargo install espforge

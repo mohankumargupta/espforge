@@ -24,16 +24,13 @@ check:
     cargo check
 
 run:
-    cargo run -- compile examples/003-blink.yaml
+    cargo run
 
 minimal:
     cargo run -- compile examples/001-minimal.yaml
 
-i2c:
-    cargo run -- compile examples/005-i2c-example.yaml
-
-expand_test:
-    cd cli; cargo expand --test integration_tests
+examples:
+    cargo run -- examples
 
 test_with_output:
     cargo test -- --no-capture
@@ -48,10 +45,11 @@ tidy:
     @just format
     @just lint
 
+fix:
+    cargo clippy --fix --bin espforge
+
 espgenerate:
     esp-generate --chip esp32c3 -o esp-backtrace -o vscode blank
 
-hello:
-    cargo run -- compile examples/002-helloworld.yaml
 
 

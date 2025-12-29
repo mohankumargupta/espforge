@@ -2,24 +2,9 @@
 name = "espforge"
 version = "0.1.3"
 include = [
-    "build.rs",
-    "compile",
-    "components",
-    "config",
-    "devices",
-    "export.rs",
-    "generate",
-    "globals",
-    "lib.rs",
-    "LICENSE", 
-    "manifest.rs",
-    "nibblers",
-    "platform",
+    "LICENSE.md",
     "README.md",
-    "resolver",
     "src", 
-    "templates", 
-    "template_utils.rs",
 ]
 edition = "2024"
 description = "A scaffolding++ project generator for ESP32 projects"
@@ -31,7 +16,7 @@ readme = "../README.md"
 
 [lib]
 name = "espforge_lib"
-path = "lib.rs"
+path = "src/lib.rs"
 
 [[bin]]
 name = "espforge"
@@ -41,6 +26,7 @@ required-features = ["cli"]
 [dependencies]
 espforge_macros = { version = "0.1.0", path = "../espforge_macros" }
 anyhow = "1.0"
+miette = "7.6"
 serde = { version = "1.0", features = ["derive"] }
 include_dir = { version = "0.7.4", features = ["glob"] }
 tera = "1.20.1"

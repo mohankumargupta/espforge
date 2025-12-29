@@ -1,0 +1,3 @@
+espforge:
+  name: minimal
+  platform: esp32c3
