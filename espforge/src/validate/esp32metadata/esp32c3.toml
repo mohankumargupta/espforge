@@ -1,0 +1,19 @@
+# Created from https://github.com/esphome/esphome/blob/dev/esphome/components/esp32/gpio_esp32_c3.py
+
+[esp32c3]
+name = "ESP32-C3"
+description = "RISC-V architecture"
+
+[esp32c3.gpio_limits]
+min = 0
+max = 21
+strapping_pins = [2, 8, 9]
+
+[esp32c3.reserved_pins]
+"12" = "SPIHD"
+"13" = "SPIWP"
+"14" = "SPICS0"
+"15" = "SPICLK"
+"16" = "SPID"
+"17" = "SPIQ"
+
