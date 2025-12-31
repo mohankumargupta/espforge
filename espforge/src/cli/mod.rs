@@ -5,7 +5,9 @@ pub mod commands;
 pub mod interactive;
 pub mod model;
 
+
 use commands::examples;
+use commands::compile;
 
 #[derive(Parser)]
 #[command(about = "Example tool with a compile subcommand")]
@@ -18,8 +20,6 @@ pub struct Cli {
 enum Commands {
     Compile {
         file: PathBuf,
-        #[arg(long, short = 'c')]
-        chip: Option<String>,
     },
     Examples {
         #[arg(default_value = "")]
@@ -34,9 +34,8 @@ enum Commands {
 impl Cli {
     pub fn execute(self) -> miette::Result<()> {
         match self.command {
-            Commands::Compile { file, chip } => {
-                Ok(())
-                //compile::execute(compile::CompileArgs { file, chip })
+            Commands::Compile { file } => {
+                compile::execute(&file)
             }
             Commands::Examples {
                 name,
