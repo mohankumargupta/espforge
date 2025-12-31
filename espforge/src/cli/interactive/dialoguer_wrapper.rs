@@ -120,32 +120,32 @@ fn list_examples_by_category() -> HashMap<String, Vec<String>> {
     map
 }
 
-// ============================================================================
-// Example: Mock implementation for testing
-// ============================================================================
-#[cfg(test)]
-pub struct MockPrompter {
-    pub example_name: String,
-    pub project_name: String,
-    pub chip: String,
-    pub allow_overwrite: bool,
-}
+// // ============================================================================
+// // Example: Mock implementation for testing
+// // ============================================================================
+// #[cfg(test)]
+// pub struct MockPrompter {
+//     pub example_name: String,
+//     pub project_name: String,
+//     pub chip: String,
+//     pub allow_overwrite: bool,
+// }
 
-#[cfg(test)]
-impl Prompter for MockPrompter {
-    fn select_example(&self) -> Result<String> {
-        Ok(self.example_name.clone())
-    }
+// #[cfg(test)]
+// impl Prompter for MockPrompter {
+//     fn select_example(&self) -> Result<String> {
+//         Ok(self.example_name.clone())
+//     }
 
-    fn prompt_project_name(&self, _default: &str) -> Result<String> {
-        Ok(self.project_name.clone())
-    }
+//     fn prompt_project_name(&self, _default: &str) -> Result<String> {
+//         Ok(self.project_name.clone())
+//     }
 
-    fn select_chip(&self) -> Result<String> {
-        Ok(self.chip.clone())
-    }
+//     fn select_chip(&self) -> Result<String> {
+//         Ok(self.chip.clone())
+//     }
 
-    fn confirm_overwrite(&self, _dir_name: &str) -> Result<bool> {
-        Ok(self.allow_overwrite)
-    }
-}
+//     fn confirm_overwrite(&self, _dir_name: &str) -> Result<bool> {
+//         Ok(self.allow_overwrite)
+//     }
+// }

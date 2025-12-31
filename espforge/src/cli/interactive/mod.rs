@@ -1,5 +1,8 @@
-mod dialoguer_wrapper;
-pub use dialoguer_wrapper::DialoguerPrompter;
+pub mod catalog;
+pub mod dialoguer;
+
+pub use catalog::{ChipCatalog, ExampleCatalog};
+pub use dialoguer::DialoguerPrompter;
 
 use miette::Result;
 
