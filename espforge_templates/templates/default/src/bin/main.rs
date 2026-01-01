@@ -15,12 +15,18 @@ fn main() -> ! {
     let config = esp_hal::Config::default();
     let _peripherals = esp_hal::init(config);
 
+    let mut ctx = Context::new();
+
+    app::setup(&mut ctx);
+
+
     // Setup code from app.rs
-    {{ setup_code }}
+    //{{ setup_code }}
 
     loop {
+        app_lib::forever(&mut ctx);
         // Forever code from app.rs
-        {{ forever_code }}
+        //{{ forever_code }}
         // let delay_start = Instant::now();
         // while delay_start.elapsed() < Duration::from_millis(500) {
         //      //forever goes here
