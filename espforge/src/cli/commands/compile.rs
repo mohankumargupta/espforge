@@ -23,12 +23,12 @@ pub fn execute(file: &Path) -> Result<()> {
 
     if app_rs_path.exists() {
         println!("Found app logic at: {}", app_rs_path.display());
-        
-        let app_code = parse_app_rs(&app_rs_path)
-            .context("Failed to parse app.rs")?;
 
-        let main_rs_content = espforge_templates::render_main(None, &app_code.setup, &app_code.forever)
-            .map_err(|e| anyhow::anyhow!("Failed to render template: {}", e))?;
+        let app_code = parse_app_rs(&app_rs_path).context("Failed to parse app.rs")?;
+
+        let main_rs_content =
+            espforge_templates::render_main(None, &app_code.setup, &app_code.forever)
+                .map_err(|e| anyhow::anyhow!("Failed to render template: {}", e))?;
 
         let current_dir = std::env::current_dir().context("Failed to get current directory")?;
         let project_dir = current_dir.join(config.get_name());
@@ -39,10 +39,16 @@ pub fn execute(file: &Path) -> Result<()> {
                 .context("Failed to write generated main.rs")?;
             println!("✨ Injected app logic into {}", main_rs_path.display());
         } else {
-            println!("Warning: Could not find generated main.rs at {}", main_rs_path.display());
+            println!(
+                "Warning: Could not find generated main.rs at {}",
+                main_rs_path.display()
+            );
         }
     } else {
-        println!("No app/rust/app.rs found (checked {}), skipping logic injection.", app_rs_path.display());
+        println!(
+            "No app/rust/app.rs found (checked {}), skipping logic injection.",
+            app_rs_path.display()
+        );
     }
 
     Ok(())

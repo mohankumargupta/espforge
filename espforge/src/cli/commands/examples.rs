@@ -186,6 +186,10 @@ fn extract_recursive(
         fs::write(dest_path, file.contents())?;
     }
 
+    for subdir in dir.dirs() {
+        extract_recursive(subdir, base_path, root_prefix)?;
+    }
+
     Ok(())
 }
 
