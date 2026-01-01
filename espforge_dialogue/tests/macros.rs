@@ -27,16 +27,44 @@ pub enum TestMode {
     Safe,
 }
 
+
 #[derive(EnumAsker, Debug, PartialEq)]
-#[asker(prompt = "Select Board")]
-pub enum TestBoard {
-    #[asker(label = "Board A", group = "g1")]
-    BoardA,
-    #[asker(label = "Board B", group = "g2")]
-    BoardB,
-    #[asker(label = "Generic")]
+#[asker(prompt = "Select Target Chip")]
+pub enum Chip {
+    #[asker(label = "esp32c3")]
+    Esp32c3,
+    #[asker(label = "esp32c6")]
+    Esp32c6,
+    #[asker(label = "esp32s3")]
+    Esp32s3,
+    #[asker(label = "esp32s2")]
+    Esp32s2,
+    #[asker(label = "esp32")]
+    Esp32,
+    #[asker(label = "esp32h2")]
+    Esp32h2,
+}
+
+#[derive(EnumAsker, Debug, PartialEq)]
+#[asker(prompt = "Select Development Board")]
+pub enum Board {
+    #[asker(label = "Espressif ESP32-C3-DevKitM-1", group = "esp32c3")]
+    Esp32C3DevKitM1,
+    
+    #[asker(label = "Seeed Studio XIAO ESP32C3", group = "esp32c3")]
+    XiaoEsp32C3,
+
+    #[asker(label = "Espressif ESP32-S3-DevKitC-1", group = "esp32s3")]
+    Esp32S3DevKitC1,
+    
+    #[asker(label = "LILYGO T-Display-S3", group = "esp32s3")]
+    LilyGoTDisplayS3,
+
+    #[asker(label = "Generic Board")]
     Generic,
 }
+
+
 
 #[test]
 fn test_asker_struct_generation() {
@@ -68,9 +96,16 @@ fn test_enum_asker_generation() {
     let _ask_fn: fn() -> TestMode = TestMode::ask;
 }
 
+
 #[test]
-fn test_enum_asker_filtered_generation() {
-    // Verify the filtered ask method exists with correct signature
-    let _ask_filtered: fn(&str) -> TestBoard = TestBoard::ask_filtered;
+fn test_chip_asker_api() {
+    // Verify that the simple `ask` method is generated with the correct signature
+    let _ask_fn: fn() -> Chip = Chip::ask;
+}
+
+#[test]
+fn test_board_asker_api() {
+    let _ask_filtered_fn: fn(&str) -> Board = Board::ask_filtered;
+    let _ask_fn: fn() -> Board = Board::ask;
 }
 
