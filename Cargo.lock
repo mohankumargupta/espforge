@@ -378,6 +378,8 @@ dependencies = [
  "dialoguer",
  "espforge_examples",
  "espforge_macros",
+ "espforge_rust_app",
+ "espforge_templates",
  "include_dir",
  "inventory",
  "log",
@@ -404,6 +406,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "espforge_rust_app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
 ]
 
 [[package]]

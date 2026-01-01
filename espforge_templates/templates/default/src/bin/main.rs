@@ -15,12 +15,15 @@ fn main() -> ! {
     let config = esp_hal::Config::default();
     let _peripherals = esp_hal::init(config);
 
-    //setup goes here
+    // Setup code from app.rs
+    {{ setup_code }}
 
     loop {
-        let delay_start = Instant::now();
-        while delay_start.elapsed() < Duration::from_millis(500) {
-             //forever goes here
-        }
+        // Forever code from app.rs
+        {{ forever_code }}
+        // let delay_start = Instant::now();
+        // while delay_start.elapsed() < Duration::from_millis(500) {
+        //      //forever goes here
+        // }
     }
 }

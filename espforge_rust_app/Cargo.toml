@@ -1,0 +1,9 @@
+[package]
+name = "espforge_rust_app"
+version = "0.1.0"
+edition = "2024"
+description = "Parser for espforge rust app logic"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"

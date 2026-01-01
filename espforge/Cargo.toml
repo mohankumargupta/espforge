@@ -26,6 +26,8 @@ required-features = ["cli"]
 [dependencies]
 espforge_examples = { version = "0.1.0", path = "../espforge_examples" }
 espforge_macros = { version = "0.1.0", path = "../espforge_macros" }
+espforge_templates = { version = "0.1.0", path = "../espforge_templates" }
+espforge_rust_app = { version = "0.1.0", path = "../espforge_rust_app" }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 include_dir = { version = "0.7.4", features = ["glob"] }
