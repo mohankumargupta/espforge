@@ -1,7 +1,8 @@
-use log::info;
+use espforge_platform::logger;
 
 pub fn setup() {
-    info!("Hello World");
+    let loggerlogger::init();
+    logger("Hello World");
 }
 
 pub fn forever() {
