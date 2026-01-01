@@ -1,15 +1,13 @@
-use esp_println::logger::init_logger_from_env;
-
-pub fn init() {
-    init_logger_from_env();
-}
-
 pub struct Logger;
 
 impl Logger {
-    pub fn info(&self, msg: impl core::fmt::Display) {
+   pub fn new() -> Self{
+     Self{}
+   }
+   
+   pub fn info(&self, msg: impl core::fmt::Display) {
         log::info!("{}", msg);
-    }
+   }
 
     pub fn warn(&self, msg: impl core::fmt::Display) {
         log::warn!("{}", msg);
