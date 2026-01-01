@@ -1,0 +1,11 @@
+[package]
+name = "espforge_templates"
+version = "0.1.0"
+edition = "2024"
+description = "Templates for espforge"
+license = "MIT"
+
+[dependencies]
+include_dir = { version = "0.7.4", features = ["glob"] }
+tera = "1.20"
+

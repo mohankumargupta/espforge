@@ -407,6 +407,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "espforge_templates"
+version = "0.1.0"
+dependencies = [
+ "include_dir",
+ "tera",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
