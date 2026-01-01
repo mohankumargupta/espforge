@@ -1,10 +1,10 @@
 use espforge_platform::logger;
 
-pub fn setup() {
-    let loggerlogger::init();
+pub fn setup(ctx: &mut Context) {
+    let logger::init();
     logger("Hello World");
 }
 
-pub fn forever() {
+pub fn forever(ctx: &mut Context) {
 
 }
