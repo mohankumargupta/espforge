@@ -6,26 +6,30 @@ description = "Platform abstractions for espforge projects"
 license = "MIT"
 
 [dependencies]
-# The logging facade
-log = "0.4"
+esp-hal = { version = "1.0.0", features = ["esp32c3", "log-04", "unstable"] }
 
-# Core ESP32 Hardware Abstraction Layer
-esp-hal = "1.0.0"
 
-# Printing and Logging implementation
-esp-println = { version = "0.16", features = ["log"] }
+esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32c3", "log-04"] }
+log                    = "0.4.27"
 
-# Panic and Exception handling
-esp-backtrace = { version = "0.18", features = [] }
+critical-section = "1.2.0"
+esp-alloc = "0.9.0"
+esp-backtrace = { version = "0.18.1", features = [
+  "esp32c3",
+  "panic-handler",
+  "println",
+] }
+esp-println = { version = "0.16.1", features = ["esp32c3", "log-04"] }
 
-[features]
-default = []
 
-# Feature flags to forward chip selection to underlying dependencies
-esp32   = ["esp-hal/esp32",   "esp-println/esp32",   "esp-backtrace/esp32"]
-esp32c2 = ["esp-hal/esp32c2", "esp-println/esp32c2", "esp-backtrace/esp32c2"]
-esp32c3 = ["esp-hal/esp32c3", "esp-println/esp32c3", "esp-backtrace/esp32c3"]
-esp32c6 = ["esp-hal/esp32c6", "esp-println/esp32c6", "esp-backtrace/esp32c6"]
-esp32h2 = ["esp-hal/esp32h2", "esp-println/esp32h2", "esp-backtrace/esp32h2"]
-esp32s2 = ["esp-hal/esp32s2", "esp-println/esp32s2", "esp-backtrace/esp32s2"]
-esp32s3 = ["esp-hal/esp32s3", "esp-println/esp32s3", "esp-backtrace/esp32s3"]
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+codegen-units    = 1     
+debug            = 2
+debug-assertions = false
+incremental      = false
+lto              = 'fat'
+opt-level        = 's'
+overflow-checks  = false
