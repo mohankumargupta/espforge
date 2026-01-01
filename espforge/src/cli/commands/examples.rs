@@ -176,7 +176,7 @@ fn extract_recursive(
     let relative_dir_path = dir_path
         .strip_prefix(root_prefix)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    
+
     let dest_dir = base_path.join(relative_dir_path);
     if !dest_dir.exists() {
         fs::create_dir_all(&dest_dir)?;

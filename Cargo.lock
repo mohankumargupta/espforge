@@ -409,6 +409,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "espforge_platform"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
 name = "espforge_rust_app"
 version = "0.1.0"
 dependencies = [

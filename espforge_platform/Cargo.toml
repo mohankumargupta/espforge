@@ -1,0 +1,31 @@
+[package]
+name = "espforge_platform"
+version = "0.1.0"
+edition = "2024"
+description = "Platform abstractions for espforge projects"
+license = "MIT"
+
+[dependencies]
+# The logging facade
+log = "0.4"
+
+# Core ESP32 Hardware Abstraction Layer
+esp-hal = "1.0.0"
+
+# Printing and Logging implementation
+esp-println = { version = "0.13.0", features = ["log"] }
+
+# Panic and Exception handling
+esp-backtrace = { version = "0.14.0", features = ["panic-handler", "exception-handler", "print-uart"] }
+
+[features]
+default = []
+
+# Feature flags to forward chip selection to underlying dependencies
+esp32   = ["esp-hal/esp32",   "esp-println/esp32",   "esp-backtrace/esp32"]
+esp32c2 = ["esp-hal/esp32c2", "esp-println/esp32c2", "esp-backtrace/esp32c2"]
+esp32c3 = ["esp-hal/esp32c3", "esp-println/esp32c3", "esp-backtrace/esp32c3"]
+esp32c6 = ["esp-hal/esp32c6", "esp-println/esp32c6", "esp-backtrace/esp32c6"]
+esp32h2 = ["esp-hal/esp32h2", "esp-println/esp32h2", "esp-backtrace/esp32h2"]
+esp32s2 = ["esp-hal/esp32s2", "esp-println/esp32s2", "esp-backtrace/esp32s2"]
+esp32s3 = ["esp-hal/esp32s3", "esp-println/esp32s3", "esp-backtrace/esp32s3"]
