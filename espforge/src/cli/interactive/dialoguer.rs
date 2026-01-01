@@ -1,12 +1,49 @@
 use super::{
     Prompter,
-    catalog::{ChipCatalog, ExampleCatalog},
-};
+    catalog::ExampleCatalog};
 use anyhow::{Result, bail};
-use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
+use dialoguer::{Input, Select, theme::ColorfulTheme};
+use espforge_dialogue::{Asker, EnumAsker};
 
 pub struct DialoguerPrompter {
     theme: ColorfulTheme,
+}
+
+#[derive(Debug, Clone, EnumAsker)]
+#[asker(prompt = "Select Target Chip")]
+pub enum Chip {
+    #[asker(label = "esp32c3")]
+    Esp32c3,
+    #[asker(label = "esp32c6")]
+    Esp32c6,
+    #[asker(label = "esp32s3")]
+    Esp32s3,
+    #[asker(label = "esp32s2")]
+    Esp32s2,
+    #[asker(label = "esp32")]
+    Esp32,
+    #[asker(label = "esp32h2")]
+    Esp32h2,
+}
+
+impl std::fmt::Display for Chip {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Chip::Esp32c3 => "esp32c3",
+            Chip::Esp32c6 => "esp32c6",
+            Chip::Esp32s3 => "esp32s3",
+            Chip::Esp32s2 => "esp32s2",
+            Chip::Esp32 => "esp32",
+            Chip::Esp32h2 => "esp32h2",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+#[derive(Asker)]
+struct OverwritePrompt {
+    #[confirm]
+    confirm: bool,
 }
 
 impl DialoguerPrompter {
@@ -60,19 +97,15 @@ impl Prompter for DialoguerPrompter {
     }
 
     fn select_chip(&self) -> Result<String> {
-        let chips = ChipCatalog::available_chips();
-        let selection = self.select_from_list("Select Target Chip", &chips)?;
-        Ok(chips[selection].to_string())
+        let chip = Chip::ask();
+        Ok(chip.to_string())
     }
 
     fn confirm_overwrite(&self, dir_name: &str) -> Result<bool> {
-        let confirm = Confirm::with_theme(&self.theme)
-            .with_prompt(format!(
-                "Directory '{}' already exists. Overwrite?",
-                dir_name
-            ))
-            .default(false)
-            .interact()?;
-        Ok(confirm)
+        let prompt_text = format!("Directory '{}' already exists. Overwrite?", dir_name);
+        let prompt = OverwritePrompt::asker()
+            .confirm(prompt_text)
+            .finish();
+        Ok(prompt.confirm)
     }
 }
