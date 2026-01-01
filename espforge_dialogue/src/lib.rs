@@ -50,11 +50,11 @@ fn impl_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
              });
         }
 
-        // Generate interaction method
+        let conversion = if is_optional { quote! { Some(val) } } else { quote! { val } };
+
         if has_attr(field, "confirm") {
             let prompt_attr = get_attr_prompt(field, "confirm");
-            let conversion = if is_optional { quote! { Some(val) } } else { quote! { val } };
-
+            
             if let Some(p) = prompt_attr {
                 methods.extend(quote! {
                     pub fn #name(mut self) -> Self {
@@ -81,7 +81,6 @@ fn impl_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
         } else {
             // Input (default)
             let prompt_attr = get_attr_prompt(field, "input");
-            let conversion = if is_optional { quote! { Some(val) } } else { quote! { val } };
             
             if let Some(p) = prompt_attr {
                 methods.extend(quote! {
@@ -153,11 +152,14 @@ fn impl_enum_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
     }
 
     let mut labels = Vec::new();
+    let mut groups = Vec::new();
     let mut match_arms = Vec::new();
+    let mut from_str_arms = Vec::new();
 
     for (idx, variant) in variants.iter().enumerate() {
         let ident = &variant.ident;
         let mut label = ident.to_string();
+        let mut group = String::new(); 
 
         if let Some(attr) = variant.attrs.iter().find(|a| a.path().is_ident("asker")) {
              let _ = attr.parse_nested_meta(|meta| {
@@ -165,11 +167,18 @@ fn impl_enum_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
                     let val: LitStr = meta.value()?.parse()?;
                     label = val.value();
                 }
+                if meta.path.is_ident("group") {
+                    let val: LitStr = meta.value()?.parse()?;
+                    group = val.value();
+                }
                 Ok(())
              });
         }
-        labels.push(label);
+        
+        labels.push(label.clone());
+        groups.push(group);
         match_arms.push(quote! { #idx => #enum_name::#ident, });
+        from_str_arms.push(quote! { #label => #enum_name::#ident, });
     }
 
     Ok(quote! {
@@ -185,6 +194,41 @@ fn impl_enum_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
 
                 match selection {
                     #(#match_arms)*
+                    _ => unreachable!(),
+                }
+            }
+
+            pub fn ask_filtered(group_filter: &str) -> Self {
+                let all_labels = vec![#(#labels),*];
+                let all_groups = vec![#(#groups),*];
+                
+                // Filter items where group matches or group is empty (common items)
+                let filtered_items: Vec<&str> = all_labels.iter()
+                    .zip(all_groups.iter())
+                    .filter(|(_, g)| {
+                        // Strict type assertion to avoid ambiguity
+                        let g_str: &str = *g;
+                        g_str.is_empty() || g_str == group_filter
+                    })
+                    .map(|(l, _)| *l)
+                    .collect();
+
+                if filtered_items.is_empty() {
+                    panic!("No options available for group: {}", group_filter);
+                }
+
+                let selection_idx = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                    .with_prompt(format!("{} ({})", #prompt, group_filter))
+                    .default(0)
+                    .items(&filtered_items)
+                    .interact()
+                    .unwrap();
+
+                let selected_label = filtered_items[selection_idx];
+
+                // Map back to enum variant
+                match selected_label {
+                    #(#from_str_arms)*
                     _ => unreachable!(),
                 }
             }
@@ -215,7 +259,6 @@ fn get_attr_prompt(field: &Field, attr_name: &str) -> Option<String> {
     for attr in &field.attrs {
         if attr.path().is_ident(attr_name) {
              let mut prompt = None;
-             // Parsing fails if not a list, but that's fine for simple #[input]
              let _ = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("prompt") {
                      if let Ok(val) = meta.value() {
@@ -231,4 +274,3 @@ fn get_attr_prompt(field: &Field, attr_name: &str) -> Option<String> {
     }
     None
 }
-

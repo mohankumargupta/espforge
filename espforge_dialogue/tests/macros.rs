@@ -27,9 +27,21 @@ pub enum TestMode {
     Safe,
 }
 
+#[derive(EnumAsker, Debug, PartialEq)]
+#[asker(prompt = "Select Board")]
+pub enum TestBoard {
+    #[asker(label = "Board A", group = "g1")]
+    BoardA,
+    #[asker(label = "Board B", group = "g2")]
+    BoardB,
+    #[asker(label = "Generic")]
+    Generic,
+}
+
 #[test]
 fn test_asker_struct_generation() {
     let builder = TestConfig::asker();
+    // Verify methods check (compile-time)
     let _check_methods = || {
         let _ = builder
             .name("Enter name")
@@ -42,6 +54,7 @@ fn test_asker_struct_generation() {
 #[test]
 fn test_asker_prompt_generation() {
     let builder = PromptConfig::asker();
+    // Verify methods take NO arguments because prompts are defined in attributes
     let _check_methods = || {
         let _ = builder
             .name()
@@ -53,5 +66,11 @@ fn test_asker_prompt_generation() {
 #[test]
 fn test_enum_asker_generation() {
     let _ask_fn: fn() -> TestMode = TestMode::ask;
+}
+
+#[test]
+fn test_enum_asker_filtered_generation() {
+    // Verify the filtered ask method exists with correct signature
+    let _ask_filtered: fn(&str) -> TestBoard = TestBoard::ask_filtered;
 }
 
