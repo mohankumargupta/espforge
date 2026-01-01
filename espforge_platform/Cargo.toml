@@ -13,10 +13,10 @@ log = "0.4"
 esp-hal = "1.0.0"
 
 # Printing and Logging implementation
-esp-println = { version = "0.13.0", features = ["log"] }
+esp-println = { version = "0.16", features = ["log"] }
 
 # Panic and Exception handling
-esp-backtrace = { version = "0.14.0", features = ["panic-handler", "exception-handler", "print-uart"] }
+esp-backtrace = { version = "0.18", features = [] }
 
 [features]
 default = []
