@@ -171,6 +171,18 @@ fn extract_recursive(
     base_path: &Path,
     root_prefix: &Path,
 ) -> std::io::Result<()> {
+    // First, create the directory itself
+    let dir_path = dir.path();
+    let relative_dir_path = dir_path
+        .strip_prefix(root_prefix)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    
+    let dest_dir = base_path.join(relative_dir_path);
+    if !dest_dir.exists() {
+        fs::create_dir_all(&dest_dir)?;
+    }
+
+    // Then extract files
     for file in dir.files() {
         let path = file.path();
         let relative_path = path
@@ -186,6 +198,7 @@ fn extract_recursive(
         fs::write(dest_path, file.contents())?;
     }
 
+    // Recursively handle subdirectories
     for subdir in dir.dirs() {
         extract_recursive(subdir, base_path, root_prefix)?;
     }
