@@ -1,3 +1,3 @@
 espforge:
   name: helloworld
-  platform: esp32c3
+  chip: esp32c3
