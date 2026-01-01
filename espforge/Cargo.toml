@@ -26,15 +26,13 @@ required-features = ["cli"]
 [dependencies]
 espforge_examples = { version = "0.1.0", path = "../espforge_examples" }
 espforge_macros = { version = "0.1.0", path = "../espforge_macros" }
-#anyhow = "1.0"
-miette = { version = "7.6", features = ["fancy"] }
+anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 include_dir = { version = "0.7.4", features = ["glob"] }
 tera = "1.20.1"
 toml = { version = "0.9", features = ["preserve_order"] }
 ron = "0.12"
 serde_yaml_ng = "0.10"
-#ruchy = {version = "3", default-features = false}
 inventory = "0.3"
 toml_edit = "0.23"
 log = "0.4"

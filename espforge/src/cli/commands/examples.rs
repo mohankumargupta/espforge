@@ -1,7 +1,7 @@
 use crate::cli::interactive::{self, Prompter};
 use crate::cli::model::{ExampleConfig, ExportResult};
+use anyhow::{Context, Result, bail};
 use espforge_examples::EXAMPLES_DIR;
-use miette::{Context, IntoDiagnostic, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -90,15 +90,13 @@ impl OutputDirectory {
     }
 
     fn resolve_path(project_name: &str) -> Result<PathBuf> {
-        let current_dir = std::env::current_dir()
-            .into_diagnostic()
-            .context("Failed to get current directory")?;
+        let current_dir = std::env::current_dir().context("Failed to get current directory")?;
 
         Ok(current_dir.join(project_name))
     }
 
     fn handle_existing_directory(
-        _path: &Path,
+        path: &Path,
         project_name: &str,
         prompter: &dyn Prompter,
     ) -> Result<()> {
@@ -106,13 +104,13 @@ impl OutputDirectory {
         if !overwrite {
             bail!("Operation cancelled by user");
         }
+        fs::remove_dir_all(path).context("Failed to remove existing directory")?;
+
         Ok(())
     }
 
     fn create_directory(path: &Path) -> Result<()> {
-        fs::create_dir_all(path)
-            .into_diagnostic()
-            .context("Failed to create output directory")
+        fs::create_dir_all(path).context("Failed to create output directory")
     }
 
     fn path(&self) -> &Path {
@@ -150,7 +148,7 @@ struct ExampleTemplate {
 impl ExampleTemplate {
     fn find(name: &str) -> Result<Self> {
         let dir = Self::search_in_catalog(name)
-            .ok_or_else(|| miette::miette!("Example template '{}' not found", name))?;
+            .ok_or_else(|| anyhow::anyhow!("Example template '{}' not found", name))?;
 
         Ok(Self { dir })
     }
@@ -164,8 +162,7 @@ impl ExampleTemplate {
 
     fn extract_to(&self, target: &Path) -> Result<()> {
         extract_recursive(self.dir, target, self.dir.path())
-             .into_diagnostic()
-             .context("Failed to extract example files to disk")
+            .context("Failed to extract example files to disk")
     }
 }
 
@@ -176,22 +173,21 @@ fn extract_recursive(
 ) -> std::io::Result<()> {
     for file in dir.files() {
         let path = file.path();
-        let relative_path = path.strip_prefix(root_prefix).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
+        let relative_path = path
+            .strip_prefix(root_prefix)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let dest_path = base_path.join(relative_path);
-        
+
         if let Some(parent) = dest_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         fs::write(dest_path, file.contents())?;
     }
 
     Ok(())
 }
-
 
 struct ConfigFile {
     path: PathBuf,
@@ -224,34 +220,25 @@ impl ConfigFile {
         let new_path = self
             .path
             .parent()
-            .ok_or_else(|| miette::miette!("Invalid config file path"))?
+            .ok_or_else(|| anyhow::anyhow!("Invalid config file path"))?
             .join(&new_filename);
 
-        fs::rename(&self.path, &new_path)
-            .into_diagnostic()
-            .context("Failed to rename configuration file")?;
+        fs::rename(&self.path, &new_path).context("Failed to rename configuration file")?;
 
         Ok(project_name.to_string())
     }
 
     fn read_yaml(&self) -> Result<serde_yaml_ng::Value> {
-        let content = fs::read_to_string(&self.path)
-            .into_diagnostic()
-            .context("Failed to read example.yaml")?;
+        let content = fs::read_to_string(&self.path).context("Failed to read example.yaml")?;
 
-        serde_yaml_ng::from_str(&content)
-            .into_diagnostic()
-            .context("Failed to parse example.yaml")
+        serde_yaml_ng::from_str(&content).context("Failed to parse example.yaml")
     }
 
     fn write_yaml(&self, doc: &serde_yaml_ng::Value) -> Result<()> {
-        let content = serde_yaml_ng::to_string(doc)
-            .into_diagnostic()
-            .context("Failed to serialize updated config")?;
+        let content =
+            serde_yaml_ng::to_string(doc).context("Failed to serialize updated config")?;
 
-        fs::write(&self.path, content)
-            .into_diagnostic()
-            .context("Failed to write updated example.yaml")
+        fs::write(&self.path, content).context("Failed to write updated example.yaml")
     }
 
     fn apply_project_name(doc: &mut serde_yaml_ng::Value, name: &str) {

@@ -1,14 +1,16 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-use crate::parse::{app::AppConfig, components::ComponentConfig, devices::DeviceConfig, esp32::Esp32Config, project::EspforgeConfig};
+use crate::parse::{
+    app::AppConfig, components::ComponentConfig, devices::DeviceConfig, esp32::Esp32Config,
+    project::EspforgeConfig,
+};
 
 pub mod app;
 pub mod components;
 pub mod devices;
 pub mod esp32;
 pub mod project;
-
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EspforgeConfiguration {
@@ -25,14 +27,14 @@ impl EspforgeConfiguration {
         &self.espforge.name
     }
 
-    pub fn get_platform(&self) -> String {
-        self.espforge.platform.to_string()
+    pub fn get_chip(&self) -> String {
+        self.espforge.chip.to_string()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::project::PlatformConfig;
+    use crate::parse::project::ChipConfig;
 
     use super::*;
     use serde_yaml_ng;
@@ -49,7 +51,7 @@ mod tests {
             serde_yaml_ng::from_str(yaml).expect("YAML parse failed");
 
         assert_eq!(config.espforge.name, "minimum");
-        assert_eq!(config.espforge.platform, PlatformConfig::ESP32C3);
+        assert_eq!(config.espforge.chip, ChipConfig::ESP32C3);
     }
 
     #[test]
@@ -102,4 +104,3 @@ mod tests {
         assert_eq!(config.espforge.name, "blink");
     }
 }
-

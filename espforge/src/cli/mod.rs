@@ -1,3 +1,4 @@
+use anyhow::Result;
 use clap::{Parser, Subcommand, command};
 use std::path::PathBuf;
 
@@ -5,9 +6,8 @@ pub mod commands;
 pub mod interactive;
 pub mod model;
 
-
-use commands::examples;
 use commands::compile;
+use commands::examples;
 
 #[derive(Parser)]
 #[command(about = "Example tool with a compile subcommand")]
@@ -32,11 +32,9 @@ enum Commands {
 }
 
 impl Cli {
-    pub fn execute(self) -> miette::Result<()> {
+    pub fn execute(self) -> Result<()> {
         match self.command {
-            Commands::Compile { file } => {
-                compile::execute(&file)
-            }
+            Commands::Compile { file } => compile::execute(&file),
             Commands::Examples {
                 name,
                 project_name,

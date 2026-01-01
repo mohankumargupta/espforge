@@ -4,7 +4,7 @@ pub mod dialoguer;
 pub use catalog::{ChipCatalog, ExampleCatalog};
 pub use dialoguer::DialoguerPrompter;
 
-use miette::Result;
+use anyhow::Result;
 
 pub trait Prompter {
     fn select_example(&self) -> Result<String>;

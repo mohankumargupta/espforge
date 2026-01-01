@@ -1,7 +1,7 @@
 //! Mock prompter for testing
 
 use super::Prompter;
-use miette::Result;
+use anyhow::Result;
 
 /// Mock implementation for testing without user interaction
 /// 

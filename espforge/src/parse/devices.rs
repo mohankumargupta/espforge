@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DeviceConfig {
@@ -8,4 +8,3 @@ pub struct DeviceConfig {
     #[serde(default)]
     pub with: HashMap<String, Value>,
 }
-

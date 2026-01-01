@@ -1,4 +1,4 @@
-use miette::Result;
+use anyhow::Result;
 use std::collections::HashMap;
 
 use crate::cli::interactive::DialoguerPrompter;
@@ -53,7 +53,7 @@ impl ExampleCatalog {
         let examples = self
             .categories
             .get(category)
-            .ok_or_else(|| miette::miette!("Category '{}' not found", category))?;
+            .ok_or_else(|| anyhow::anyhow!("Category '{}' not found", category))?;
 
         DialoguerPrompter::ensure_not_empty(examples, &format!("examples in '{}'", category))?;
 
