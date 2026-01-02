@@ -5,6 +5,9 @@
 
 use esp_backtrace as _;
 use esp_hal::main;
+use espforge_platform::Context;
+
+mod app;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -17,19 +20,11 @@ fn main() -> ! {
 
     let mut ctx = Context::new();
 
+    // Call setup
     app::setup(&mut ctx);
 
-
-    // Setup code from app.rs
-    //{{ setup_code }}
-
     loop {
-        app_lib::forever(&mut ctx);
-        // Forever code from app.rs
-        //{{ forever_code }}
-        // let delay_start = Instant::now();
-        // while delay_start.elapsed() < Duration::from_millis(500) {
-        //      //forever goes here
-        // }
+        // Call forever loop
+        app::forever(&mut ctx);
     }
 }

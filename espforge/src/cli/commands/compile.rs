@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::{codegen::espgenerate::esp_generate, parse::EspforgeConfiguration};
 use anyhow::{Context, Result};
-use espforge_rust_app::parse_app_rs;
+use toml_edit::{DocumentMut, InlineTable, Item, Value};
 
 pub fn execute(file: &Path) -> Result<()> {
     let content = fs::read_to_string(file).context(format!(
@@ -19,101 +19,41 @@ pub fn execute(file: &Path) -> Result<()> {
     esp_generate(config.get_name(), &config.get_chip(), false)?;
 
     let base_dir = file.parent().unwrap_or_else(|| Path::new("."));
-    let app_rust_dir = base_dir.join("app/rust");
-    if app_rust_dir.exists() && app_rust_dir.is_dir() {
-        let current_dir = std::env::current_dir().context("Failed to get current directory")?;
-        let project_dir = current_dir.join(config.get_name());
-        let src_app_dir = project_dir.join("src/app");
+    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
+    let project_dir = current_dir.join(config.get_name());
+    let src_dir = project_dir.join("src");
 
-        fs::create_dir_all(&src_app_dir).context("Failed to create src/app directory")?;
-        copy_dir_recursive(&app_rust_dir, &src_app_dir)
-            .context("Failed to copy app/rust content")?;
-        println!("Copied app/rust content to {}", src_app_dir.display());
-    }
+    let platform_dir = project_dir.join("espforge_platform");
+    crate::PLATFORM_SRC.extract(&platform_dir).context("Failed to extract espforge_platform")?;
 
-    let app_rs_path = base_dir.join("app/rust/app.rs");
-
-    if app_rs_path.exists() {
-        println!("Found app logic at: {}", app_rs_path.display());
-
-        let app_code = parse_app_rs(&app_rs_path).context("Failed to parse app.rs")?;
-
-        let main_rs_content =
-            espforge_templates::render_main(None, &app_code.setup, &app_code.forever)
-                .map_err(|e| anyhow::anyhow!("Failed to render template: {}", e))?;
-
-        let current_dir = std::env::current_dir().context("Failed to get current directory")?;
-        let project_dir = current_dir.join(config.get_name());
-        let main_rs_path = project_dir.join("src/bin/main.rs");
-
-        if main_rs_path.exists() {
-            fs::write(&main_rs_path, main_rs_content)
-                .context("Failed to write generated main.rs")?;
-            println!("✨ Injected app logic into {}", main_rs_path.display());
-        } else {
-            println!(
-                "Warning: Could not find generated main.rs at {}",
-                main_rs_path.display()
-            );
-        }
+    let app_rust_src = base_dir.join("app/rust/app.rs");
+    if app_rust_src.exists() {
+        fs::copy(&app_rust_src, src_dir.join("app.rs"))
+            .context("Failed to copy app.rs to src/app.rs")?;
+        println!("Copied app logic to src/app.rs");
     } else {
-        println!(
-            "No app/rust/app.rs found (checked {}), skipping logic injection.",
-            app_rs_path.display()
-        );
+        println!("Warning: No app/rust/app.rs found.");
     }
 
-    // let app_rs_path = base_dir.join("app/rust/app.rs");
+    let cargo_toml_path = project_dir.join("Cargo.toml");
+    let cargo_toml_content = fs::read_to_string(&cargo_toml_path)?;
+    let mut manifest = cargo_toml_content.parse::<DocumentMut>()?;
 
-    // if app_rs_path.exists() {
-    //     println!("Found app logic at: {}", app_rs_path.display());
+    let mut platform_dep = InlineTable::default();
+    platform_dep.insert("path", "espforge_platform".into());
+    manifest["dependencies"]["espforge_platform"] = Item::Value(Value::InlineTable(platform_dep));
+    fs::write(&cargo_toml_path, manifest.to_string())?;
 
-    //     let app_code = parse_app_rs(&app_rs_path).context("Failed to parse app.rs")?;
+    let main_rs_content = espforge_templates::render_main(None, "", "")
+        .map_err(|e| anyhow::anyhow!("Failed to render template: {}", e))?;
 
-    //     let main_rs_content =
-    //         espforge_templates::render_main(None, &app_code.setup, &app_code.forever)
-    //             .map_err(|e| anyhow::anyhow!("Failed to render template: {}", e))?;
-
-    //     let current_dir = std::env::current_dir().context("Failed to get current directory")?;
-    //     let project_dir = current_dir.join(config.get_name());
-    //     let main_rs_path = project_dir.join("src/bin/main.rs");
-
-    //     if main_rs_path.exists() {
-    //         fs::write(&main_rs_path, main_rs_content)
-    //             .context("Failed to write generated main.rs")?;
-    //         println!("✨ Injected app logic into {}", main_rs_path.display());
-    //     } else {
-    //         println!(
-    //             "Warning: Could not find generated main.rs at {}",
-    //             main_rs_path.display()
-    //         );
-    //     }
-    // } else {
-    //     println!(
-    //         "No app/rust/app.rs found (checked {}), skipping logic injection.",
-    //         app_rs_path.display()
-    //     );
-    // }
+    let main_rs_path = src_dir.join("bin/main.rs");
+    if main_rs_path.exists() {
+        fs::write(&main_rs_path, main_rs_content)
+            .context("Failed to write generated main.rs")?;
+        println!("✨ wired up main.rs");
+    }
 
     Ok(())
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    if !dst.exists() {
-        fs::create_dir_all(dst)?;
-    }
-
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            fs::copy(&src_path, &dst_path)?;
-        }
-    }
-    Ok(())
-}
