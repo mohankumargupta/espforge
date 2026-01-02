@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#[warn(unused_variables)]
 
 // based on esp-generate generator version: 1.0.1
 
