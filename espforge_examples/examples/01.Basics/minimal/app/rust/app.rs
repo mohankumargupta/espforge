@@ -1,10 +1,10 @@
+use app::Context;
 
-
-pub fn setup() {
+pub fn setup(ctx: &mut Context) {
 
 }
 
-pub fn forever() {
+pub fn forever(ctx: &mut Context) {
     
 }
 

@@ -1,7 +1,7 @@
-use espforge_platform::logger;
+use app::Context;
 
 pub fn setup(ctx: &mut Context) {
-    let logger::init();
+    let logger = ctx.logger;
     logger.info("Hello World");
 }
 
