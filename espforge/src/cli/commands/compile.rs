@@ -23,8 +23,14 @@ pub fn execute(file: &Path) -> Result<()> {
     let project_dir = current_dir.join(config.get_name());
     let src_dir = project_dir.join("src");
 
-    let platform_dir = project_dir.join("espforge_platform");
-    crate::PLATFORM_SRC.extract(&platform_dir).context("Failed to extract espforge_platform")?;
+    let platform_temp = project_dir.join(".espforge_temp");
+    crate::PLATFORM_SRC.extract(&platform_temp).context("Failed to extract platform")?;
+
+    let assets_dir = platform_temp.join("assets");
+    if assets_dir.exists() {
+        copy_dir_recursive(&assets_dir, &src_dir)?;
+    }
+    let _ = fs::remove_dir_all(platform_temp);
 
     let app_rust_src = base_dir.join("app/rust/app.rs");
     if app_rust_src.exists() {
@@ -57,3 +63,23 @@ pub fn execute(file: &Path) -> Result<()> {
     Ok(())
 }
 
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    if !dst.exists() {
+        fs::create_dir_all(dst)?;
+    }
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&entry.path(), &target_path)?;
+        } else {
+            if entry.file_name() == "lib.rs" {
+                fs::copy(entry.path(), dst.join("platform.rs"))?;
+            } else {
+                fs::copy(entry.path(), target_path)?;
+            }
+        }
+    }
+    Ok(())
+}
