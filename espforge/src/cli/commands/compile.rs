@@ -24,6 +24,7 @@ pub fn execute(file: &Path) -> Result<()> {
     let src_dir = project_dir.join("src");
 
     let platform_temp = project_dir.join(".espforge_temp");
+    fs::create_dir_all(&platform_temp)?;
     crate::PLATFORM_SRC.extract(&platform_temp).context("Failed to extract platform")?;
 
     let assets_dir = platform_temp.join("assets");
