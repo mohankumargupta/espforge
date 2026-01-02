@@ -8,10 +8,12 @@ pub static TEMPLATES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/templates");
 ///
 /// # Arguments
 /// * `template_name` - Optional name of the template directory to use. Defaults to "default".
+/// * `crate_name` - The name of the generated project crate (used for imports).
 /// * `setup_code` - The code body for the setup section.
 /// * `forever_code` - The code body for the loop section.
 pub fn render_main(
     template_name: Option<&str>,
+    crate_name: &str,
     setup_code: &str,
     forever_code: &str,
 ) -> Result<String, Box<dyn Error>> {
@@ -33,6 +35,7 @@ pub fn render_main(
     tera.add_raw_template("main.rs", template_content)?;
 
     let mut context = Context::new();
+    context.insert("crate_name", crate_name);
     context.insert("setup_code", setup_code);
     context.insert("forever_code", forever_code);
 
