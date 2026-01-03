@@ -15,6 +15,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 #[main]
 fn main() -> ! {
     esp_println::logger::init_logger_from_env();
+    esp_println::print!("\x1b[20h");
 
     let config = esp_hal::Config::default();
     let _peripherals = esp_hal::init(config);
