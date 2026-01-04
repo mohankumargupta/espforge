@@ -5,8 +5,6 @@ use toml_edit::DocumentMut;
 
 use crate::codegen::espgenerate::esp_generate;
 use crate::parse::ConfigurationOrchestrator;
-use crate::resolve;
-
 
 pub fn compile_project(config_path: &Path) -> Result<()> {
     //
@@ -17,14 +15,14 @@ pub fn compile_project(config_path: &Path) -> Result<()> {
     ))?;
 
     let orchestrator = ConfigurationOrchestrator::new();
-    let mut model = orchestrator.compile(&content)?;
+    let model = orchestrator.compile(&content)?;
 
     println!("   Project: {}", model.get_name());
     println!("   Chip:    {}", model.get_chip());
 
     //
     println!("🔗 Resolving configuration...");
-    resolve::resolve_project(&mut model)?;
+    //resolve::resolve_project(&mut model)?;
 
     //
     println!("🔨 Generating artifacts...");    
