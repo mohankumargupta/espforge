@@ -35,6 +35,10 @@ pub fn compile_project(config_path: &Path) -> Result<()> {
 
     provision_platform_assets(&project_dir, &src_dir)?;
 
+    let components_src = generate_components_source(&model)?;
+    fs::write(src_dir.join("generated.rs"), components_src)
+        .context("Failed to write src/generated.rs")?;
+
     setup_library_structure(&src_dir)?;
     inject_app_code(base_dir, &src_dir)?;
 
@@ -88,8 +92,26 @@ fn setup_library_structure(src_dir: &Path) -> Result<()> {
     let lib_rs_content = r#"#![no_std]
 pub mod app;
 pub mod platform;
-// Wildcard export platform items so they are easily accessible in app code
+pub mod generated;
+
+// Re-export platform items
 pub use platform::*;
+
+/// Application Context
+/// Holds platform peripherals and generated components
+pub struct Context {
+    pub logger: platform::logger::Logger,
+    pub components: generated::Components,
+}
+
+impl Context {
+    pub fn new() -> Self {
+        Self {
+            logger: platform::logger::Logger::new(),
+            components: generated::Components::new(),
+        }
+    }
+}
 "#;
     fs::write(src_dir.join("lib.rs"), lib_rs_content)
         .context("Failed to write src/lib.rs")?;

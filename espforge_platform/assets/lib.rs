@@ -1,4 +1,6 @@
 pub mod logger;
+pub mod components;
+pub mod gpio; 
 
 pub struct Context {
     pub logger: logger::Logger,
