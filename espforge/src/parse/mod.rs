@@ -1,6 +1,13 @@
 use anyhow::{Context, Result};
 use serde_yaml_ng::Value;
 
+use crate::parse::{model::ProjectModel, processor::{ProcessorRegistration, SectionProcessor}};
+
+pub mod model;
+pub mod processor;
+pub mod components;
+pub mod esp32;
+
 pub struct ConfigurationOrchestrator {
     // We don't even need to store them in a Vec if we just iterate inventory directly,
     // but storing them allows us to sort/filter if needed.

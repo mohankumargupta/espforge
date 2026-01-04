@@ -7,7 +7,7 @@ pub struct PlatformProvisioner;
 
 impl SectionProcessor for PlatformProvisioner {
     fn section_key(&self) -> &'static str { "esp32" }
-    fn priority(&self) -> u8 { 300 } 
+    fn priority(&self) -> u32 { 300 } 
     fn process(&self, content: &Value, model: &mut ProjectModel) -> Result<()> {
         println!("Provisioning ESP32...");
         Ok(())

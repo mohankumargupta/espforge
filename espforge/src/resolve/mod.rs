@@ -1,5 +1,6 @@
-use crate::parse::ProjectModel;
 use anyhow::Result;
+
+use crate::parse::model::ProjectModel;
 
 /// Resolves dependencies and validates the project model.
 ///
