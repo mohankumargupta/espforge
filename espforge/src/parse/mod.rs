@@ -1,106 +1,42 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use anyhow::{Context, Result};
+use serde_yaml_ng::Value;
 
-use crate::parse::{
-    app::AppConfig, components::ComponentConfig, devices::DeviceConfig, esp32::Esp32Config,
-    project::EspforgeConfig,
-};
-
-pub mod app;
-pub mod components;
-pub mod devices;
-pub mod esp32;
-pub mod project;
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct EspforgeConfiguration {
-    pub espforge: EspforgeConfig,
-    #[serde(default)]
-    pub esp32: Option<Esp32Config>,
-    pub components: Option<HashMap<String, ComponentConfig>>,
-    pub devices: Option<HashMap<String, DeviceConfig>>,
-    pub app: Option<AppConfig>,
+pub struct ConfigurationOrchestrator {
+    // We don't even need to store them in a Vec if we just iterate inventory directly,
+    // but storing them allows us to sort/filter if needed.
 }
 
-impl EspforgeConfiguration {
-    pub fn get_name(&self) -> &str {
-        &self.espforge.name
+impl ConfigurationOrchestrator {
+    pub fn new() -> Self {
+        Self {}
     }
 
-    pub fn get_chip(&self) -> String {
-        self.espforge.chip.to_string()
-    }
-}
+    pub fn compile(&self, yaml_text: &str) -> Result<ProjectModel> {
+        let raw_yaml: Value = serde_yaml_ng::from_str(yaml_text)?;
+        let root_map = raw_yaml.as_mapping()
+            .ok_or_else(|| anyhow::anyhow!("Config must be a map"))?;
 
-#[cfg(test)]
-mod tests {
-    use crate::parse::project::ChipConfig;
+        let mut model = ProjectModel::default();
 
-    use super::*;
-    use serde_yaml_ng;
+let mut processors: Vec<Box<dyn SectionProcessor>> = inventory::iter::<ProcessorRegistration>
+    .into_iter()
+    .map(|reg| (reg.factory)())
+    .collect();
 
-    #[test]
-    fn parse_minimal() {
-        let yaml = r#"
-            espforge:
-              name: minimum
-              platform: esp32c3
-        "#;
+// 2. Sort by priority (High to Low)
+processors.sort_by(|a, b| b.priority().cmp(&a.priority()));
 
-        let config: EspforgeConfiguration =
-            serde_yaml_ng::from_str(yaml).expect("YAML parse failed");
+        // ITERATE OVER AUTO-REGISTERED ITEMS
+        for registration in inventory::iter::<ProcessorRegistration> {
+            let processor = (registration.factory)(); // Create instance
+            let key = processor.section_key();
 
-        assert_eq!(config.espforge.name, "minimum");
-        assert_eq!(config.espforge.chip, ChipConfig::ESP32C3);
-    }
+            if let Some(section_content) = root_map.get(&Value::String(key.to_string())) {
+                processor.process(section_content, &mut model)
+                    .with_context(|| format!("Error in section '{}'", key))?;
+            }
+        }
 
-    #[test]
-    fn parse_wokwi_config() {
-        let yaml = r#"
-            espforge:
-              name: wokwi_test
-              platform: esp32c3
-              wokwi:
-                diagram: diagram.json
-                config: wokwi.toml
-        "#;
-
-        let config: EspforgeConfiguration =
-            serde_yaml_ng::from_str(yaml).expect("YAML parse failed");
-
-        let wokwi = config.espforge.wokwi.expect("Wokwi config should exist");
-        assert_eq!(wokwi.diagram, Some("diagram.json".to_string()));
-        assert_eq!(wokwi.config, Some("wokwi.toml".to_string()));
-    }
-
-    #[test]
-    fn invalid_platform() {
-        let yaml = r#"
-            espforge:
-              name: minimum
-              platform: invalid
-        "#;
-
-        let result: Result<EspforgeConfiguration, _> = serde_yaml_ng::from_str(yaml);
-        assert!(
-            result.is_err(),
-            "expected invalid_platform to fail deserialization"
-        );
-    }
-
-    #[test]
-    fn parse_blink_example() {
-        let yaml = r#"
-            espforge:
-              name: blink
-              platform: esp32c3
-            example:
-              name: blink            
-        "#;
-
-        let config: EspforgeConfiguration =
-            serde_yaml_ng::from_str(yaml).expect("YAML parse failed");
-
-        assert_eq!(config.espforge.name, "blink");
+        Ok(model)
     }
 }
