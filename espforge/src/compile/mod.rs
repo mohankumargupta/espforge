@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use toml_edit::DocumentMut;
 
+use crate::codegen::components::generate_components_source;
 use crate::codegen::espgenerate::esp_generate;
 use crate::parse::ConfigurationOrchestrator;
 
