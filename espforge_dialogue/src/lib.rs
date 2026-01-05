@@ -252,11 +252,12 @@ fn impl_enum_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
 fn extract_inner_type(ty: &Type) -> Option<&Type> {
     if let Type::Path(tp) = ty
         && let Some(seg) = tp.path.segments.last()
-            && seg.ident == "Option"
-                && let PathArguments::AngleBracketed(args) = &seg.arguments
-                    && let Some(GenericArgument::Type(inner)) = args.args.first() {
-                        return Some(inner);
-                    }
+        && seg.ident == "Option"
+        && let PathArguments::AngleBracketed(args) = &seg.arguments
+        && let Some(GenericArgument::Type(inner)) = args.args.first()
+    {
+        return Some(inner);
+    }
     None
 }
 
@@ -271,9 +272,10 @@ fn get_attr_prompt(field: &Field, attr_name: &str) -> Option<String> {
             let _ = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("prompt")
                     && let Ok(val) = meta.value()
-                        && let Ok(lit) = val.parse::<LitStr>() {
-                            prompt = Some(lit.value());
-                        }
+                    && let Ok(lit) = val.parse::<LitStr>()
+                {
+                    prompt = Some(lit.value());
+                }
                 Ok(())
             });
             if prompt.is_some() {

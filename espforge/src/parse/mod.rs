@@ -41,10 +41,7 @@ impl ConfigurationOrchestrator {
                 .map(|reg| (reg.factory)())
                 .collect();
 
-        // 2. Sort by priority (High to Low)
-        processors.sort_by(|a, b| b.priority().cmp(&a.priority()));
-
-        // ITERATE OVER AUTO-REGISTERED ITEMS
+        processors.sort_by_key(|b| std::cmp::Reverse(b.priority()));
         for registration in inventory::iter::<ProcessorRegistration> {
             let processor = (registration.factory)(); // Create instance
             let key = processor.section_key();
