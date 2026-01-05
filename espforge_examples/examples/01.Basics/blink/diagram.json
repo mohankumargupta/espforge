@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "author": "Gayathry V",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-c3-devkitm-1", "id": "esp", "top": 7.34, "left": -82.67, "attrs": {} },
+    {
+      "type": "wokwi-led",
+      "id": "led1",
+      "top": -32.53,
+      "left": 45.93,
+      "attrs": { "color": "red" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "esp:18", "led1:A", "green", [ "h61.07", "v-132.57" ] ],
+    [ "esp:GND.6", "led1:C", "black", [ "h22.4", "v-151.77" ] ]
+  ],
+  "dependencies": {}
+}
