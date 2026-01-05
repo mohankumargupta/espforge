@@ -27,7 +27,6 @@ pub enum TestMode {
     Safe,
 }
 
-
 #[derive(EnumAsker, Debug, PartialEq)]
 #[asker(prompt = "Select Target Chip")]
 pub enum Chip {
@@ -50,21 +49,19 @@ pub enum Chip {
 pub enum Board {
     #[asker(label = "Espressif ESP32-C3-DevKitM-1", group = "esp32c3")]
     Esp32C3DevKitM1,
-    
+
     #[asker(label = "Seeed Studio XIAO ESP32C3", group = "esp32c3")]
     XiaoEsp32C3,
 
     #[asker(label = "Espressif ESP32-S3-DevKitC-1", group = "esp32s3")]
     Esp32S3DevKitC1,
-    
+
     #[asker(label = "LILYGO T-Display-S3", group = "esp32s3")]
     LilyGoTDisplayS3,
 
     #[asker(label = "Generic Board")]
     Generic,
 }
-
-
 
 #[test]
 fn test_asker_struct_generation() {
@@ -84,10 +81,7 @@ fn test_asker_prompt_generation() {
     let builder = PromptConfig::asker();
     // Verify methods take NO arguments because prompts are defined in attributes
     let _check_methods = || {
-        let _ = builder
-            .name()
-            .sure()
-            .finish();
+        let _ = builder.name().sure().finish();
     };
 }
 
@@ -95,7 +89,6 @@ fn test_asker_prompt_generation() {
 fn test_enum_asker_generation() {
     let _ask_fn: fn() -> TestMode = TestMode::ask;
 }
-
 
 #[test]
 fn test_chip_asker_api() {
@@ -108,4 +101,3 @@ fn test_board_asker_api() {
     let _ask_filtered_fn: fn(&str) -> Board = Board::ask_filtered;
     let _ask_fn: fn() -> Board = Board::ask;
 }
-

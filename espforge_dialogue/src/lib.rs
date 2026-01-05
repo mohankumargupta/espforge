@@ -1,26 +1,35 @@
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Error, Field, Type, LitStr, PathArguments, GenericArgument};
 use proc_macro2::TokenStream as TokenStream2;
+use quote::quote;
+use syn::{
+    DeriveInput, Error, Field, GenericArgument, LitStr, PathArguments, Type, parse_macro_input,
+};
 
 #[proc_macro_derive(Asker, attributes(asker, input, confirm, secret, select, multiselect))]
 pub fn asker_derive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
-    impl_asker(&ast).unwrap_or_else(|e| e.to_compile_error()).into()
+    impl_asker(&ast)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
 }
 
 #[proc_macro_derive(EnumAsker, attributes(asker))]
 pub fn enum_asker_derive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
-    impl_enum_asker(&ast).unwrap_or_else(|e| e.to_compile_error()).into()
+    impl_enum_asker(&ast)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
 }
 
 fn impl_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
     let struct_name = &st.ident;
     let asker_name = syn::Ident::new(&format!("{}Asker", struct_name), struct_name.span());
-    
+
     let fields = match &st.data {
-        syn::Data::Struct(syn::DataStruct { fields: syn::Fields::Named(fields), .. }) => &fields.named,
+        syn::Data::Struct(syn::DataStruct {
+            fields: syn::Fields::Named(fields),
+            ..
+        }) => &fields.named,
         _ => return Err(Error::new_spanned(st, "Asker only supports named structs")),
     };
 
@@ -43,18 +52,22 @@ fn impl_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
 
         // Final build logic
         if is_optional {
-             build_logic.extend(quote! { #name: self.#name.clone().flatten(), });
+            build_logic.extend(quote! { #name: self.#name.clone().flatten(), });
         } else {
-             build_logic.extend(quote! { 
-                 #name: self.#name.clone().expect(concat!("Field ", stringify!(#name), " not set")), 
-             });
+            build_logic.extend(quote! {
+                #name: self.#name.clone().expect(concat!("Field ", stringify!(#name), " not set")),
+            });
         }
 
-        let conversion = if is_optional { quote! { Some(val) } } else { quote! { val } };
+        let conversion = if is_optional {
+            quote! { Some(val) }
+        } else {
+            quote! { val }
+        };
 
         if has_attr(field, "confirm") {
             let prompt_attr = get_attr_prompt(field, "confirm");
-            
+
             if let Some(p) = prompt_attr {
                 methods.extend(quote! {
                     pub fn #name(mut self) -> Self {
@@ -81,7 +94,7 @@ fn impl_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
         } else {
             // Input (default)
             let prompt_attr = get_attr_prompt(field, "input");
-            
+
             if let Some(p) = prompt_attr {
                 methods.extend(quote! {
                     pub fn #name(mut self) -> Self {
@@ -159,10 +172,10 @@ fn impl_enum_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
     for (idx, variant) in variants.iter().enumerate() {
         let ident = &variant.ident;
         let mut label = ident.to_string();
-        let mut group = String::new(); 
+        let mut group = String::new();
 
         if let Some(attr) = variant.attrs.iter().find(|a| a.path().is_ident("asker")) {
-             let _ = attr.parse_nested_meta(|meta| {
+            let _ = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("label") {
                     let val: LitStr = meta.value()?.parse()?;
                     label = val.value();
@@ -172,9 +185,9 @@ fn impl_enum_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
                     group = val.value();
                 }
                 Ok(())
-             });
+            });
         }
-        
+
         labels.push(label.clone());
         groups.push(group);
         match_arms.push(quote! { #idx => #enum_name::#ident, });
@@ -201,7 +214,7 @@ fn impl_enum_asker(st: &DeriveInput) -> syn::Result<TokenStream2> {
             pub fn ask_filtered(group_filter: &str) -> Self {
                 let all_labels = vec![#(#labels),*];
                 let all_groups = vec![#(#groups),*];
-                
+
                 // Filter items where group matches or group is empty (common items)
                 let filtered_items: Vec<&str> = all_labels.iter()
                     .zip(all_groups.iter())
@@ -240,7 +253,7 @@ fn extract_inner_type(ty: &Type) -> Option<&Type> {
     if let Type::Path(tp) = ty {
         if let Some(seg) = tp.path.segments.last() {
             if seg.ident == "Option" {
-                 if let PathArguments::AngleBracketed(args) = &seg.arguments {
+                if let PathArguments::AngleBracketed(args) = &seg.arguments {
                     if let Some(GenericArgument::Type(inner)) = args.args.first() {
                         return Some(inner);
                     }
@@ -258,18 +271,20 @@ fn has_attr(field: &Field, name: &str) -> bool {
 fn get_attr_prompt(field: &Field, attr_name: &str) -> Option<String> {
     for attr in &field.attrs {
         if attr.path().is_ident(attr_name) {
-             let mut prompt = None;
-             let _ = attr.parse_nested_meta(|meta| {
+            let mut prompt = None;
+            let _ = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("prompt") {
-                     if let Ok(val) = meta.value() {
-                         if let Ok(lit) = val.parse::<LitStr>() {
-                             prompt = Some(lit.value());
-                         }
-                     }
+                    if let Ok(val) = meta.value() {
+                        if let Ok(lit) = val.parse::<LitStr>() {
+                            prompt = Some(lit.value());
+                        }
+                    }
                 }
                 Ok(())
-             });
-             if prompt.is_some() { return prompt; }
+            });
+            if prompt.is_some() {
+                return prompt;
+            }
         }
     }
     None

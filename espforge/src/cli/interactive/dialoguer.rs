@@ -1,6 +1,4 @@
-use super::{
-    Prompter,
-    catalog::ExampleCatalog};
+use super::{Prompter, catalog::ExampleCatalog};
 use anyhow::{Result, bail};
 use dialoguer::{Input, Select, theme::ColorfulTheme};
 use espforge_dialogue::{Asker, EnumAsker};
@@ -103,9 +101,7 @@ impl Prompter for DialoguerPrompter {
 
     fn confirm_overwrite(&self, dir_name: &str) -> Result<bool> {
         let prompt_text = format!("Directory '{}' already exists. Overwrite?", dir_name);
-        let prompt = OverwritePrompt::asker()
-            .confirm(prompt_text)
-            .finish();
+        let prompt = OverwritePrompt::asker().confirm(prompt_text).finish();
         Ok(prompt.confirm)
     }
 }

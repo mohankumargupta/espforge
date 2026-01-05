@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use crate::parse::processor::{ProcessorRegistration, SectionProcessor};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
-use anyhow::{Context, Result};
-use crate::parse::processor::{SectionProcessor, ProcessorRegistration};
+use std::collections::HashMap;
 
 // ============================================================================
 // Project Model
@@ -18,9 +18,13 @@ pub struct ProjectModel {
 
 impl ProjectModel {
     pub fn get_name(&self) -> &str {
-        if self.name.is_empty() { "espforge_project" } else { &self.name }
+        if self.name.is_empty() {
+            "espforge_project"
+        } else {
+            &self.name
+        }
     }
-    
+
     pub fn get_chip(&self) -> &str {
         &self.chip
     }
@@ -61,7 +65,8 @@ impl ResourceResolver for Esp32Config {
     where
         Self: AsRef<HashMap<String, T>>,
     {
-        reference.strip_prefix('$')
+        reference
+            .strip_prefix('$')
             .and_then(|name| self.as_ref().get(name))
     }
 }
@@ -106,7 +111,11 @@ pub struct SpiConfig {
     pub sck: u8,
     #[serde(default)]
     pub cs: Option<u8>,
-    #[serde(default = "default_spi_frequency", alias = "frequency_kHz", alias = "frequency_khz")]
+    #[serde(
+        default = "default_spi_frequency",
+        alias = "frequency_kHz",
+        alias = "frequency_khz"
+    )]
     pub frequency: u32,
     #[serde(default)]
     pub mode: u8,
@@ -118,7 +127,11 @@ pub struct I2cConfig {
     pub i2c: u8,
     pub sda: u8,
     pub scl: u8,
-    #[serde(default = "default_i2c_frequency", alias = "frequency_kHz", alias = "frequency_khz")]
+    #[serde(
+        default = "default_i2c_frequency",
+        alias = "frequency_kHz",
+        alias = "frequency_khz"
+    )]
     pub frequency: u32,
 }
 
@@ -139,16 +152,24 @@ pub enum PinDirection {
     Output,
 }
 
-fn default_i2c_frequency() -> u32 { 100 }
-fn default_spi_frequency() -> u32 { 1000 }
-fn default_uart_baud() -> u32 { 9600 }
+fn default_i2c_frequency() -> u32 {
+    100
+}
+fn default_spi_frequency() -> u32 {
+    1000
+}
+fn default_uart_baud() -> u32 {
+    9600
+}
 
 // ============================================================================
 // Component System
 // ============================================================================
 
 pub trait ComponentResource {
-    type ResourceRefs<'a>: Iterator<Item = ResourceRef<'a>> where Self: 'a;
+    type ResourceRefs<'a>: Iterator<Item = ResourceRef<'a>>
+    where
+        Self: 'a;
     fn resource_refs(&self) -> Self::ResourceRefs<'_>;
 }
 
@@ -161,16 +182,31 @@ pub struct ResourceRef<'a> {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "using", content = "with")]
 pub enum Component {
-    LED { gpio: String },
-    Button { gpio: String, #[serde(default)] pull_up: bool },
-    SpiDevice { spi: String, #[serde(default)] cs: Option<String> },
-    I2cDevice { i2c: String, address: u8 },
-    UartDevice { uart: String },
+    LED {
+        gpio: String,
+    },
+    Button {
+        gpio: String,
+        #[serde(default)]
+        pull_up: bool,
+    },
+    SpiDevice {
+        spi: String,
+        #[serde(default)]
+        cs: Option<String>,
+    },
+    I2cDevice {
+        i2c: String,
+        address: u8,
+    },
+    UartDevice {
+        uart: String,
+    },
 }
 
 impl ComponentResource for Component {
     type ResourceRefs<'a> = Box<dyn Iterator<Item = ResourceRef<'a>> + 'a>;
-    
+
     fn resource_refs(&self) -> Self::ResourceRefs<'_> {
         match self {
             Self::LED { gpio } | Self::Button { gpio, .. } => {
@@ -180,28 +216,25 @@ impl ComponentResource for Component {
                 }))
             }
             Self::SpiDevice { spi, cs } => {
-                let spi_ref = ResourceRef { resource_type: "spi", reference: spi };
+                let spi_ref = ResourceRef {
+                    resource_type: "spi",
+                    reference: spi,
+                };
                 Box::new(
-                    std::iter::once(spi_ref).chain(
-                        cs.iter().map(|cs_ref| ResourceRef {
-                            resource_type: "gpio",
-                            reference: cs_ref,
-                        })
-                    )
+                    std::iter::once(spi_ref).chain(cs.iter().map(|cs_ref| ResourceRef {
+                        resource_type: "gpio",
+                        reference: cs_ref,
+                    })),
                 )
             }
-            Self::I2cDevice { i2c, .. } => {
-                Box::new(std::iter::once(ResourceRef {
-                    resource_type: "i2c",
-                    reference: i2c,
-                }))
-            }
-            Self::UartDevice { uart } => {
-                Box::new(std::iter::once(ResourceRef {
-                    resource_type: "uart",
-                    reference: uart,
-                }))
-            }
+            Self::I2cDevice { i2c, .. } => Box::new(std::iter::once(ResourceRef {
+                resource_type: "i2c",
+                reference: i2c,
+            })),
+            Self::UartDevice { uart } => Box::new(std::iter::once(ResourceRef {
+                resource_type: "uart",
+                reference: uart,
+            })),
         }
     }
 }
@@ -220,13 +253,17 @@ struct MainConfig {
 pub struct MainConfigProvisioner;
 
 impl SectionProcessor for MainConfigProvisioner {
-    fn section_key(&self) -> &'static str { "espforge" }
-    fn priority(&self) -> u32 { 1000 } // Highest priority
-    
+    fn section_key(&self) -> &'static str {
+        "espforge"
+    }
+    fn priority(&self) -> u32 {
+        1000
+    } // Highest priority
+
     fn process(&self, content: &Value, model: &mut ProjectModel) -> Result<()> {
         let config: MainConfig = serde_yaml_ng::from_value(content.clone())
             .context("Failed to parse espforge section")?;
-        
+
         model.name = config.name;
         model.chip = config.chip;
         Ok(())
@@ -238,4 +275,3 @@ inventory::submit! {
         factory: || Box::new(MainConfigProvisioner),
     }
 }
-

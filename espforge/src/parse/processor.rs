@@ -5,7 +5,9 @@ use crate::parse::model::ProjectModel;
 
 pub trait SectionProcessor {
     fn section_key(&self) -> &'static str;
-    fn priority(&self) -> u32 { 50 } // Default priority
+    fn priority(&self) -> u32 {
+        50
+    } // Default priority
     fn process(&self, content: &Value, model: &mut ProjectModel) -> Result<()>;
 }
 
@@ -14,4 +16,3 @@ pub struct ProcessorRegistration {
 }
 
 inventory::collect!(ProcessorRegistration);
-

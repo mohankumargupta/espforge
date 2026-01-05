@@ -1,27 +1,31 @@
-use std::collections::HashMap;
+use crate::parse::ProjectModel;
+use crate::parse::model::{Component, ComponentResource, Esp32Config};
+use crate::parse::processor::{ProcessorRegistration, SectionProcessor};
 use anyhow::{Context, Result, bail};
 use serde_yaml_ng::Value;
-use crate::parse::processor::{SectionProcessor, ProcessorRegistration};
-use crate::parse::ProjectModel;
-use crate::parse::model::{Component, Esp32Config, ComponentResource};
+use std::collections::HashMap;
 
 pub struct ComponentProvisioner;
 
 impl SectionProcessor for ComponentProvisioner {
-    fn section_key(&self) -> &'static str { "components" }
-    fn priority(&self) -> u32 { 200 } // Process after ESP32
-    
+    fn section_key(&self) -> &'static str {
+        "components"
+    }
+    fn priority(&self) -> u32 {
+        200
+    } // Process after ESP32
+
     fn process(&self, content: &Value, model: &mut ProjectModel) -> Result<()> {
         let components: HashMap<String, Component> = serde_yaml_ng::from_value(content.clone())
             .context("Failed to deserialize components")?;
-        
+
         // Validate all resource references
         if let Some(esp32) = &model.esp32 {
             self.validate_references(&components, esp32)?;
         } else {
             bail!("Components require esp32 section to be processed first");
         }
-        
+
         model.components = components;
         println!("✓ {} components provisioned", model.components.len());
         Ok(())
@@ -37,11 +41,15 @@ impl ComponentProvisioner {
         let errors: Vec<_> = components
             .iter()
             .flat_map(|(name, component)| {
-                component.resource_refs()
+                component
+                    .resource_refs()
                     .filter_map(|res_ref| {
-                        res_ref.reference
+                        res_ref
+                            .reference
                             .strip_prefix('$')
-                            .filter(|res_name| !Self::resource_exists(esp32, res_ref.resource_type, res_name))
+                            .filter(|res_name| {
+                                !Self::resource_exists(esp32, res_ref.resource_type, res_name)
+                            })
                             .map(|_| {
                                 format!(
                                     "Component '{}': {} reference '{}' not found",
@@ -52,14 +60,14 @@ impl ComponentProvisioner {
                     .collect::<Vec<_>>()
             })
             .collect();
-        
+
         if !errors.is_empty() {
             bail!("Component validation failed:\n{}", errors.join("\n"));
         }
-        
+
         Ok(())
     }
-    
+
     fn resource_exists(esp32: &Esp32Config, res_type: &str, name: &str) -> bool {
         match res_type {
             "gpio" => esp32.gpio.contains_key(name),
@@ -76,4 +84,3 @@ inventory::submit! {
         factory: || Box::new(ComponentProvisioner),
     }
 }
-
