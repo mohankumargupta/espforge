@@ -2,20 +2,28 @@ use core::cell::RefCell;
 use esp_hal::{
     spi::master::Spi,
     i2c::master::I2c,
-    gpio::AnyPin,
+    gpio::{AnyPin, Output, OutputConfig, Level},
     Blocking,
     delay::Delay,
 };
 use embedded_hal_bus::{spi::RefCellDevice as SpiRefCellDevice, i2c::RefCellDevice as I2cRefCellDevice};
 
 pub struct SpiDevice<'a> {
-    inner: SpiRefCellDevice<'a, Spi<'static, Blocking>, AnyPin<'static>, Delay>,
+    inner: SpiRefCellDevice<'a, Spi<'static, Blocking>, Output<'static>, Delay>,
 }
 
 impl<'a> SpiDevice<'a> {
     pub fn new(bus: &'a RefCell<Spi<'static, Blocking>>, cs: AnyPin<'static>) -> Self {
         let delay = Delay::new();
-        let dev = SpiRefCellDevice::new(bus, cs, delay);
+        // The CS pin must be an OutputPin for RefCellDevice.
+        // We configure it as an Output here.
+        let cs_output = Output::new(cs, Level::High, OutputConfig::default());
+        
+        // SpiRefCellDevice::new returns a Result, usually related to the CS pin's ErrorType.
+        // Since we are creating the Output here, we unwrap the result.
+        let dev = SpiRefCellDevice::new(bus, cs_output, delay)
+            .expect("Failed to create SpiRefCellDevice");
+            
         Self { inner: dev }
     }
 }
@@ -27,7 +35,7 @@ impl<'a> embedded_hal::spi::SpiDevice for SpiDevice<'a> {
 }
 
 impl<'a> embedded_hal::spi::ErrorType for SpiDevice<'a> {
-    type Error = <SpiRefCellDevice<'a, Spi<'static, Blocking>, AnyPin<'static>, Delay> as embedded_hal::spi::ErrorType>::Error;
+    type Error = <SpiRefCellDevice<'a, Spi<'static, Blocking>, Output<'static>, Delay> as embedded_hal::spi::ErrorType>::Error;
 }
 
 pub struct I2cDevice<'a> {
