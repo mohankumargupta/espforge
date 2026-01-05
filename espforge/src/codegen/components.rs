@@ -38,17 +38,6 @@ pub fn generate_components_source(model: &ProjectModel) -> Result<String> {
         }
     }
 
-    let field_names: Vec<TokenStream> = model.components.keys()
-        .map(|k| {
-            let ident = format_ident!("{}", k);
-            quote! { #ident }
-        })
-        .collect();
-    
-    // Ensure field names in return struct are also sorted or match init vars
-    // The previous loop created `let name = ...`, so we just need to return `name,`
-    // However, the hashmap iteration order for `field_names` might differ from `sorted_components`.
-    // Let's rebuild field_names from the sorted list to be safe.
     let mut sorted_keys: Vec<_> = model.components.keys().collect();
     sorted_keys.sort();
     
