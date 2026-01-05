@@ -16,7 +16,7 @@ pub fn render_main(crate_name: &str) -> Result<String, Box<dyn Error>> {
         use esp_backtrace as _;
         use esp_hal::main;
 
-        use #crate_ident::{Context, app};
+        use #crate_ident::{Context, app, generated, platform};
 
         esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -26,9 +26,19 @@ pub fn render_main(crate_name: &str) -> Result<String, Box<dyn Error>> {
             esp_println::print!("\x1b[20h");
 
             let config = esp_hal::Config::default();
-            let _peripherals = esp_hal::init(config);
+            let peripherals = esp_hal::init(config);
+            
+            // Peripheral Registry
+            let registry = generated::PeripheralRegistry::new(peripherals);
+            
+            // Components
+            let components = generated::Components::new(&registry);
 
-            let mut ctx = Context::new();
+            let mut ctx = Context {
+                logger: platform::logger::Logger::new(),
+                delay: platform::delay::Delay::new(),
+                components,
+            };
 
             // Call setup
             app::setup(&mut ctx);
@@ -43,4 +53,3 @@ pub fn render_main(crate_name: &str) -> Result<String, Box<dyn Error>> {
     let syntax_tree = syn::parse2(tokens)?;
     Ok(prettyplease::unparse(&syntax_tree))
 }
-

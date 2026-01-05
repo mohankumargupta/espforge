@@ -6,9 +6,9 @@ pub struct LED {
 }
 
 impl LED {
-    pub fn new(pin: u8) -> Self {
+    pub fn new(output: GPIOOutput) -> Self {
         LED {
-            output: GPIOOutput::new(pin),
+            output
         }
     }
 

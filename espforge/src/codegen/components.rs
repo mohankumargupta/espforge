@@ -23,6 +23,7 @@ pub fn generate_components_source(model: &ProjectModel) -> Result<String> {
             Blocking,
         };
         use core::cell::RefCell;
+        use core::marker::PhantomData;
 
         // Platform dependencies for the Component Registry
         // This ensures the generated Components struct only sees 'platform' types
@@ -42,18 +43,13 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
     let mut init_logic = Vec::new();
     let mut struct_init = Vec::new();
 
-    // 1. Initialize IO System
-    init_logic.push(quote! {
-        let io = Io::new(p.GPIO, p.IO_MUX);
-    });
-
     if let Some(esp32) = &model.esp32 {
         // 2. Generate SPI Buses
         for (name, cfg) in &esp32.spi {
             let field = format_ident!("{}", name);
             let spi_peri = format_ident!("SPI{}", cfg.spi);
-            let sck = format_ident!("gpio{}", cfg.sck);
-            let mosi = format_ident!("gpio{}", cfg.mosi);
+            let sck = format_ident!("GPIO{}", cfg.sck);
+            let mosi = format_ident!("GPIO{}", cfg.mosi);
             let freq = cfg.frequency;
 
             // Generate RefCell<Spi> field
@@ -61,16 +57,21 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
 
             // Generate Spi::new() init code
             let miso_cfg = if let Some(m) = cfg.miso {
-                let m_pin = format_ident!("gpio{}", m);
-                quote! { .with_miso(io.pins.#m_pin) }
+                let m_pin = format_ident!("GPIO{}", m);
+                quote! { .with_miso(p.#m_pin.degrade()) }
             } else {
                 quote! {}
             };
 
             init_logic.push(quote! {
-                let #field = Spi::new(p.#spi_peri, #freq.kHz(), SpiMode::Mode0, clocks)
-                    .with_sck(io.pins.#sck)
-                    .with_mosi(io.pins.#mosi)
+                let #field = Spi::new(
+                        p.#spi_peri, 
+                        esp_hal::spi::master::Config::default()
+                            .with_frequency(#freq.kHz())
+                            .with_mode(SpiMode::Mode0)
+                    )
+                    .with_sck(p.#sck.degrade())
+                    .with_mosi(p.#mosi.degrade())
                     #miso_cfg;
             });
 
@@ -81,17 +82,19 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
         for (name, cfg) in &esp32.i2c {
             let field = format_ident!("{}", name);
             let i2c_peri = format_ident!("I2C{}", cfg.i2c);
-            let sda = format_ident!("gpio{}", cfg.sda);
-            let scl = format_ident!("gpio{}", cfg.scl);
+            let sda = format_ident!("GPIO{}", cfg.sda);
+            let scl = format_ident!("GPIO{}", cfg.scl);
             let freq = cfg.frequency;
 
             fields.push(quote! { pub #field: RefCell<I2c<'static, Blocking>> });
 
             init_logic.push(quote! {
-                let #field = I2c::new(p.#i2c_peri, esp_hal::i2c::master::Config::default().with_frequency(#freq.kHz()))
-                    .unwrap()
-                    .with_sda(io.pins.#sda)
-                    .with_scl(io.pins.#scl);
+                let #field = I2c::new(
+                        p.#i2c_peri, 
+                        esp_hal::i2c::master::Config::default().with_frequency(#freq.kHz())
+                    )
+                    .with_sda(p.#sda.degrade())
+                    .with_scl(p.#scl.degrade());
             });
 
             struct_init.push(quote! { #field: RefCell::new(#field) });
@@ -102,10 +105,10 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
         // We wrap them in RefCell<Option<AnyPin>> to allow ComponentRegistry to "take" ownership of them
         for (name, cfg) in &esp32.gpio {
             let field = format_ident!("{}", name);
-            let pin_num = format_ident!("gpio{}", cfg.pin);
+            let pin_num = format_ident!("GPIO{}", cfg.pin);
 
             fields.push(quote! { pub #field: RefCell<Option<AnyPin<'static>>> });
-            struct_init.push(quote! { #field: RefCell::new(Some(io.pins.#pin_num.into())) });
+            struct_init.push(quote! { #field: RefCell::new(Some(p.#pin_num.degrade())) });
         }
     }
 
@@ -116,7 +119,7 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
         }
 
         impl PeripheralRegistry {
-            pub fn new(p: Peripherals, clocks: &esp_hal::clock::Clocks) -> Self {
+            pub fn new(p: Peripherals) -> Self {
                 #(#init_logic)*
                 Self { #(#struct_init),* }
             }
@@ -128,6 +131,10 @@ fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
     let mut fields = Vec::new();
     let mut init_logic = Vec::new();
     let mut struct_init = Vec::new();
+
+    // PhantomData to hold lifetime 'a
+    fields.push(quote! { _marker: PhantomData<&'a ()> });
+    struct_init.push(quote! { _marker: PhantomData });
 
     let mut sorted_components: Vec<_> = model.components.iter().collect();
     sorted_components.sort_by_key(|(name, _)| *name);
@@ -194,11 +201,11 @@ fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
 
     Ok(quote! {
         /// Owns high-level components constructed from platform wrappers
-        pub struct ComponentRegistry<'a> {
+        pub struct Components<'a> {
             #(#fields),*
         }
 
-        impl<'a> ComponentRegistry<'a> {
+        impl<'a> Components<'a> {
             pub fn new(registry: &'a PeripheralRegistry) -> Self {
                 #(#init_logic)*
                 Self { #(#struct_init),* }

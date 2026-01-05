@@ -118,20 +118,10 @@ impl ProjectCompiler {
 
             pub use platform::*;
 
-            pub struct Context {
+            pub struct Context<'a> {
                 pub logger: platform::logger::Logger,
                 pub delay: platform::delay::Delay,
-                pub components: generated::Components,
-            }
-
-            impl Context {
-                pub fn new() -> Self {
-                    Self {
-                        logger: platform::logger::Logger::new(),
-                        delay: platform::delay::Delay::new(),
-                        components: generated::Components::new(),
-                    }
-                }
+                pub components: generated::Components<'a>,
             }
         };
         fs::write(src_dir.join("lib.rs"), tokens.to_string())
