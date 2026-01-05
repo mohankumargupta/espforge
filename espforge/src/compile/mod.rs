@@ -162,8 +162,8 @@ impl ProjectCompiler {
 
     fn generate_entry_point(&self, src_dir: &Path) -> Result<()> {
         let crate_name = self.model.get_name().replace('-', "_");
-        let content = espforge_templates::render_main(None, &crate_name, "", "")
-            .map_err(|e| anyhow!("Failed to render template: {}", e))?;
+        let content = espforge_templates::render_main(&crate_name)
+            .map_err(|e| anyhow!("Failed to render main.rs: {}", e))?;
 
         let path = src_dir.join("bin/main.rs");
         if let Some(p) = path.parent() {

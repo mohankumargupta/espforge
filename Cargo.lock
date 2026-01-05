@@ -491,7 +491,10 @@ name = "espforge_templates"
 version = "0.1.0"
 dependencies = [
  "include_dir",
- "tera",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
