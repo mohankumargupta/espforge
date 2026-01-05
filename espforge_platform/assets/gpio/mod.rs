@@ -8,108 +8,50 @@ pub struct GPIOOutput {
 }
 
 impl GPIOOutput {
-    /// Creates a new GPIO output with the specified pin number
-    ///
-    /// # Arguments
-    /// * `pin_number` - The GPIO pin number (0-39 for ESP32)
-    ///
-    /// # Panics
-    /// Panics if the pin number is invalid or already in use
-    pub fn new(pin_number: u8) -> Self {
-        // Safety: We ensure only one instance exists by consuming the AnyPin
-        let any_pin = unsafe { AnyPin::steal(pin_number) };
-
-        // Default to push-pull output with 20mA drive strength
+    /// Creates a wrapper from an existing owned pin (Registry Pattern)
+    pub fn from_pin(pin: AnyPin<'static>) -> Self {
         let config = OutputConfig::default();
-        let output = Output::new(any_pin, Level::Low, config);
-
-        GPIOOutput { output }
+        let output = Output::new(pin, Level::Low, config);
+        Self { output }
     }
 
-    /// Sets the output level high
-    pub fn set_high(&mut self) {
-        self.output.set_high();
+    /// Legacy constructor (Integer Pattern)
+    pub fn new(pin_number: u8) -> Self {
+        let any_pin = unsafe { AnyPin::steal(pin_number) };
+        Self::from_pin(any_pin)
     }
 
-    /// Sets the output level low
-    pub fn set_low(&mut self) {
-        self.output.set_low();
-    }
-
-    /// Toggles the output level
-    pub fn toggle(&mut self) {
-        self.output.toggle();
-    }
-
-    /// Gets the current output level
-    pub fn is_high(&self) -> bool {
-        self.output.is_set_high()
-    }
+    pub fn set_high(&mut self) { self.output.set_high(); }
+    pub fn set_low(&mut self) { self.output.set_low(); }
+    pub fn toggle(&mut self) { self.output.toggle(); }
+    pub fn is_high(&self) -> bool { self.output.is_set_high() }
 }
-
 
 pub struct GPIOInput {
     input: Input<'static>,
 }
 
 impl GPIOInput {
-    /// Creates a new GPIO input with the specified pin number and pull configuration
-    ///
-    /// # Arguments
-    /// * `pin_number` - The GPIO pin number (0-39 for ESP32)
-    /// * `pull_up` - enable/disable pull up resistor (default true)
-    /// * `pull_down` - enable/disable pull up resistor (default false)
-    /// # Panics
-    /// Panics if the pin number is invalid or already in use
-    pub fn new(pin_number: u8, pull_up: bool, pull_down: bool) -> Self {
-        // Safety: We ensure only one instance exists by consuming the AnyPin
-        let any_pin = unsafe { AnyPin::steal(pin_number) };
-
-        let pull = if pull_up {
-            Pull::Up
-        } else if pull_down {
-            Pull::Down
-        } else {
-            Pull::None
-        };
-
+    /// Creates a wrapper from an existing owned pin (Registry Pattern)
+    pub fn from_pin(pin: AnyPin<'static>, pull_up: bool, pull_down: bool) -> Self {
+        let pull = if pull_up { Pull::Up } else if pull_down { Pull::Down } else { Pull::None };
         let config = InputConfig::default().with_pull(pull);
-        let input = Input::new(any_pin, config);
-
-        GPIOInput { input }
+        let input = Input::new(pin, config);
+        Self { input }
     }
 
-    /// Reads the current input level
-    pub fn read(&self) -> Level {
-        self.input.level()
+    /// Legacy constructor
+    pub fn new(pin_number: u8, pull_up: bool, pull_down: bool) -> Self {
+        let any_pin = unsafe { AnyPin::steal(pin_number) };
+        Self::from_pin(any_pin, pull_up, pull_down)
     }
 
-    /// Returns true if the input is high
-    pub fn is_high(&self) -> bool {
-        self.input.is_high()
-    }
-
-    /// Returns true if the input is low
-    pub fn is_low(&self) -> bool {
-        self.input.is_low()
-    }
-
-     pub async fn wait_for_low(&mut self) {
-        self.input.wait_for_low().await;
-    }
-
-    /// Asynchronously wait for the pin to go high
-    pub async fn wait_for_high(&mut self) {
-        self.input.wait_for_high().await;
-    }
-
-    /// Asynchronously wait for a rising edge
-    pub async fn wait_for_rising_edge(&mut self) {
-        self.input.wait_for_rising_edge().await;
-    }
-
-    /// Asynchronously wait for a falling edge
-    pub async fn wait_for_falling_edge(&mut self) {
-        self.input.wait_for_falling_edge().await;
-    }
+    pub fn read(&self) -> Level { self.input.level() }
+    pub fn is_high(&self) -> bool { self.input.is_high() }
+    pub fn is_low(&self) -> bool { self.input.is_low() }
+    // pub async fn wait_for_low(&mut self) { self.input.wait_for_low().await; }
+    // pub async fn wait_for_high(&mut self) { self.input.wait_for_high().await; }
+    // pub async fn wait_for_rising_edge(&mut self) { self.input.wait_for_rising_edge().await; }
+    // pub async fn wait_for_falling_edge(&mut self) { self.input.wait_for_falling_edge().await; }
 }
+

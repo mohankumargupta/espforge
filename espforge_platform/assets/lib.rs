@@ -2,6 +2,7 @@ pub mod logger;
 pub mod delay;
 pub mod components;
 pub mod gpio; 
+pub mod bus;
 
 pub struct Context {
     pub logger: logger::Logger,
@@ -16,3 +17,4 @@ impl Context {
         }
     }
 }
+
