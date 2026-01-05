@@ -96,12 +96,10 @@ fn copy_recursive(src: &Path, dst: &Path) -> Result<()> {
 
         if file_type.is_dir() {
             copy_recursive(&entry.path(), &target_path)?;
+        } else if entry.file_name() == "lib.rs" {
+            fs::copy(entry.path(), dst.join("mod.rs"))?;
         } else {
-            if entry.file_name() == "lib.rs" {
-                fs::copy(entry.path(), dst.join("mod.rs"))?;
-            } else {
-                fs::copy(entry.path(), target_path)?;
-            }
+            fs::copy(entry.path(), target_path)?;
         }
     }
     Ok(())

@@ -16,6 +16,12 @@ pub struct ConfigurationOrchestrator {
     // but storing them allows us to sort/filter if needed.
 }
 
+impl Default for ConfigurationOrchestrator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfigurationOrchestrator {
     pub fn new() -> Self {
         Self {}
@@ -43,7 +49,7 @@ impl ConfigurationOrchestrator {
             let processor = (registration.factory)(); // Create instance
             let key = processor.section_key();
 
-            if let Some(section_content) = root_map.get(&Value::String(key.to_string())) {
+            if let Some(section_content) = root_map.get(Value::String(key.to_string())) {
                 processor
                     .process(section_content, &mut model)
                     .with_context(|| format!("Error in section '{}'", key))?;
