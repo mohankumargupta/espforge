@@ -6,11 +6,6 @@ use proc_macro2::{Literal, TokenStream};
 pub fn generate_components_source(model: &ProjectModel) -> Result<String> {
     let mut struct_fields = Vec::new();
     let mut init_lines = Vec::new();
-    
-    // Default imports are implicitly handled by fully qualified paths in quote!,
-    // or we can add them to the top.
-    
-    // Sort components for deterministic output
     let mut sorted_components: Vec<_> = model.components.iter().collect();
     sorted_components.sort_by_key(|(name, _)| *name);
 
