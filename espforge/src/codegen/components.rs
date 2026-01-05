@@ -69,10 +69,9 @@ pub fn generate_components_source(model: &ProjectModel) -> Result<String> {
 }
 
 fn resolve_pin_number(model: &ProjectModel, reference: &str) -> Result<u8> {
-    if let Some(esp32) = &model.esp32 {
-        if let Some(gpio_config) = esp32.resolve::<crate::parse::model::GpioPinConfig>(reference) {
+    if let Some(esp32) = &model.esp32
+        && let Some(gpio_config) = esp32.resolve::<crate::parse::model::GpioPinConfig>(reference) {
             return Ok(gpio_config.pin);
         }
-    }
     Err(anyhow!("Could not resolve pin reference: {}", reference))
 }
