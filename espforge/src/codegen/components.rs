@@ -7,7 +7,7 @@ pub fn generate_components_source(model: &ProjectModel) -> Result<String> {
     // Stage 1: Generate the struct that owns the raw silicon
     // This creates 'PeripheralRegistry'
     let hardware_struct = generate_peripheral_registry(model)?;
-    
+
     // Stage 2: Generate the struct that owns the platform components
     // This creates 'ComponentRegistry' and injects resources from PeripheralRegistry
     let components_struct = generate_component_registry(model)?;
@@ -23,13 +23,13 @@ pub fn generate_components_source(model: &ProjectModel) -> Result<String> {
             Blocking,
         };
         use core::cell::RefCell;
-        
+
         // Platform dependencies for the Component Registry
         // This ensures the generated Components struct only sees 'platform' types
         use crate::platform;
 
         #hardware_struct
-        
+
         #components_struct
     };
 
@@ -58,7 +58,7 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
 
             // Generate RefCell<Spi> field
             fields.push(quote! { pub #field: RefCell<Spi<'static, Blocking>> });
-            
+
             // Generate Spi::new() init code
             let miso_cfg = if let Some(m) = cfg.miso {
                 let m_pin = format_ident!("gpio{}", m);
@@ -138,10 +138,10 @@ fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
         match component {
             Component::LED { gpio } => {
                 let pin_ref = resolve_resource_ident(gpio)?;
-                
+
                 // Field Type: Platform Component
                 fields.push(quote! { pub #field: platform::components::led::LED });
-                
+
                 // Init: Take the pin from registry -> Wrap in Platform GPIO -> Create Component
                 init_logic.push(quote! {
                     let #field = platform::components::led::LED::new(
@@ -154,7 +154,7 @@ fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
             Component::Button { gpio, pull_up } => {
                 let pin_ref = resolve_resource_ident(gpio)?;
                 let pull_up_val = *pull_up;
-                
+
                 fields.push(quote! { pub #field: platform::gpio::GPIOInput });
                 init_logic.push(quote! {
                     let #field = platform::gpio::GPIOInput::from_pin(
@@ -166,26 +166,26 @@ fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
             }
             Component::SpiDevice { spi, cs } => {
                 let spi_ref = resolve_resource_ident(spi)?;
-                
+
                 if let Some(cs_ref_str) = cs {
                     let cs_ref = resolve_resource_ident(cs_ref_str)?;
-                    
+
                     fields.push(quote! { pub #field: platform::bus::SpiDevice<'a> });
-                    
+
                     init_logic.push(quote! {
                         let #field = platform::bus::SpiDevice::new(
-                            &registry.#spi_ref, 
+                            &registry.#spi_ref,
                             registry.#cs_ref.borrow_mut().take().expect("CS Pin already claimed")
                         );
                     });
                 }
             }
             Component::I2cDevice { i2c, address: _ } => {
-                 let i2c_ref = resolve_resource_ident(i2c)?;
-                 fields.push(quote! { pub #field: platform::bus::I2cDevice<'a> });
-                 init_logic.push(quote! {
-                    let #field = platform::bus::I2cDevice::new(&registry.#i2c_ref);
-                 });
+                let i2c_ref = resolve_resource_ident(i2c)?;
+                fields.push(quote! { pub #field: platform::bus::I2cDevice<'a> });
+                init_logic.push(quote! {
+                   let #field = platform::bus::I2cDevice::new(&registry.#i2c_ref);
+                });
             }
             _ => {}
         }
@@ -208,8 +208,8 @@ fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
 }
 
 fn resolve_resource_ident(reference: &str) -> Result<Ident> {
-    let name = reference.strip_prefix('$')
+    let name = reference
+        .strip_prefix('$')
         .ok_or_else(|| anyhow!("Invalid resource reference {}", reference))?;
     Ok(format_ident!("{}", name))
 }
-
