@@ -11,10 +11,7 @@ pub mod esp32;
 pub mod model;
 pub mod processor;
 
-pub struct ConfigurationOrchestrator {
-    // We don't even need to store them in a Vec if we just iterate inventory directly,
-    // but storing them allows us to sort/filter if needed.
-}
+pub struct ConfigurationOrchestrator;
 
 impl Default for ConfigurationOrchestrator {
     fn default() -> Self {
@@ -42,15 +39,17 @@ impl ConfigurationOrchestrator {
                 .collect();
 
         processors.sort_by_key(|b| std::cmp::Reverse(b.priority()));
-        for registration in inventory::iter::<ProcessorRegistration> {
-            let processor = (registration.factory)(); // Create instance
+        for processor in processors {
             let key = processor.section_key();
-
             if let Some(section_content) = root_map.get(Value::String(key.to_string())) {
                 processor
                     .process(section_content, &mut model)
-                    .with_context(|| format!("Error in section '{}'", key))?;
+                    .with_context(|| format!("Error processing configuration section '{}'", key))?;
             }
+        }
+
+        if model.chip.is_empty() {
+            return Err(anyhow::anyhow!("Project configuration missing required 'espforge.chip' or 'espforge.platform' definition"));
         }
 
         Ok(model)

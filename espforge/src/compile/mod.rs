@@ -1,90 +1,178 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use quote::quote;
 use std::fs;
-use std::path::Path;
-use toml_edit::DocumentMut;
+use std::path::{Path, PathBuf};
 
 use crate::codegen::espgenerate::esp_generate;
-use crate::parse::ConfigurationOrchestrator;
+use crate::parse::model::ProjectModel;
+use crate::parse::{ConfigurationOrchestrator};
 
 pub fn compile_project(config_path: &Path) -> Result<()> {
-    //
-    println!("🔍 Parsing configuration...");
-    let content = fs::read_to_string(config_path).context(format!(
-        "Failed to read configuration file: {}",
-        config_path.display()
-    ))?;
-
-    let orchestrator = ConfigurationOrchestrator::new();
-    let model = orchestrator.compile(&content)?;
-
-    println!("   Project: {}", model.get_name());
-    println!("   Chip:    {}", model.get_chip());
-
-    //
-    println!("🔗 Resolving configuration...");
-    //resolve::resolve_project(&mut model)?;
-
-    //
-    println!("🔨 Generating artifacts...");
-    esp_generate(model.get_name(), model.get_chip(), false)?;
-
-    let base_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
-    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
-    let project_dir = current_dir.join(model.get_name());
-    let src_dir = project_dir.join("src");
-
-    copy_wokwi_files(base_dir, &project_dir)?;
-    provision_platform_assets(&project_dir, &src_dir)?;
-
-    let components_src = crate::codegen::components::generate_components_source(&model)?;
-    fs::write(src_dir.join("generated.rs"), components_src)
-        .context("Failed to write src/generated.rs")?;
-
-    setup_library_structure(&src_dir)?;
-    inject_app_code(base_dir, &src_dir)?;
-
-    update_cargo_manifest(&project_dir)?;
-    generate_entry_point(model.get_name(), &src_dir)?;
-
-    println!("✨ Project compiled successfully!");
-    Ok(())
+    let compiler = ProjectCompiler::new(config_path)?;
+    compiler.run()
 }
 
-fn copy_wokwi_files(base_dir: &Path, project_dir: &Path) -> Result<()> {
-    let files_to_check = ["diagram.json", "wokwi.toml"];
+struct ProjectCompiler {
+    base_dir: PathBuf,
+    model: ProjectModel,
+}
 
-    for filename in files_to_check {
-        let source_path = base_dir.join(filename);
-        if source_path.exists() {
-            let dest_path = project_dir.join(filename);
-            fs::copy(&source_path, &dest_path)
-                .with_context(|| format!("Failed to copy {} to project directory", filename))?;
-            println!("   Overriding generated {} with custom file", filename);
+impl ProjectCompiler {
+    fn new(config_path: &Path) -> Result<Self> {
+        println!("🔍 Parsing configuration...");
+        let content = fs::read_to_string(config_path).context(format!(
+            "Failed to read configuration file: {}",
+            config_path.display()
+        ))?;
+
+        let orchestrator = ConfigurationOrchestrator::new();
+        let model = orchestrator.compile(&content)?;
+
+        let base_dir = config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+
+        Ok(Self {
+            base_dir,
+            model,
+        })
+    }
+
+    fn run(&self) -> Result<()> {
+        println!("   Project: {}", self.model.get_name());
+        println!("   Chip:    {}", self.model.get_chip());
+
+        println!("🔨 Generating artifacts...");
+        self.generate_scaffold()?;
+
+        let project_dir = self.resolve_project_dir()?;
+        let src_dir = project_dir.join("src");
+        self.copy_wokwi_files(&project_dir)?;
+        self.provision_platform_assets(&project_dir, &src_dir)?;
+        self.generate_component_code(&src_dir)?;
+        self.setup_library_structure(&src_dir)?;
+        self.inject_app_code(&src_dir)?;
+        self.generate_entry_point(&src_dir)?;
+        
+        println!("✨ Project compiled successfully!");
+        Ok(())
+    }
+
+    fn resolve_project_dir(&self) -> Result<PathBuf> {
+        let current_dir = std::env::current_dir().context("Failed to get current directory")?;
+        Ok(current_dir.join(self.model.get_name()))
+    }
+
+    fn generate_scaffold(&self) -> Result<()> {
+        esp_generate(self.model.get_name(), self.model.get_chip(), false)
+    }
+
+    fn copy_wokwi_files(&self, project_dir: &Path) -> Result<()> {
+        let files_to_check = ["diagram.json", "wokwi.toml"];
+        for filename in files_to_check {
+            let source_path = self.base_dir.join(filename);
+            if source_path.exists() {
+                let dest_path = project_dir.join(filename);
+                fs::copy(&source_path, &dest_path)
+                    .with_context(|| format!("Failed to copy {} to project", filename))?;
+                println!("   Overriding generated {} with custom file", filename);
+            }
         }
-    }
-    Ok(())
-}
-
-fn provision_platform_assets(project_dir: &Path, src_dir: &Path) -> Result<()> {
-    let platform_temp = project_dir.join(".espforge_temp");
-    fs::create_dir_all(&platform_temp)?;
-
-    crate::PLATFORM_SRC
-        .extract(&platform_temp)
-        .context("Failed to extract platform assets")?;
-
-    let assets_dir = platform_temp.join("assets");
-    let platform_dest = src_dir.join("platform");
-
-    if assets_dir.exists() {
-        copy_recursive(&assets_dir, &platform_dest)?;
+        Ok(())
     }
 
-    let _ = fs::remove_dir_all(platform_temp);
-    Ok(())
+    fn provision_platform_assets(&self, project_dir: &Path, src_dir: &Path) -> Result<()> {
+        let platform_temp = project_dir.join(".espforge_temp");
+        
+        if platform_temp.exists() {
+            fs::remove_dir_all(&platform_temp)?;
+        }
+        fs::create_dir_all(&platform_temp)?;
+
+        crate::PLATFORM_SRC
+            .extract(&platform_temp)
+            .context("Failed to extract platform assets")?;
+
+        let assets_dir = platform_temp.join("assets");
+        let platform_dest = src_dir.join("platform");
+
+        if assets_dir.exists() {
+            copy_recursive(&assets_dir, &platform_dest)?;
+        }
+
+        let _ = fs::remove_dir_all(platform_temp);
+        Ok(())
+    }
+
+    fn generate_component_code(&self, src_dir: &Path) -> Result<()> {
+        let components_src = crate::codegen::components::generate_components_source(&self.model)?;
+        fs::write(src_dir.join("generated.rs"), components_src)
+            .context("Failed to write src/generated.rs")?;
+        Ok(())
+    }
+
+    fn setup_library_structure(&self, src_dir: &Path) -> Result<()> {
+        let tokens = quote! {
+            #![no_std]
+            pub mod app;
+            pub mod platform;
+            pub mod generated;
+
+            pub use platform::*;
+
+            pub struct Context {
+                pub logger: platform::logger::Logger,
+                pub delay: platform::delay::Delay,
+                pub components: generated::Components,
+            }
+
+            impl Context {
+                pub fn new() -> Self {
+                    Self {
+                        logger: platform::logger::Logger::new(),
+                        delay: platform::delay::Delay::new(),
+                        components: generated::Components::new(),
+                    }
+                }
+            }
+        };
+        fs::write(src_dir.join("lib.rs"), tokens.to_string())
+            .context("Failed to write src/lib.rs")?;
+        Ok(())
+    }
+
+    fn inject_app_code(&self, src_dir: &Path) -> Result<()> {
+        let rust_source = self.base_dir.join("app/rust/app.rs");
+        let target = src_dir.join("app.rs");
+
+        if rust_source.exists() {
+            fs::copy(&rust_source, &target)?;
+            println!("   Included app logic from app/rust/app.rs");
+        } else {
+            println!("⚠️  Warning: No app code found. Generating stub.");
+            fs::write(&target, r#"
+                // Stub generated by espforge
+                pub fn setup(_: &mut crate::Context) {}
+                pub fn forever(_: &mut crate::Context) {}
+            "#)?;
+        }
+        Ok(())
+    }
+
+    fn generate_entry_point(&self, src_dir: &Path) -> Result<()> {
+        let crate_name = self.model.get_name().replace('-', "_");
+        let content = espforge_templates::render_main(None, &crate_name, "", "")
+            .map_err(|e| anyhow!("Failed to render template: {}", e))?;
+        
+        let path = src_dir.join("bin/main.rs");
+        if let Some(p) = path.parent() { fs::create_dir_all(p)?; }
+        fs::write(&path, content).context("Failed to write generated main.rs")?;
+        Ok(())
+    }
 }
 
+// Helper utility
 fn copy_recursive(src: &Path, dst: &Path) -> Result<()> {
     if !dst.exists() {
         fs::create_dir_all(dst)?;
@@ -97,6 +185,7 @@ fn copy_recursive(src: &Path, dst: &Path) -> Result<()> {
         if file_type.is_dir() {
             copy_recursive(&entry.path(), &target_path)?;
         } else if entry.file_name() == "lib.rs" {
+            // Rename internal lib.rs to mod.rs when moving to submodules
             fs::copy(entry.path(), dst.join("mod.rs"))?;
         } else {
             fs::copy(entry.path(), target_path)?;
@@ -105,97 +194,3 @@ fn copy_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-fn setup_library_structure(src_dir: &Path) -> Result<()> {
-    // Generate lib.rs using quote!
-    let tokens = quote! {
-        #![no_std]
-        pub mod app;
-        pub mod platform;
-        pub mod generated;
-
-        // Re-export platform items
-        pub use platform::*;
-
-        /// Application Context
-        /// Holds platform peripherals and generated components
-        pub struct Context {
-            pub logger: platform::logger::Logger,
-            pub delay: platform::delay::Delay,
-            pub components: generated::Components,
-        }
-
-        impl Context {
-            pub fn new() -> Self {
-                Self {
-                    logger: platform::logger::Logger::new(),
-                    delay: platform::delay::Delay::new(),
-                    components: generated::Components::new(),
-                }
-            }
-        }
-    };
-
-    fs::write(src_dir.join("lib.rs"), tokens.to_string()).context("Failed to write src/lib.rs")?;
-    Ok(())
-}
-
-fn inject_app_code(base_dir: &Path, src_dir: &Path) -> Result<()> {
-    // Support two folder structures:
-    // 1. Nested: app/rust/app.rs (Classic/Complex)
-    // 2. Flat:   app/app.rs      (Simple/Blink)
-    let app_rust_src_nested = base_dir.join("app/rust/app.rs");
-    let app_rust_src_flat = base_dir.join("app/app.rs");
-    let target_app_rs = src_dir.join("app.rs");
-
-    if app_rust_src_nested.exists() {
-        fs::copy(&app_rust_src_nested, &target_app_rs)
-            .context("Failed to copy app.rs to src/app.rs")?;
-        println!("   Included app logic from app/rust/app.rs");
-    } else if app_rust_src_flat.exists() {
-        fs::copy(&app_rust_src_flat, &target_app_rs)
-            .context("Failed to copy app.rs to src/app.rs")?;
-        println!("   Included app logic from app/app.rs");
-    } else {
-        println!(
-            "⚠️  Warning: No app code found at app/rust/app.rs or app/app.rs. Generating stub."
-        );
-        fs::write(
-            &target_app_rs,
-            r#"
-            // Stub generated by espforge
-            pub fn setup(_: &mut crate::Context) {}
-            pub fn forever(_: &mut crate::Context) {}
-        "#,
-        )?;
-    }
-    Ok(())
-}
-
-/// Updates Cargo.toml. (Place to add dependencies derived from components in the future).
-fn update_cargo_manifest(project_dir: &Path) -> Result<()> {
-    let cargo_toml_path = project_dir.join("Cargo.toml");
-    if cargo_toml_path.exists() {
-        // Just validation for now
-        let cargo_toml_content = fs::read_to_string(&cargo_toml_path)?;
-        let _manifest = cargo_toml_content.parse::<DocumentMut>()?;
-    }
-    Ok(())
-}
-
-/// Generates the `main.rs` entry point using templates.
-fn generate_entry_point(project_name: &str, src_dir: &Path) -> Result<()> {
-    // Rust crates use underscores, project folders often use hyphens
-    let crate_name = project_name.replace('-', "_");
-
-    let main_rs_content = espforge_templates::render_main(None, &crate_name, "", "")
-        .map_err(|e| anyhow::anyhow!("Failed to render template: {}", e))?;
-
-    let main_rs_path = src_dir.join("bin/main.rs");
-    if let Some(parent) = main_rs_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    fs::write(&main_rs_path, main_rs_content).context("Failed to write generated main.rs")?;
-
-    Ok(())
-}
