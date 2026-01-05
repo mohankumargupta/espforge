@@ -49,7 +49,9 @@ impl ConfigurationOrchestrator {
         }
 
         if model.chip.is_empty() {
-            return Err(anyhow::anyhow!("Project configuration missing required 'espforge.chip' or 'espforge.platform' definition"));
+            return Err(anyhow::anyhow!(
+                "Project configuration missing required 'espforge.chip' or 'espforge.platform' definition"
+            ));
         }
 
         Ok(model)

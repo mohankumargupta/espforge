@@ -5,13 +5,19 @@ pub fn esp_generate(project_name: &str, chip: &str, enable_async: bool) -> Resul
     println!("Running esp-generate for chip: {}", chip);
     let mut cmd = Command::new("esp-generate");
     cmd.args([
-        "--headless", 
-        "--chip", chip,
-        "-o", "log",
-        "-o", "unstable-hal",
-        "-o", "esp-backtrace",
-        "-o", "wokwi",
-        "-o", "vscode",
+        "--headless",
+        "--chip",
+        chip,
+        "-o",
+        "log",
+        "-o",
+        "unstable-hal",
+        "-o",
+        "esp-backtrace",
+        "-o",
+        "wokwi",
+        "-o",
+        "vscode",
     ]);
 
     if enable_async {

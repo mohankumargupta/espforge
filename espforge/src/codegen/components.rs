@@ -1,5 +1,5 @@
 use crate::parse::model::{Component, ProjectModel, ResourceResolver};
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote};
 
@@ -62,18 +62,17 @@ pub fn generate_components_source(model: &ProjectModel) -> Result<String> {
         }
     };
 
-    Ok(output.to_string())
+    let syntax_tree =
+        syn::parse2(output).context("Failed to parse generated tokens into valid Rust syntax")?;
+    let formatted_source = prettyplease::unparse(&syntax_tree);
+    Ok(formatted_source.to_string())
 }
 
 fn resolve_pin_number(model: &ProjectModel, reference: &str) -> Result<u8> {
     if let Some(esp32) = &model.esp32 {
-        // Try resolving as GPIO config first
         if let Some(gpio_config) = esp32.resolve::<crate::parse::model::GpioPinConfig>(reference) {
             return Ok(gpio_config.pin);
         }
     }
-
-    // If we supported raw integers (e.g. "18"), we would parse it here.
-    // For now, fail if not a reference.
     Err(anyhow!("Could not resolve pin reference: {}", reference))
 }
