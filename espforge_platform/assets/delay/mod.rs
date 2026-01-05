@@ -1,10 +1,10 @@
 use esp_hal::delay::Delay as HalDelay;
 
-pub struct EspforgeDelay {
+pub struct Delay {
     inner: HalDelay,
 }
 
-impl EspforgeDelay {
+impl Delay {
     pub fn new() -> Self {
         Self {
             inner: HalDelay::new(),

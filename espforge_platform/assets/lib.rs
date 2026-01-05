@@ -1,4 +1,5 @@
 pub mod logger;
+pub mod delay;
 pub mod components;
 pub mod gpio; 
 

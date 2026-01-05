@@ -1,6 +1,8 @@
 
 use crate::platform::gpio::GPIOOutput;
 
+pub mod delay;
+
 pub struct LED {
     output: GPIOOutput,
 }
