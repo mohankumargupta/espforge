@@ -19,3 +19,10 @@ impl Delay {
         self.inner.delay_micros(us);
     }
 }
+
+impl embedded_hal::delay::DelayNs for Delay {
+    fn delay_ns(&mut self, ns: u32) {
+        use embedded_hal::delay::DelayNs;
+        self.inner.delay_ns(ns);
+    }
+}

@@ -63,11 +63,11 @@ impl ProjectCompiler {
         let mut doc = manifest.parse::<toml_edit::DocumentMut>().context("Failed to parse Cargo.toml")?;
         
         if let Some(deps) = doc.get_mut("dependencies").and_then(|i| i.as_table_mut()) {
-            // if !deps.contains_key("embedded-hal") {
-            //     deps["embedded-hal"] = toml_edit::value("1.0.0");
-            // }
+            if !deps.contains_key("embedded-hal") {
+                deps["embedded-hal"] = toml_edit::value("1.0.0");
+            }
             if !deps.contains_key("embedded-hal-bus") {
-                deps["embedded-hal-bus"] = toml_edit::value("0.1.0");
+                deps["embedded-hal-bus"] = toml_edit::value("0.3.0");
             }
         }
         
