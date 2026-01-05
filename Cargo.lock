@@ -433,6 +433,8 @@ dependencies = [
  "inventory",
  "log",
  "predicates",
+ "proc-macro2",
+ "quote",
  "ron",
  "serde",
  "serde_yaml_ng",

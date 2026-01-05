@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 use anyhow::{Context, Result};
 use toml_edit::DocumentMut;
+use quote::quote;
 
-use crate::codegen::components::generate_components_source;
 use crate::codegen::espgenerate::esp_generate;
 use crate::parse::ConfigurationOrchestrator;
 
@@ -36,7 +36,7 @@ pub fn compile_project(config_path: &Path) -> Result<()> {
 
     provision_platform_assets(&project_dir, &src_dir)?;
 
-    let components_src = generate_components_source(&model)?;
+    let components_src = crate::codegen::components::generate_components_source(&model)?;
     fs::write(src_dir.join("generated.rs"), components_src)
         .context("Failed to write src/generated.rs")?;
 
@@ -90,31 +90,36 @@ fn copy_recursive(src: &Path, dst: &Path) -> Result<()> {
 }
 
 fn setup_library_structure(src_dir: &Path) -> Result<()> {
-    let lib_rs_content = r#"#![no_std]
-pub mod app;
-pub mod platform;
-pub mod generated;
+    // Generate lib.rs using quote!
+    let tokens = quote! {
+        #![no_std]
+        pub mod app;
+        pub mod platform;
+        pub mod generated;
 
-// Re-export platform items
-pub use platform::*;
+        // Re-export platform items
+        pub use platform::*;
 
-/// Application Context
-/// Holds platform peripherals and generated components
-pub struct Context {
-    pub logger: platform::logger::Logger,
-    pub components: generated::Components,
-}
-
-impl Context {
-    pub fn new() -> Self {
-        Self {
-            logger: platform::logger::Logger::new(),
-            components: generated::Components::new(),
+        /// Application Context
+        /// Holds platform peripherals and generated components
+        pub struct Context {
+            pub logger: platform::logger::Logger,
+            pub delay: platform::delay::Delay,
+            pub components: generated::Components,
         }
-    }
-}
-"#;
-    fs::write(src_dir.join("lib.rs"), lib_rs_content)
+
+        impl Context {
+            pub fn new() -> Self {
+                Self {
+                    logger: platform::logger::Logger::new(),
+                    delay: platform::delay::Delay::new(),
+                    components: generated::Components::new(),
+                }
+            }
+        }
+    };
+
+    fs::write(src_dir.join("lib.rs"), tokens.to_string())
         .context("Failed to write src/lib.rs")?;
     Ok(())
 }

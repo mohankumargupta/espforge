@@ -4,12 +4,14 @@ pub mod gpio;
 
 pub struct Context {
     pub logger: logger::Logger,
+    pub delay: delay::Delay,
 }
 
 impl Context {
     pub fn new() -> Self {
         Self {
             logger: logger::Logger::new(),
+            delay: delay::Delay::new(),
         }
     }
 }

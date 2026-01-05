@@ -11,7 +11,11 @@ impl EspforgeDelay {
         }
     }
 
-    pub fn delay_millis(&self, ms: u32) {
+    pub fn delay_ms(&self, ms: u32) {
         self.inner.delay_millis(ms);
+    }
+
+    pub fn delay_us(&self, us: u32) {
+        self.inner.delay_micros(us);
     }
 }
