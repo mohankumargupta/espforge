@@ -21,7 +21,7 @@ impl<'a> SpiDevice<'a> {
 }
 
 impl<'a> embedded_hal::spi::SpiDevice for SpiDevice<'a> {
-    fn transaction(&mut self, operations: &mut [embedded_hal::spi::Operation<'_, u8>]) -> Result<(), self::Error> {
+    fn transaction(&mut self, operations: &mut [embedded_hal::spi::Operation<'_, u8>]) -> Result<(), Self::Error> {
         self.inner.transaction(operations)
     }
 }
@@ -42,7 +42,7 @@ impl<'a> I2cDevice<'a> {
 }
 
 impl<'a> embedded_hal::i2c::I2c for I2cDevice<'a> {
-    fn transaction(&mut self, address: u8, operations: &mut [embedded_hal::i2c::Operation<'_>]) -> Result<(), self::Error> {
+    fn transaction(&mut self, address: u8, operations: &mut [embedded_hal::i2c::Operation<'_>]) -> Result<(), Self::Error> {
         self.inner.transaction(address, operations)
     }
 }

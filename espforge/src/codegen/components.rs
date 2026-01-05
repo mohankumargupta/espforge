@@ -17,7 +17,7 @@ pub fn generate_components_source(model: &ProjectModel) -> Result<String> {
         // Low-level dependencies for the Hardware Registry
         use esp_hal::{
             gpio::{AnyPin, Io},
-            spi::{master::Spi, SpiMode},
+            spi::{master::Spi, Mode},
             i2c::master::I2c,
             peripherals::Peripherals,
             Blocking,
@@ -68,7 +68,7 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
                         p.#spi_peri, 
                         esp_hal::spi::master::Config::default()
                             .with_frequency(#freq.kHz())
-                            .with_mode(SpiMode::Mode0)
+                            .with_mode(Mode::_0)
                     )
                     .with_sck(p.#sck.degrade())
                     .with_mosi(p.#mosi.degrade())

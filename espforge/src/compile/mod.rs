@@ -42,7 +42,8 @@ impl ProjectCompiler {
 
         println!("🔨 Generating artifacts...");
         self.generate_scaffold()?;
-
+        
+        self.add_dependencies()?;
         let project_dir = self.resolve_project_dir()?;
         let src_dir = project_dir.join("src");
         self.copy_wokwi_files(&project_dir)?;
@@ -55,6 +56,25 @@ impl ProjectCompiler {
         println!("✨ Project compiled successfully!");
         Ok(())
     }
+
+    fn add_dependencies(&self) -> Result<()> {
+        let cargo_path = self.resolve_project_dir()?.join("Cargo.toml");
+        let manifest = fs::read_to_string(&cargo_path).context("Failed to read Cargo.toml")?;
+        let mut doc = manifest.parse::<toml_edit::DocumentMut>().context("Failed to parse Cargo.toml")?;
+        
+        if let Some(deps) = doc.get_mut("dependencies").and_then(|i| i.as_table_mut()) {
+            if !deps.contains_key("embedded-hal") {
+                deps["embedded-hal"] = toml_edit::value("1.0.0");
+            }
+            if !deps.contains_key("embedded-hal-bus") {
+                deps["embedded-hal-bus"] = toml_edit::value("0.1.0");
+            }
+        }
+        
+        fs::write(cargo_path, doc.to_string()).context("Failed to write Cargo.toml")?;
+        Ok(())
+    }
+
 
     fn resolve_project_dir(&self) -> Result<PathBuf> {
         let current_dir = std::env::current_dir().context("Failed to get current directory")?;
