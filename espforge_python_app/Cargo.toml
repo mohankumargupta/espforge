@@ -1,8 +1,8 @@
 [package]
-name = "espforge_rust_app"
+name = "espforge_python_app"
 version = "0.1.0"
 edition = "2024"
-description = "Parser for espforge rust app logic"
+description = "Module for espforge"
 license = "MIT"
 
 [dependencies]

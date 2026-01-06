@@ -28,11 +28,10 @@ espforge_dialogue = { version = "0.1.0", path = "../espforge_dialogue" }
 espforge_examples = { version = "0.1.0", path = "../espforge_examples" }
 espforge_macros = { version = "0.1.0", path = "../espforge_macros" }
 espforge_templates = { version = "0.1.0", path = "../espforge_templates" }
-espforge_rust_app = { version = "0.1.0", path = "../espforge_rust_app" }
+espforge_python_app = { version = "0.1.0", path = "../espforge_python_app" }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 include_dir = { version = "0.7.4", features = ["glob"] }
-#tera = "1.20.1"
 toml = { version = "0.9", features = ["preserve_order"] }
 ron = "0.12"
 serde_yaml_ng = "0.10"
