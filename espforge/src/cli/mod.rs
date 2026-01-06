@@ -9,6 +9,8 @@ pub mod model;
 use commands::compile;
 use commands::examples;
 
+use crate::examples::ExamplesArgs;
+
 #[derive(Parser)]
 #[command(about = "Example tool with a compile subcommand")]
 pub struct Cli {
@@ -39,7 +41,7 @@ impl Cli {
                 name,
                 project_name,
                 chip,
-            } => examples::execute(examples::ExamplesArgs {
+            } => examples::execute(ExamplesArgs {
                 name,
                 project_name,
                 chip,
