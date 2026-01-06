@@ -69,6 +69,9 @@ impl ProjectCompiler {
             if !deps.contains_key("embedded-hal-bus") {
                 deps["embedded-hal-bus"] = toml_edit::value("0.3.0");
             }
+            if !deps.contains_key("static_cell") {
+            deps["static_cell"] = toml_edit::value("2.1");
+        }
         }
         
         fs::write(cargo_path, doc.to_string()).context("Failed to write Cargo.toml")?;
@@ -141,7 +144,7 @@ impl ProjectCompiler {
             pub struct Context<'a> {
                 pub logger: platform::logger::Logger,
                 pub delay: platform::delay::Delay,
-                pub components: generated::Components<'a>,
+                pub components: generated::Components<'static>,
             }
         };
         fs::write(src_dir.join("lib.rs"), tokens.to_string())

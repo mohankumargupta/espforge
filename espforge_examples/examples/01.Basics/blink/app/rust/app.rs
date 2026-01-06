@@ -2,11 +2,11 @@
 
 use crate::Context;
 
-pub fn setup(ctx: &mut Context<'_>) {
+pub fn setup(ctx: &mut Context) {
     ctx.logger.info("Starting Blink Example");
 }
 
-pub fn forever(ctx: &mut Context<'_>) {
+pub fn forever(ctx: &mut Context) {
     // Access the red_led defined in example.yaml
     ctx.components.red_led.toggle();
     

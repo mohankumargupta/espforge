@@ -17,6 +17,7 @@ pub fn render_main(crate_name: &str) -> Result<String, Box<dyn Error>> {
         use esp_hal::main;
 
         use #crate_ident::{Context, app, generated, platform};
+        static REGISTRY: StaticCell<generated::PeripheralRegistry> = StaticCell::new();
 
         esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -28,11 +29,8 @@ pub fn render_main(crate_name: &str) -> Result<String, Box<dyn Error>> {
             let config = esp_hal::Config::default();
             let peripherals = esp_hal::init(config);
             
-            // Peripheral Registry
-            let registry = generated::PeripheralRegistry::new(peripherals);
-            
-            // Components
-            let components = generated::Components::new(&registry);
+            let registry = REGISTRY.init(generated::PeripheralRegistry::new(peripherals));
+            let components = generated::Components::new(registry);
 
             let mut ctx = Context {
                 logger: platform::logger::Logger::new(),

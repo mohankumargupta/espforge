@@ -32,7 +32,7 @@ espforge_rust_app = { version = "0.1.0", path = "../espforge_rust_app" }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 include_dir = { version = "0.7.4", features = ["glob"] }
-tera = "1.20.1"
+#tera = "1.20.1"
 toml = { version = "0.9", features = ["preserve_order"] }
 ron = "0.12"
 serde_yaml_ng = "0.10"
