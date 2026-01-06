@@ -17,6 +17,7 @@ pub fn render_main(crate_name: &str) -> Result<String, Box<dyn Error>> {
         use esp_hal::main;
 
         use #crate_ident::{Context, app, generated, platform};
+        use static_cell::StaticCell;
         static REGISTRY: StaticCell<generated::PeripheralRegistry> = StaticCell::new();
 
         esp_bootloader_esp_idf::esp_app_desc!();
