@@ -141,7 +141,7 @@ impl ProjectCompiler {
 
             pub use platform::*;
 
-            pub struct Context<'a> {
+            pub struct Context {
                 pub logger: platform::logger::Logger,
                 pub delay: platform::delay::Delay,
                 pub components: generated::Components<'static>,
