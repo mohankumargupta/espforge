@@ -42,8 +42,8 @@ impl I2CMaster {
                 let peripheral = unsafe { esp_hal::peripherals::I2C0::steal() };
                 I2c::new(peripheral, config).unwrap()
             },
-            // Enable I2C1 only for chips that have it (ESP32, S2, S3, H2)
-            #[cfg(any(feature = "esp32", feature = "esp32s2", feature = "esp32s3", feature = "esp32h2"))]
+            // Enable I2C1 only for chips that have it (ESP32, S2, S3, H2, C6)
+            #[cfg(any(feature = "esp32", feature = "esp32s2", feature = "esp32s3", feature = "esp32h2", feature = "esp32c6"))]
             1 => {
                 let peripheral = unsafe { esp_hal::peripherals::I2C1::steal() };
                 I2c::new(peripheral, config).unwrap()
@@ -59,20 +59,20 @@ impl I2CMaster {
         I2CMaster { i2c }
     }
 
-    /// Writes bytes to the specified address.
-    pub fn write(&mut self, address: u8, bytes: &[u8]) -> Result<(), esp_hal::i2c::master::Error> {
-        self.i2c.write(address, bytes)
-    }
+    // /// Writes bytes to the specified address.
+    // pub fn write(&mut self, address: u8, bytes: &[u8]) -> Result<(), esp_hal::i2c::master::Error> {
+    //     self.i2c.write(address, bytes)
+    // }
 
-    /// Reads bytes from the specified address.
-    pub fn read(&mut self, address: u8, buffer: &mut [u8]) -> Result<(), esp_hal::i2c::master::Error> {
-        self.i2c.read(address, buffer)
-    }
+    // /// Reads bytes from the specified address.
+    // pub fn read(&mut self, address: u8, buffer: &mut [u8]) -> Result<(), esp_hal::i2c::master::Error> {
+    //     self.i2c.read(address, buffer)
+    // }
 
-    /// Writes bytes and then reads bytes from the specified address.
-    pub fn write_read(&mut self, address: u8, write_buffer: &[u8], read_buffer: &mut [u8]) -> Result<(), esp_hal::i2c::master::Error> {
-        self.i2c.write_read(address, write_buffer, read_buffer)
-    }
+    // /// Writes bytes and then reads bytes from the specified address.
+    // pub fn write_read(&mut self, address: u8, write_buffer: &[u8], read_buffer: &mut [u8]) -> Result<(), esp_hal::i2c::master::Error> {
+    //     self.i2c.write_read(address, write_buffer, read_buffer)
+    // }
 }
 
 

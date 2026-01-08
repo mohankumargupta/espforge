@@ -1,5 +1,6 @@
 use crate::platform::i2c::I2CMaster;
 use core::cell::RefCell;
+use embedded_hal::i2c::{ErrorType, I2c, Operation};
 
 pub struct I2C {
     master: RefCell<I2CMaster>,
@@ -14,15 +15,15 @@ impl I2C {
     }
 
     /// Probes an I2C address to see if a device acknowledges it.
-    pub fn probe(&self, address: u8) -> bool {
-        let mut buffer = [0u8; 1];
-        // Attempt to read 1 byte. If successful, the device exists.
-        self.master.borrow_mut().read(address, &mut buffer).is_ok()
-    }
+    // pub fn probe(&self, address: u8) -> bool {
+    //     let mut buffer = [0u8; 1];
+    //     // Attempt to read 1 byte. If successful, the device exists.
+    //     self.master.borrow_mut().read(address, &mut buffer).is_ok()
+    // }
     
-    pub fn write(&self, address: u8, data: u8) {
-        let _ = self.master.borrow_mut().write(address, &[data]);
-    }
+    // pub fn write(&self, address: u8, data: u8) {
+    //     let _ = self.master.borrow_mut().write(address, &[data]);
+    // }
 
     /// Consumes this component wrapper and returns the underlying Platform Driver.
     /// 
@@ -30,5 +31,15 @@ impl I2C {
     /// of the generic `embedded-hal` I2C interface.
     pub fn into_inner(self) -> I2CMaster {
         self.master.into_inner()
+    }
+}
+
+impl ErrorType for I2C {
+    type Error = esp_hal::i2c::master::Error;
+}
+
+impl I2c for I2C {
+    fn transaction(&mut self, address: u8, operations: &mut [Operation<'_>]) -> Result<(), Self::Error> {
+        self.master.borrow_mut().transaction(address, operations)
     }
 }
