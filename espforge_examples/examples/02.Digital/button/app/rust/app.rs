@@ -7,8 +7,8 @@ pub fn setup(ctx: &mut Context) {
 }
 
 pub fn forever(ctx: &mut Context) {
-    let button = ctx.components.button;
-    let red_led = ctx.components.red_led;
+    let button = &mut ctx.components.button;
+    let red_led = &mut ctx.components.red_led;
     if button.is_button_pressed() {
         red_led.toggle();
     }

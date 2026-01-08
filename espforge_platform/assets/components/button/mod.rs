@@ -6,9 +6,9 @@ pub struct Button {
 }
 
 impl Button {
-    pub fn new(pin: u8,  pullup: bool, pulldown: bool) -> Self {
+    pub fn new(input: GPIOInput) -> Self {
         Button {
-            input: GPIOInput::new(pin, pullup, pulldown),
+            input,
         }
     }
 

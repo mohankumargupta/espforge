@@ -165,12 +165,14 @@ fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
                 let pin_ref = resolve_resource_ident(gpio)?;
                 let pull_up_val = *pull_up;
 
-                fields.push(quote! { pub #field: platform::gpio::GPIOInput });
+                fields.push(quote! { pub #field: platform::components::button::Button });
                 init_logic.push(quote! {
-                    let #field = platform::gpio::GPIOInput::from_pin(
-                        registry.#pin_ref.borrow_mut().take().expect("Pin already claimed"),
-                        #pull_up_val,
-                        false
+                    let #field = platform::components::button::Button::new(
+                        platform::gpio::GPIOInput::from_pin(
+                            registry.#pin_ref.borrow_mut().take().expect("Pin already claimed"),
+                            #pull_up_val,
+                            false
+                        )
                     );
                 });
             }

@@ -17,3 +17,4 @@ components:
     using: button
     with:
       gpio: $gpio9
+      pull_up: true
