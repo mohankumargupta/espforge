@@ -70,9 +70,9 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
                 let #field = Spi::new(
                         p.#spi_peri, 
                         esp_hal::spi::master::Config::default()
-                            .with_frequency(#freq.kHz())
+                            .with_frequency(esp_hal::time::Rate::from_khz(#freq))
                             .with_mode(Mode::_0)
-                    )
+                    ).expect("can create spi peripheral")
                     .with_sck(p.#sck.degrade())
                     .with_mosi(p.#mosi.degrade())
                     #miso_cfg;
@@ -81,7 +81,7 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
             struct_init.push(quote! { #field: RefCell::new(#field) });
         }
 
-        // 3. Generate I2C Buses
+            // 3. Generate I2C Buses
         for (name, cfg) in &esp32.i2c {
             let field = format_ident!("{}", name);
             let i2c_peri = format_ident!("I2C{}", cfg.i2c);
@@ -94,8 +94,8 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
             init_logic.push(quote! {
                 let #field = I2c::new(
                         p.#i2c_peri, 
-                        esp_hal::i2c::master::Config::default().with_frequency(#freq.kHz())
-                    )
+                        esp_hal::i2c::master::Config::default().with_frequency(esp_hal::time::Rate::from_khz(#freq))
+                    ).expect("can create i2c peripheral")
                     .with_sda(p.#sda.degrade())
                     .with_scl(p.#scl.degrade());
             });
