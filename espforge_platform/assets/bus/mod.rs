@@ -2,7 +2,7 @@ use core::cell::RefCell;
 use esp_hal::{
     spi::master::Spi,
     i2c::master::I2c,
-    gpio::{AnyPin, Output, OutputConfig, Level},
+    gpio::{Output},
     Blocking,
     delay::Delay,
 };
