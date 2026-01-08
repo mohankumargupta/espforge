@@ -4,6 +4,7 @@ use esp_hal::{
     uart::{Config, Uart},
     Blocking,
 };
+use embedded_io::{ErrorType, Read, Write, ReadReady, WriteReady};
 
 pub struct UartDriver {
     uart: Uart<'static, Blocking>,
@@ -47,19 +48,36 @@ impl UartDriver {
 
         Self { uart }
     }
+}
 
-    pub fn write(&mut self, data: &[u8]) {
-        let _ = self.uart.write(data);
+impl ErrorType for UartDriver {
+    type Error = <Uart<'static, Blocking> as ErrorType>::Error;
+}
+
+impl Read for UartDriver {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.uart.read(buf)
     }
+}
 
-    pub fn read(&mut self, buf: &mut [u8]) -> usize {
-        match self.uart.read(buf) {
-            Ok(len) => len,
-            Err(_) => 0,
-        }
-    }
-
-    pub fn read_ready(&mut self) -> bool {
+impl ReadReady for UartDriver {
+    fn read_ready(&mut self) -> Result<bool, Self::Error> {
         self.uart.read_ready()
+    }
+}
+
+impl Write for UartDriver {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.uart.write(buf)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.uart.flush()
+    }
+}
+
+impl WriteReady for UartDriver {
+    fn write_ready(&mut self) -> Result<bool, Self::Error> {
+        self.uart.write_ready()
     }
 }

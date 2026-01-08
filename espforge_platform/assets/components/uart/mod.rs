@@ -1,5 +1,6 @@
 use crate::platform::uart::UartDriver;
 use core::str;
+use embedded_io::{ErrorType, Read, Write, ReadReady};
 
 pub struct Uart {
     driver: UartDriver,
@@ -17,25 +18,27 @@ impl Uart {
     }
 
     pub fn write(&mut self, data: &str) {
-        self.driver.write(data.as_bytes());
+        let _ = self.driver.write_all(data.as_bytes());
     }
 
     pub fn write_bytes(&mut self, data: &[u8]) {
-        self.driver.write(data);
+        let _ = self.driver.write_all(data);
     }
 
     pub fn available(&mut self) -> bool {
-        self.driver.read_ready()
+        self.driver.read_ready().unwrap_or(false)
     }
 
     pub fn read_byte(&mut self) -> Option<u8> {
         if self.available() {
             let mut buf = [0u8; 1];
-            if self.driver.read(&mut buf) > 0 {
-                return Some(buf[0]);
+            match self.driver.read(&mut buf) {
+                Ok(n) if n > 0 => Some(buf[0]),
+                _ => None,
             }
+        } else {
+            None
         }
-        None
     }
 
     pub fn buffer_until_newline(&mut self) -> bool {
@@ -64,3 +67,16 @@ impl Uart {
     }
 }
 
+impl ErrorType for Uart {
+    type Error = <UartDriver as ErrorType>::Error;
+}
+
+impl Write for Uart {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.driver.write(buf)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.driver.flush()
+    }
+}

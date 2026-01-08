@@ -1,4 +1,4 @@
-use crate::parse::model::{Component, ProjectModel};
+use crate::parse::model::{Component, ProjectModel, UartConfig};
 use anyhow::{Context, Result, anyhow};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
@@ -199,7 +199,33 @@ fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
                    let #field = platform::bus::I2cDevice::new(&registry.#i2c_ref);
                 });
             }
-            _ => {}
+            Component::UartDevice { uart, baud } => {
+                // Find the config for this referenced UART
+                let uart_ref = uart.strip_prefix('$').unwrap_or(uart);
+                if let Some(esp32) = &model.esp32 {
+                    if let Some(cfg) = esp32.uart.get(uart_ref) {
+                        let uart_num = cfg.uart;
+                        let tx_pin = cfg.tx;
+                        let rx_pin = cfg.rx;
+                        // Use baud from component config if present, else fall back to resource config
+                        let baud_rate = baud.unwrap_or(cfg.baud);
+
+                        fields.push(quote! { pub #field: platform::components::uart::Uart });
+                        
+                        init_logic.push(quote! {
+                            let #field = platform::components::uart::Uart::new(
+                                #uart_num,
+                                #tx_pin,
+                                #rx_pin,
+                                #baud_rate
+                            );
+                        });
+                    } else {
+                        // This case should ideally be caught by validation earlier
+                        return Err(anyhow!("UART resource {} not found", uart));
+                    }
+                }
+            }
         }
         struct_init.push(quote! { #field });
     }

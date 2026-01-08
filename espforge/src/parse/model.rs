@@ -201,6 +201,8 @@ pub enum Component {
     },
     UartDevice {
         uart: String,
+        #[serde(default)]
+        baud: Option<u32>,
     },
 }
 
@@ -231,7 +233,7 @@ impl ComponentResource for Component {
                 resource_type: "i2c",
                 reference: i2c,
             })),
-            Self::UartDevice { uart } => Box::new(std::iter::once(ResourceRef {
+            Self::UartDevice { uart, .. } => Box::new(std::iter::once(ResourceRef {
                 resource_type: "uart",
                 reference: uart,
             })),
@@ -275,3 +277,4 @@ inventory::submit! {
         factory: || Box::new(MainConfigProvisioner),
     }
 }
+
