@@ -56,28 +56,29 @@ impl ErrorType for UartDriver {
 
 impl Read for UartDriver {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        self.uart.read(buf)
+        self.uart.read(buf).map_err(Into::into)
     }
 }
 
 impl ReadReady for UartDriver {
     fn read_ready(&mut self) -> Result<bool, Self::Error> {
-        self.uart.read_ready()
+        Ok(self.uart.read_ready())
     }
 }
 
 impl Write for UartDriver {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.uart.write(buf)
+        self.uart.write(buf).map_err(Into::into)
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
-        self.uart.flush()
+        self.uart.flush().map_err(Into::into)
     }
 }
 
 impl WriteReady for UartDriver {
     fn write_ready(&mut self) -> Result<bool, Self::Error> {
-        self.uart.write_ready()
+        Ok(self.uart.write_ready())
     }
 }
+

@@ -1,4 +1,4 @@
-use crate::parse::model::{Component, ProjectModel, UartConfig};
+use crate::parse::model::{Component, ProjectModel};
 use anyhow::{Context, Result, anyhow};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
