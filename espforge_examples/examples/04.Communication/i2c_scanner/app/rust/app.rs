@@ -1,23 +1,38 @@
+#![no_std]
+#![no_main]
+
 #[warn(unused_variables)]
 
 use crate::Context;
+use embedded_hal::i2c::I2c;
 
 pub fn setup(ctx: &mut Context) {
-  ctx.logger.info("i2c scanner Example");
-      while address <= 127 {
-        if my_i2c.probe(address) {
-            log.info("Found I2C device at address:");
-            log.print_hex(address);
-            found = true;
+    ctx.logger.info("I2C Scanner Example");
+    
+    let i2c = &mut ctx.components.my_i2c;
+    let logger = &ctx.logger;
+
+    logger.info("Scanning I2C bus...");
+
+    // Scan standard 7-bit addresses (1 to 127)
+    for address in 1..128u8 {
+        // Probe by writing 0 bytes. If the device is present, it will ACK the address.
+        match i2c.write(address, &[]) {
+            Ok(_) => {
+                logger.info(format_args!("Found device at address 0x{:02x}", address));
+            }
+            Err(_) => {
+                // Ignore errors (NACK means no device responded)
+            }
         }
-        address = address + 1;
-        delay.delay_millis(10)
+        // Small delay to not flood the log too fast
+        ctx.delay.delay_ms(10);
     }
-    if !found {
-        log.info("No i2c devices found");
-    }
+    
+    logger.info("Scan complete");
 }
 
 pub fn forever(ctx: &mut Context) {
-  delay.delay_millis(1000);
+    ctx.delay.delay_ms(1000);
 }
+

@@ -40,13 +40,13 @@ impl I2CMaster {
         let i2c_driver: I2c<'static, Blocking> = match i2c_num {
             0 => {
                 let peripheral = unsafe { esp_hal::peripherals::I2C0::steal() };
-                I2c::new(peripheral, config).unwrap()
+                I2c::new(peripheral, config).expect("i2c peripheral not created")
             },
             // Enable I2C1 only for chips that have it (ESP32, S2, S3, H2, C6)
             #[cfg(any(feature = "esp32", feature = "esp32s2", feature = "esp32s3", feature = "esp32h2", feature = "esp32c6"))]
             1 => {
                 let peripheral = unsafe { esp_hal::peripherals::I2C1::steal() };
-                I2c::new(peripheral, config).unwrap()
+                I2c::new(peripheral, config).expect("i2c peripheral not created")
             },
             _ => panic!("Invalid or unsupported I2C bus number: {}", i2c_num),
         };

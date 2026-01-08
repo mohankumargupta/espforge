@@ -197,6 +197,7 @@ pub enum Component {
     },
     I2cDevice {
         i2c: String,
+        #[serde(default)]
         address: u8,
     },
     UartDevice {

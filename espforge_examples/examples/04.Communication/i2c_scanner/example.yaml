@@ -8,6 +8,6 @@ esp32:
 
 components:
   my_i2c:
-    using: i2c
+    using: I2cDevice
     with:
       i2c: $i2c0

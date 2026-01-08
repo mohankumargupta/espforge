@@ -14,17 +14,6 @@ impl I2C {
         }
     }
 
-    /// Probes an I2C address to see if a device acknowledges it.
-    // pub fn probe(&self, address: u8) -> bool {
-    //     let mut buffer = [0u8; 1];
-    //     // Attempt to read 1 byte. If successful, the device exists.
-    //     self.master.borrow_mut().read(address, &mut buffer).is_ok()
-    // }
-    
-    // pub fn write(&self, address: u8, data: u8) {
-    //     let _ = self.master.borrow_mut().write(address, &[data]);
-    // }
-
     /// Consumes this component wrapper and returns the underlying Platform Driver.
     /// 
     /// This is used by "Devices" (e.g., Display Drivers) that need ownership 
@@ -43,3 +32,4 @@ impl I2c for I2C {
         self.master.borrow_mut().transaction(address, operations)
     }
 }
+
