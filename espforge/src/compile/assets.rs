@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Copies the Wokwi configuration files from the source to the project directory.
 pub fn copy_wokwi_files(base_dir: &Path, project_dir: &Path) -> Result<()> {
-    let files_to_check = ["diagram.json", "wokwi.toml"];
+    let files_to_check = ["diagram.json", "wokwi.toml", "chip.json", "chip.wasm"];
     for filename in files_to_check {
         let source_path = base_dir.join(filename);
         if source_path.exists() {
