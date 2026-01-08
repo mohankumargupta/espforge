@@ -3,6 +3,9 @@ pub mod delay;
 pub mod components;
 pub mod gpio; 
 pub mod bus;
+pub mod i2c;
+pub mod spi;
+pub mod uart;
 
 pub struct Context {
     pub logger: logger::Logger,

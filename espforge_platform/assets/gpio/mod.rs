@@ -1,8 +1,9 @@
 use esp_hal::{
     gpio::{AnyPin, Input, InputConfig, Level, Output, OutputConfig, Pull},
 };
+use embedded_hal::digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin};
 
-/// User-friendly GPIO output wrapper
+/// User-friendly GPIO output wrapper implementing embedded-hal traits
 pub struct GPIOOutput {
     output: Output<'static>,
 }
@@ -20,13 +21,37 @@ impl GPIOOutput {
         let any_pin = unsafe { AnyPin::steal(pin_number) };
         Self::from_pin(any_pin)
     }
-
-    pub fn set_high(&mut self) { self.output.set_high(); }
-    pub fn set_low(&mut self) { self.output.set_low(); }
-    pub fn toggle(&mut self) { self.output.toggle(); }
-    pub fn is_high(&self) -> bool { self.output.is_set_high() }
 }
 
+impl ErrorType for GPIOOutput {
+    type Error = core::convert::Infallible;
+}
+
+impl OutputPin for GPIOOutput {
+    fn set_low(&mut self) -> Result<(), Self::Error> {
+        Ok(self.output.set_low())
+    }
+
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        Ok(self.output.set_high())
+    }
+}
+
+impl StatefulOutputPin for GPIOOutput {
+    fn is_set_high(&mut self) -> Result<bool, Self::Error> {
+        Ok(self.output.is_set_high())
+    }
+
+    fn is_set_low(&mut self) -> Result<bool, Self::Error> {
+        Ok(self.output.is_set_low())
+    }
+    
+    fn toggle(&mut self) -> Result<(), Self::Error> {
+        Ok(self.output.toggle())
+    }
+}
+
+/// User-friendly GPIO input wrapper implementing embedded-hal traits
 pub struct GPIOInput {
     input: Input<'static>,
 }
@@ -45,12 +70,18 @@ impl GPIOInput {
         let any_pin = unsafe { AnyPin::steal(pin_number) };
         Self::from_pin(any_pin, pull_up, pull_down)
     }
+}
 
-    pub fn read(&self) -> Level { self.input.level() }
-    pub fn is_high(&self) -> bool { self.input.is_high() }
-    pub fn is_low(&self) -> bool { self.input.is_low() }
-    // pub async fn wait_for_low(&mut self) { self.input.wait_for_low().await; }
-    // pub async fn wait_for_high(&mut self) { self.input.wait_for_high().await; }
-    // pub async fn wait_for_rising_edge(&mut self) { self.input.wait_for_rising_edge().await; }
-    // pub async fn wait_for_falling_edge(&mut self) { self.input.wait_for_falling_edge().await; }
+impl ErrorType for GPIOInput {
+    type Error = core::convert::Infallible;
+}
+
+impl InputPin for GPIOInput {
+    fn is_high(&mut self) -> Result<bool, Self::Error> {
+        Ok(self.input.is_high())
+    }
+
+    fn is_low(&mut self) -> Result<bool, Self::Error> {
+        Ok(self.input.is_low())
+    }
 }

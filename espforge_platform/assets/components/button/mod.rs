@@ -1,5 +1,5 @@
-
 use crate::platform::gpio::GPIOInput;
+use embedded_hal::digital::InputPin;
 
 pub struct Button {
     input: GPIOInput,
@@ -12,17 +12,8 @@ impl Button {
         }
     }
 
-
-    pub fn is_button_pressed(&self) -> bool {
-        self.input.is_low()
-    }
-
-    pub async fn wait_for_press(&mut self) {
-        self.input.wait_for_falling_edge().await;
-    }
-    
-    pub async fn wait_for_release(&mut self) {
-        self.input.wait_for_rising_edge().await;
+    pub fn is_button_pressed(&mut self) -> bool {
+        // Assuming active low logic for the button
+        self.input.is_low().unwrap_or(false)
     }
 }
-

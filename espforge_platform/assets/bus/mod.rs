@@ -13,19 +13,19 @@ pub struct SpiDevice<'a> {
 }
 
 impl<'a> SpiDevice<'a> {
-    pub fn new(bus: &'a RefCell<Spi<'static, Blocking>>, cs: AnyPin<'static>) -> Self {
-        let delay = Delay::new();
-        // The CS pin must be an OutputPin for RefCellDevice.
-        // We configure it as an Output here.
-        let cs_output = Output::new(cs, Level::High, OutputConfig::default());
+    // pub fn new(bus: &'a RefCell<Spi<'static, Blocking>>, cs: AnyPin<'static>) -> Self {
+    //     let delay = Delay::new();
+    //     // The CS pin must be an OutputPin for RefCellDevice.
+    //     // We configure it as an Output here.
+    //     let cs_output = Output::new(cs, Level::High, OutputConfig::default());
         
-        // SpiRefCellDevice::new returns a Result, usually related to the CS pin's ErrorType.
-        // Since we are creating the Output here, we unwrap the result.
-        let dev = SpiRefCellDevice::new(bus, cs_output, delay)
-            .expect("Failed to create SpiRefCellDevice");
+    //     // SpiRefCellDevice::new returns a Result, usually related to the CS pin's ErrorType.
+    //     // Since we are creating the Output here, we unwrap the result.
+    //     let dev = SpiRefCellDevice::new(bus, cs_output, delay)
+    //         .expect("Failed to create SpiRefCellDevice");
             
-        Self { inner: dev }
-    }
+    //     Self { inner: dev }
+    // }
 }
 
 impl<'a> embedded_hal::spi::SpiDevice for SpiDevice<'a> {
@@ -38,16 +38,16 @@ impl<'a> embedded_hal::spi::ErrorType for SpiDevice<'a> {
     type Error = <SpiRefCellDevice<'a, Spi<'static, Blocking>, Output<'static>, Delay> as embedded_hal::spi::ErrorType>::Error;
 }
 
-pub struct I2cDevice<'a> {
-    inner: I2cRefCellDevice<'a, I2c<'static, Blocking>>,
-}
+// pub struct I2cDevice<'a> {
+//     inner: I2cRefCellDevice<'a, I2c<'static, Blocking>>,
+// }
 
-impl<'a> I2cDevice<'a> {
-    pub fn new(bus: &'a RefCell<I2c<'static, Blocking>>) -> Self {
-        let dev = I2cRefCellDevice::new(bus);
-        Self { inner: dev }
-    }
-}
+// impl<'a> I2cDevice<'a> {
+//     pub fn new(bus: &'a RefCell<I2c<'static, Blocking>>) -> Self {
+//         let dev = I2cRefCellDevice::new(bus);
+//         Self { inner: dev }
+//     }
+// }
 
 impl<'a> embedded_hal::i2c::I2c for I2cDevice<'a> {
     fn transaction(&mut self, address: u8, operations: &mut [embedded_hal::i2c::Operation<'_>]) -> Result<(), Self::Error> {
@@ -73,14 +73,14 @@ impl<'a> I2cDevice<'a> {
 }
 
 // 1. Implement ErrorType
-impl<'a> I2cErrorType for I2cDevice<'a> {
-    type Error = esp_hal::i2c::master::Error;
-}
+// impl<'a> I2cErrorType for I2cDevice<'a> {
+//     type Error = esp_hal::i2c::master::Error;
+// }
 
-// 2. Implement I2c Trait
-impl<'a> I2cTrait<u8> for I2cDevice<'a> {
-    fn transaction(&mut self, address: u8, operations: &mut [I2cOperation<'_>]) -> Result<(), Self::Error> {
-        self.inner.transaction(address, operations)
-    }
-}
+// // 2. Implement I2c Trait
+// impl<'a> I2cTrait<u8> for I2cDevice<'a> {
+//     fn transaction(&mut self, address: u8, operations: &mut [I2cOperation<'_>]) -> Result<(), Self::Error> {
+//         self.inner.transaction(address, operations)
+//     }
+// }
 
