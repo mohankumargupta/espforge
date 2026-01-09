@@ -66,22 +66,30 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
                 quote! {}
             };
 
+            let cs_cfg = if let Some(c) = cfg.cs {
+                let c_pin = format_ident!("GPIO{}", c);
+                quote! { .with_cs(p.#c_pin.degrade()) }
+            } else {
+                quote! {}
+            };
+
             init_logic.push(quote! {
                 let #field = Spi::new(
                         p.#spi_peri, 
                         esp_hal::spi::master::Config::default()
                             .with_frequency(esp_hal::time::Rate::from_khz(#freq))
                             .with_mode(Mode::_0)
-                    ).expect("can create spi peripheral")
+                    ).unwrap()
                     .with_sck(p.#sck.degrade())
                     .with_mosi(p.#mosi.degrade())
-                    #miso_cfg;
+                    #miso_cfg
+                    #cs_cfg;
             });
 
             struct_init.push(quote! { #field: RefCell::new(#field) });
         }
 
-            // 3. Generate I2C Buses
+        // 3. Generate I2C Buses
         for (name, cfg) in &esp32.i2c {
             let field = format_ident!("{}", name);
             let i2c_peri = format_ident!("I2C{}", cfg.i2c);
@@ -95,7 +103,7 @@ fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
                 let #field = I2c::new(
                         p.#i2c_peri, 
                         esp_hal::i2c::master::Config::default().with_frequency(esp_hal::time::Rate::from_khz(#freq))
-                    ).expect("can create i2c peripheral")
+                    ).unwrap()
                     .with_sda(p.#sda.degrade())
                     .with_scl(p.#scl.degrade());
             });
@@ -187,8 +195,17 @@ fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
                     init_logic.push(quote! {
                         let #field = platform::bus::SpiDevice::new(
                             &registry.#spi_ref,
-                            registry.#cs_ref.borrow_mut().take().expect("CS Pin already claimed")
+                            esp_hal::gpio::Output::new(
+                                registry.#cs_ref.borrow_mut().take().expect("CS Pin already claimed"),
+                                esp_hal::gpio::Level::High,
+                                esp_hal::gpio::OutputConfig::default()
+                            )
                         );
+                    });
+                } else {
+                    fields.push(quote! { pub #field: platform::components::spi::SPI<'a> });
+                    init_logic.push(quote! {
+                        let #field = platform::components::spi::SPI::new(&registry.#spi_ref);
                     });
                 }
             }
@@ -251,3 +268,4 @@ fn resolve_resource_ident(reference: &str) -> Result<Ident> {
         .ok_or_else(|| anyhow!("Invalid resource reference {}", reference))?;
     Ok(format_ident!("{}", name))
 }
+

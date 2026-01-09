@@ -8,7 +8,7 @@ use esp_hal::{
     time::Rate,
     Blocking,
 };
-
+use embedded_hal::spi::{ErrorType, SpiBus};
 
 pub struct SPIMaster {
     spi: Spi<'static, Blocking>,
@@ -51,11 +51,9 @@ impl SPIMaster {
         };
 
         let sck = unsafe { AnyPin::steal(sck_pin) };
-        //let miso = unsafe { AnyPin::steal(miso_pin) };
         let mosi = unsafe { AnyPin::steal(mosi_pin) };
 
         let mut driver = driver.with_sck(sck)
-            //.with_miso(miso)
             .with_mosi(mosi);
 
         if miso_pin != u8::MAX {
@@ -70,20 +68,30 @@ impl SPIMaster {
 
         SPIMaster { spi: driver }
     }
+}
 
-    pub fn write(&mut self, bytes: &[u8]) -> Result<(), esp_hal::spi::Error> {
-        self.spi.write(bytes)
+impl ErrorType for SPIMaster {
+    type Error = esp_hal::spi::Error;
+}
+
+impl SpiBus for SPIMaster {
+    fn read(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        self.spi.read(words)
     }
 
-    pub fn read(&mut self, buffer: &mut [u8]) -> Result<(), esp_hal::spi::Error> {
-        self.spi.read(buffer)
+    fn write(&mut self, words: &[u8]) -> Result<(), Self::Error> {
+        self.spi.write(words)
     }
 
-    pub fn transfer(&mut self, write: &mut[u8]) -> Result<(), esp_hal::spi::Error> {
-        self.spi.transfer(write)
+    fn transfer(&mut self, read: &mut [u8], write: &[u8]) -> Result<(), Self::Error> {
+        self.spi.transfer(read, write)
     }
 
-    pub fn into_inner(self) -> Spi<'static, Blocking> {
-        self.spi
+    fn transfer_in_place(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        self.spi.transfer_in_place(words)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.spi.flush()
     }
 }
