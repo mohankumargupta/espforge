@@ -1,13 +1,13 @@
-use crate::platform::spi::SPIMaster;
 use core::cell::RefCell;
 use embedded_hal::spi::{SpiBus, ErrorType};
+use esp_hal::{Blocking, spi::master::Spi};
 
 pub struct SPI<'a> {
-    bus: &'a RefCell<SPIMaster>,
+    bus: &'a RefCell<Spi<'static, Blocking>>
 }
 
 impl<'a> SPI<'a> {
-    pub fn new(bus: &'a RefCell<SPIMaster>) -> Self {
+    pub fn new(bus: &'a RefCell<Spi<'static, Blocking>>) -> Self {
         Self { bus }
     }
 }
@@ -26,7 +26,7 @@ impl<'a> SpiBus for SPI<'a> {
     }
 
     fn transfer(&mut self, read: &mut [u8], write: &[u8]) -> Result<(), Self::Error> {
-        self.bus.borrow_mut().transfer(read, write)
+      SpiBus::transfer(&mut *self.bus.borrow_mut(), read, write)    
     }
 
     fn transfer_in_place(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
