@@ -16,7 +16,7 @@ pub fn setup(ctx: &mut Context) {
     match spi.transfer_in_place(&mut buffer) {
         Ok(_) => {
             logger.info("Sent 0x03");
-            logger.info(format_args!("Received: 0x{:02x}", buffer[1]));
+            logger.info(format_args!("Received: {}", buffer[1]));
         }
         Err(_) => {
             logger.info("SPI Transfer failed");
