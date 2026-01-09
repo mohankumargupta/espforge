@@ -1,6 +1,3 @@
-#![no_std]
-#![no_main]
-
 #[warn(unused_variables)]
 
 use crate::Context;

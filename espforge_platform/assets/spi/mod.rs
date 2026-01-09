@@ -84,7 +84,9 @@ impl SpiBus for SPIMaster {
     }
 
     fn transfer(&mut self, read: &mut [u8], write: &[u8]) -> Result<(), Self::Error> {
-        self.spi.transfer(read, write)
+        // Use fully qualified syntax to ensure we call the trait method (2 args)
+        // instead of the inherent method (1 arg, in-place).
+        SpiBus::transfer(&mut self.spi, read, write)
     }
 
     fn transfer_in_place(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {

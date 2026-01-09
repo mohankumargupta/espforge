@@ -1,14 +1,13 @@
+use crate::platform::spi::SPIMaster;
 use core::cell::RefCell;
-use esp_hal::spi::master::Spi as HalSpi;
-use esp_hal::Blocking;
 use embedded_hal::spi::{SpiBus, ErrorType};
 
 pub struct SPI<'a> {
-    bus: &'a RefCell<HalSpi<'static, Blocking>>,
+    bus: &'a RefCell<SPIMaster>,
 }
 
 impl<'a> SPI<'a> {
-    pub fn new(bus: &'a RefCell<HalSpi<'static, Blocking>>) -> Self {
+    pub fn new(bus: &'a RefCell<SPIMaster>) -> Self {
         Self { bus }
     }
 }
