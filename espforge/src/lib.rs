@@ -1,5 +1,4 @@
 pub mod cli;
-pub mod codegen;
 pub mod compile;
 pub mod parse;
 pub mod resolve;

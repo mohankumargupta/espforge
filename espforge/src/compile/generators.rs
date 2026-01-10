@@ -1,6 +1,6 @@
-use crate::codegen::espgenerate::esp_generate;
 use crate::parse::model::ProjectModel;
 use anyhow::{Context, Result, anyhow};
+use espforge_codegen::{esp_generate, generate_components_source};
 use quote::quote;
 use std::fs;
 use std::path::Path;
@@ -12,7 +12,7 @@ pub fn generate_scaffold(model: &ProjectModel) -> Result<()> {
 
 /// Generates the generated.rs file containing component definitions
 pub fn generate_component_code(src_dir: &Path, model: &ProjectModel) -> Result<()> {
-    let components_src = crate::codegen::components::generate_components_source(model)?;
+    let components_src = generate_components_source(model)?;
     fs::write(src_dir.join("generated.rs"), components_src)
         .context("Failed to write src/generated.rs")?;
     Ok(())
