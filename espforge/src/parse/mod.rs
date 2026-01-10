@@ -10,6 +10,7 @@ pub mod components;
 pub mod esp32;
 pub mod model;
 pub mod processor;
+pub mod project;
 
 pub struct ConfigurationOrchestrator;
 
