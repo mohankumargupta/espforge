@@ -1,8 +1,8 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use anyhow::Result;
-use crate::parse::model::{ProjectModel, Component};
-use super::component_builders;
+use espforge_common::{ProjectModel, Component};
+use crate::component_builders;
 
 pub fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
     let mut fields = vec![quote! { _marker: PhantomData<&'a ()> }];

@@ -24,6 +24,8 @@ path = "src/bin/main.rs"
 required-features = ["cli"]
 
 [dependencies]
+espforge_common = { path = "../espforge_common" }
+espforge_codegen = { path = "../espforge_codegen" }
 espforge_dialogue = { version = "0.1.0", path = "../espforge_dialogue" }
 espforge_examples = { version = "0.1.0", path = "../espforge_examples" }
 espforge_macros = { version = "0.1.0", path = "../espforge_macros" }

@@ -1,6 +1,8 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use anyhow::Result;
+use espforge_common::ProjectModel;
+use crate::builders;
 
 pub fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
     let mut fields = Vec::new();
@@ -8,7 +10,6 @@ pub fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream>
     let mut struct_init = Vec::new();
 
     if let Some(esp32) = &model.esp32 {
-        // Delegate to specialized builders
         builders::spi::generate_spi_buses(
             &esp32.spi,
             &mut fields,
@@ -31,6 +32,7 @@ pub fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream>
     }
 
     Ok(quote! {
+        /// Owns the raw hardware peripherals and buses
         pub struct PeripheralRegistry {
             #(#fields),*
         }
@@ -43,4 +45,3 @@ pub fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream>
         }
     })
 }
-

@@ -2,7 +2,6 @@ use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use anyhow::Result;
 use std::collections::HashMap;
-use crate::parse::model::GpioConfig;
 
 pub fn generate_gpio_pins(
     gpio_configs: &HashMap<String, GpioConfig>,

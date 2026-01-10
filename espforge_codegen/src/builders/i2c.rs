@@ -1,8 +1,8 @@
+use espforge_common::I2cConfig;
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use anyhow::Result;
 use std::collections::HashMap;
-use crate::parse::model::I2cConfig;
 
 pub fn generate_i2c_buses(
     i2c_configs: &HashMap<String, I2cConfig>,

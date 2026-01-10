@@ -1,8 +1,8 @@
+use espforge_common::SpiConfig;
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use anyhow::Result;
 use std::collections::HashMap;
-use crate::parse::model::SpiConfig;
 
 pub fn generate_spi_buses(
     spi_configs: &HashMap<String, SpiConfig>,

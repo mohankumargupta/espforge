@@ -313,6 +313,8 @@ dependencies = [
  "clap",
  "dialogue-macro",
  "dialoguer 0.12.0",
+ "espforge_codegen",
+ "espforge_common",
  "espforge_dialogue",
  "espforge_examples",
  "espforge_macros",
@@ -337,10 +339,18 @@ name = "espforge_codegen"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "espforge_common",
  "prettyplease",
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "espforge_common"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
