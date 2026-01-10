@@ -335,6 +335,13 @@ dependencies = [
 [[package]]
 name = "espforge_codegen"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "espforge_dialogue"

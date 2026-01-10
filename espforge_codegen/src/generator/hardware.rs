@@ -1,8 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use anyhow::Result;
-use crate::parse::model::ProjectModel;
-use super::builders;
 
 pub fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
     let mut fields = Vec::new();
