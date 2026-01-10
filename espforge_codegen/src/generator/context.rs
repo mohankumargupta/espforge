@@ -1,3 +1,5 @@
+use proc_macro2::TokenStream;
+
 // generator/context.rs
 pub struct GenerationContext {
     pub fields: Vec<TokenStream>,

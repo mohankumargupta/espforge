@@ -5,7 +5,7 @@ pub mod scaffold;
 
 use anyhow::{Context, Result};
 use quote::quote;
-use espforge_model::ProjectModel;
+use espforge_common::ProjectModel;
 
 // Re-export specific items for convenience
 pub use scaffold::esp_generate;

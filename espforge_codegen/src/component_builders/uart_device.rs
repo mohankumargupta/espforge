@@ -1,7 +1,7 @@
+use espforge_common::ProjectModel;
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use anyhow::{Result, anyhow};
-use crate::parse::model::ProjectModel;
 
 pub fn generate(
     name: &str,
