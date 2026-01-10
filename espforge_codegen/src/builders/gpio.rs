@@ -1,10 +1,11 @@
+use espforge_common::GpioPinConfig;
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use anyhow::Result;
 use std::collections::HashMap;
 
 pub fn generate_gpio_pins(
-    gpio_configs: &HashMap<String, GpioConfig>,
+    gpio_configs: &HashMap<String, GpioPinConfig>,
     fields: &mut Vec<TokenStream>,
     struct_init: &mut Vec<TokenStream>,
 ) -> Result<()> {
