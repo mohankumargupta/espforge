@@ -1,0 +1,6 @@
+[package]
+name = "espforge_codegen"
+version = "0.1.0"
+edition = "2024"
+description = "Embedded examples for espforge"
+license = "MIT"

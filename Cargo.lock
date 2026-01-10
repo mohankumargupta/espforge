@@ -333,6 +333,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "espforge_codegen"
+version = "0.1.0"
+
+[[package]]
 name = "espforge_dialogue"
 version = "0.1.0"
 dependencies = [
@@ -341,6 +345,10 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "espforge_esp32metadata"
+version = "0.1.0"
 
 [[package]]
 name = "espforge_examples"
