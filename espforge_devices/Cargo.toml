@@ -6,3 +6,4 @@ description = "Devices for espforge"
 license = "MIT"
 
 [dependencies]
+espforge_platform = { path = "../espforge_platform" }

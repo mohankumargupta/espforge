@@ -81,6 +81,45 @@ pub fn provision_platform_assets(project_dir: &Path, src_dir: &Path) -> Result<(
     Ok(())
 }
 
+pub fn provision_device_assets(project_dir: &Path, src_dir: &Path, devices: &[String]) -> Result<()> {
+    if devices.is_empty() { return Ok(()); }
+
+    let temp_dir = project_dir.join(".espforge_devices_temp");
+    if temp_dir.exists() { fs::remove_dir_all(&temp_dir)?; }
+    fs::create_dir_all(&temp_dir)?;
+
+    crate::DEVICES_SRC.extract(&temp_dir).context("Failed to extract device assets")?;
+
+    // The structure of espforge_devices is src/devices/<device_name>
+    let source_devices_root = temp_dir.join("src/devices");
+    let target_devices_root = src_dir.join("devices");
+    
+    fs::create_dir_all(&target_devices_root)?;
+
+    // Create a mod.rs for the devices module
+    let mut mod_rs_content = String::new();
+
+    for device in devices {
+        let src = source_devices_root.join(device);
+        if !src.exists() {
+            println!("⚠️  Warning: Device driver '{}' not found in espforge_devices", device);
+            continue;
+        }
+
+        let dst = target_devices_root.join(device);
+        copy_recursive(&src, &dst)?;
+        
+        mod_rs_content.push_str(&format!("pub mod {};\n", device));
+        println!("   Included device driver: {}", device);
+    }
+
+    fs::write(target_devices_root.join("mod.rs"), mod_rs_content)?;
+
+    let _ = fs::remove_dir_all(temp_dir);
+    Ok(())
+}
+
+
 /// Copies the user's application logic into the generated project.
 pub fn inject_app_code(base_dir: &Path, src_dir: &Path) -> Result<()> {
     let rust_source = base_dir.join("app/rust/app.rs");
