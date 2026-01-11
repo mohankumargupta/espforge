@@ -1,0 +1,8 @@
+[package]
+name = "espforge_devices"
+version = "0.1.0"
+edition = "2024"
+description = "Devices for espforge"
+license = "MIT"
+
+[dependencies]

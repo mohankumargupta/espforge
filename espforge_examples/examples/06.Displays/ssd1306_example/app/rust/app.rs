@@ -1,0 +1,12 @@
+fun setup() {
+    log.info("Initializing OLED...")
+    oled.init()
+    oled.clear()
+    oled.print(0, 0, "Hello Ruchy!")
+    oled.flush()
+}
+
+fun forever() {
+    delay.delay_millis(1000)
+}
+
