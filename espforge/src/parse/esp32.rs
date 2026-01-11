@@ -1,4 +1,4 @@
-use crate::parse::ProjectModel;
+use crate::parse::EspforgeConfiguration;
 use crate::parse::model::Esp32Config;
 use crate::parse::processor::{ProcessorRegistration, SectionProcessor};
 use anyhow::{Context, Result, bail};
@@ -15,7 +15,7 @@ impl SectionProcessor for PlatformProvisioner {
         300
     }
 
-    fn process(&self, content: &Value, model: &mut ProjectModel) -> Result<()> {
+    fn process(&self, content: &Value, model: &mut EspforgeConfiguration) -> Result<()> {
         let esp32_config: Esp32Config = serde_yaml_ng::from_value(content.clone())
             .context("Failed to deserialize esp32 configuration")?;
 

@@ -1,10 +1,10 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use anyhow::Result;
-use espforge_common::{ProjectModel, Component};
+use espforge_common::{EspforgeConfiguration, Component};
 use crate::component_builders;
 
-pub fn generate_component_registry(model: &ProjectModel) -> Result<TokenStream> {
+pub fn generate_component_registry(model: &EspforgeConfiguration) -> Result<TokenStream> {
     let mut fields = vec![quote! { _marker: PhantomData<&'a ()> }];
     let mut init_logic = Vec::new();
     let mut struct_init = vec![quote! { _marker: PhantomData }];

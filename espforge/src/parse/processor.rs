@@ -1,14 +1,14 @@
 use anyhow::Result;
 use serde_yaml_ng::Value;
 
-use crate::parse::model::ProjectModel;
+use crate::parse::model::EspforgeConfiguration;
 
 pub trait SectionProcessor {
     fn section_key(&self) -> &'static str;
     fn priority(&self) -> u32 {
         50
     } // Default priority
-    fn process(&self, content: &Value, model: &mut ProjectModel) -> Result<()>;
+    fn process(&self, content: &Value, model: &mut EspforgeConfiguration) -> Result<()>;
 }
 
 pub struct ProcessorRegistration {

@@ -1,10 +1,10 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use anyhow::Result;
-use espforge_common::ProjectModel;
+use espforge_common::EspforgeConfiguration;
 use crate::builders;
 
-pub fn generate_peripheral_registry(model: &ProjectModel) -> Result<TokenStream> {
+pub fn generate_peripheral_registry(model: &EspforgeConfiguration) -> Result<TokenStream> {
     let mut fields = Vec::new();
     let mut init_logic = Vec::new();
     let mut struct_init = Vec::new();

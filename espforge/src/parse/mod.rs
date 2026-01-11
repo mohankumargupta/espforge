@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde_yaml_ng::Value;
 
 use crate::parse::{
-    model::ProjectModel,
+    model::EspforgeConfiguration,
     processor::{ProcessorRegistration, SectionProcessor},
 };
 
@@ -25,13 +25,13 @@ impl ConfigurationOrchestrator {
         Self {}
     }
 
-    pub fn compile(&self, yaml_text: &str) -> Result<ProjectModel> {
+    pub fn compile(&self, yaml_text: &str) -> Result<EspforgeConfiguration> {
         let raw_yaml: Value = serde_yaml_ng::from_str(yaml_text)?;
         let root_map = raw_yaml
             .as_mapping()
             .ok_or_else(|| anyhow::anyhow!("Config must be a map"))?;
 
-        let mut model = ProjectModel::default();
+        let mut model = EspforgeConfiguration::default();
 
         let mut processors: Vec<Box<dyn SectionProcessor>> =
             inventory::iter::<ProcessorRegistration>

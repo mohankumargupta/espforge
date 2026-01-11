@@ -1,4 +1,4 @@
-use espforge_common::ProjectModel;
+use espforge_common::EspforgeConfiguration;
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use anyhow::{Result, anyhow};
@@ -7,7 +7,7 @@ pub fn generate(
     name: &str,
     uart: &str,
     baud: Option<u32>,
-    model: &ProjectModel,
+    model: &EspforgeConfiguration,
     fields: &mut Vec<TokenStream>,
     init_logic: &mut Vec<TokenStream>,
     struct_init: &mut Vec<TokenStream>,

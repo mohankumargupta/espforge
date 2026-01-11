@@ -1,4 +1,4 @@
-use crate::parse::model::ProjectModel;
+use crate::parse::model::EspforgeConfiguration;
 use anyhow::{Context, Result, anyhow};
 use espforge_codegen::{esp_generate, generate_components_source};
 use quote::quote;
@@ -6,12 +6,12 @@ use std::fs;
 use std::path::Path;
 
 /// Invokes the esp-generate CLI tool to create the initial project structure
-pub fn generate_scaffold(model: &ProjectModel) -> Result<()> {
+pub fn generate_scaffold(model: &EspforgeConfiguration) -> Result<()> {
     esp_generate(model.get_name(), model.get_chip(), false)
 }
 
 /// Generates the generated.rs file containing component definitions
-pub fn generate_component_code(src_dir: &Path, model: &ProjectModel) -> Result<()> {
+pub fn generate_component_code(src_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
     let components_src = generate_components_source(model)?;
     fs::write(src_dir.join("generated.rs"), components_src)
         .context("Failed to write src/generated.rs")?;
@@ -40,7 +40,7 @@ pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
 }
 
 /// Renders and writes the main entry point (main.rs)
-pub fn generate_entry_point(src_dir: &Path, model: &ProjectModel) -> Result<()> {
+pub fn generate_entry_point(src_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
     let crate_name = model.get_name().replace('-', "_");
     let content = espforge_templates::render_main(&crate_name)
         .map_err(|e| anyhow!("Failed to render main.rs: {}", e))?;

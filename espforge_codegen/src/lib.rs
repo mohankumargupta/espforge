@@ -5,13 +5,13 @@ pub mod scaffold;
 
 use anyhow::{Context, Result};
 use quote::quote;
-use espforge_common::ProjectModel;
+use espforge_common::EspforgeConfiguration;
 
 // Re-export specific items for convenience
 pub use scaffold::esp_generate;
 
 /// Main entry point: Generates the entire `generated.rs` content
-pub fn generate_components_source(model: &ProjectModel) -> Result<String> {
+pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<String> {
     // Generate the struct that owns the raw silicon
     let hardware_struct = generator::hardware::generate_peripheral_registry(model)?;
 

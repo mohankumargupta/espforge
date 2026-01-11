@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::parse::ConfigurationOrchestrator;
-use crate::parse::model::ProjectModel;
+use crate::parse::model::EspforgeConfiguration;
 
 // Declare sub-modules
 mod assets;
@@ -17,7 +17,7 @@ pub fn compile_project(config_path: &Path) -> Result<()> {
 
 struct ProjectCompiler {
     base_dir: PathBuf,
-    model: ProjectModel,
+    model: EspforgeConfiguration,
 }
 
 impl ProjectCompiler {

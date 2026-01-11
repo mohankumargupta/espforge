@@ -1,4 +1,4 @@
-use crate::parse::ProjectModel;
+use crate::parse::EspforgeConfiguration;
 use crate::parse::processor::{ProcessorRegistration, SectionProcessor};
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -22,7 +22,7 @@ impl SectionProcessor for ProjectInfoProvisioner {
         1000
     }
 
-    fn process(&self, content: &Value, model: &mut ProjectModel) -> Result<()> {
+    fn process(&self, content: &Value, model: &mut EspforgeConfiguration) -> Result<()> {
         let config: ProjectConfig = serde_yaml_ng::from_value(content.clone())
             .context("Failed to deserialize espforge configuration")?;
 

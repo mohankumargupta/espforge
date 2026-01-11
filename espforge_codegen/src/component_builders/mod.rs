@@ -1,4 +1,4 @@
-use espforge_common::ProjectModel;
+use espforge_common::EspforgeConfiguration;
 use proc_macro2::TokenStream;
 use anyhow::Result;
 
@@ -15,7 +15,7 @@ pub trait ComponentGenerator {
     fn generate(
         &self,
         name: &str,
-        model: &ProjectModel,
+        model: &EspforgeConfiguration,
         fields: &mut Vec<TokenStream>,
         init_logic: &mut Vec<TokenStream>,
         struct_init: &mut Vec<TokenStream>,

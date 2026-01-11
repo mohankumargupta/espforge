@@ -6,14 +6,14 @@ use std::collections::HashMap;
 // ============================================================================
 
 #[derive(Debug, Default)]
-pub struct ProjectModel {
+pub struct EspforgeConfiguration {
     pub name: String,
     pub chip: String,
     pub esp32: Option<Esp32Config>,
     pub components: HashMap<String, Component>,
 }
 
-impl ProjectModel {
+impl EspforgeConfiguration {
     pub fn get_name(&self) -> &str {
         if self.name.is_empty() {
             "espforge_project"
