@@ -6,7 +6,7 @@ use crate::generator::utils;
 pub fn generate(
     name: &str,
     gpio: &str,
-    pull_up: bool,
+    pull_up: Option<bool>,
     fields: &mut Vec<TokenStream>,
     init_logic: &mut Vec<TokenStream>,
     struct_init: &mut Vec<TokenStream>,
