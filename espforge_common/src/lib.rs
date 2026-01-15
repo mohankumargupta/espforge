@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod hardware;
+
+pub use hardware::ResolvePeripheral;
+pub use hardware::gpio::{GpioPinConfig, PinDirection, GpioRef};
+pub use hardware::spi::{SpiConfig, SpiRef};
+pub use hardware::i2c::{I2cConfig, I2cRef};
+pub use hardware::uart::{UartConfig, UartRef};
+
+
 // ============================================================================
 // Project Model
 // ============================================================================
@@ -26,11 +35,21 @@ impl EspforgeConfiguration {
         &self.chip
     }
 
-    pub fn resolve<T>(&self, reference: &str) -> Option<&T>
-    where
-        Esp32Config: AsRef<HashMap<String, T>>,
+    pub fn resolve<'a, R>(&'a self, reference: &R) -> Result<&'a R::Config, hardware::ResolutionError> 
+        where R: ResolvePeripheral<'a> 
     {
-        self.esp32.as_ref()?.resolve(reference)
+        let raw = reference.as_str();
+        let name = raw.strip_prefix('$')
+            .ok_or_else(|| hardware::ResolutionError::InvalidPrefix(raw.to_string()))?;
+        
+        let map = R::get_map(self)
+            .ok_or_else(|| hardware::ResolutionError::MissingSection(R::section_name()))?;
+        
+        map.get(name).ok_or_else(|| hardware::ResolutionError::NotFound { 
+            name: name.to_string(), 
+            section: R::section_name(),
+            available: map.keys().cloned().collect()
+        })
     }
 }
 
@@ -50,117 +69,10 @@ pub struct Esp32Config {
     pub uart: HashMap<String, UartConfig>,
 }
 
-pub trait ResourceResolver {
-    fn resolve<T>(&self, reference: &str) -> Option<&T>
-    where
-        Self: AsRef<HashMap<String, T>>;
-}
-
-impl ResourceResolver for Esp32Config {
-    fn resolve<T>(&self, reference: &str) -> Option<&T>
-    where
-        Self: AsRef<HashMap<String, T>>,
-    {
-        reference
-            .strip_prefix('$')
-            .and_then(|name| self.as_ref().get(name))
-    }
-}
-
-macro_rules! impl_as_ref_for_esp32 {
-    ($($type:ty => $field:ident),+ $(,)?) => {
-        $(
-            impl AsRef<HashMap<String, $type>> for Esp32Config {
-                fn as_ref(&self) -> &HashMap<String, $type> {
-                    &self.$field
-                }
-            }
-        )+
-    };
-}
-
-impl_as_ref_for_esp32! {
-    GpioPinConfig => gpio,
-    SpiConfig => spi,
-    I2cConfig => i2c,
-    UartConfig => uart,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct UartConfig {
-    #[serde(default)]
-    pub uart: u8,
-    pub tx: u8,
-    pub rx: u8,
-    #[serde(default = "default_uart_baud")]
-    pub baud: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct SpiConfig {
-    #[serde(default)]
-    pub spi: u8,
-    #[serde(default)]
-    pub miso: Option<u8>,
-    pub mosi: u8,
-    pub sck: u8,
-    #[serde(default)]
-    pub cs: Option<u8>,
-    #[serde(
-        default = "default_spi_frequency",
-        alias = "frequency_kHz",
-        alias = "frequency_khz"
-    )]
-    pub frequency: u32,
-    #[serde(default)]
-    pub mode: u8,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct I2cConfig {
-    #[serde(default)]
-    pub i2c: u8,
-    pub sda: u8,
-    pub scl: u8,
-    #[serde(
-        default = "default_i2c_frequency",
-        alias = "frequency_kHz",
-        alias = "frequency_khz"
-    )]
-    pub frequency: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
-pub struct GpioPinConfig {
-    pub pin: u8,
-    pub direction: PinDirection,
-    #[serde(default)]
-    pub pullup: bool,
-    #[serde(default)]
-    pub pulldown: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
-pub enum PinDirection {
-    Input,
-    Output,
-}
-
-fn default_i2c_frequency() -> u32 {
-    100
-}
-fn default_spi_frequency() -> u32 {
-    1000
-}
-fn default_uart_baud() -> u32 {
-    9600
-}
-
 // ============================================================================
 // Component System
 // ============================================================================
-
+/* 
 pub trait ComponentResource {
     type ResourceRefs<'a>: Iterator<Item = ResourceRef<'a>>
     where
@@ -237,3 +149,4 @@ impl ComponentResource for Component {
     }
 }
 
+*/
