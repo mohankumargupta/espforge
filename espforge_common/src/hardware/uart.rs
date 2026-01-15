@@ -17,6 +17,12 @@ fn default_uart_baud() -> u32 { 9600 }
 
 pub struct UartRef<'a>(pub &'a str);
 
+impl<'a> AsRef<str> for UartRef<'a> {
+    fn as_ref(&self) -> &str {
+        self.0
+    }
+}
+
 impl<'a> ResolvePeripheral<'a> for UartRef<'a> {
     type Config = UartConfig;
 

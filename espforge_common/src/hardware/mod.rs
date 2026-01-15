@@ -41,7 +41,7 @@ pub struct Esp32Config {
     pub uart: HashMap<String, UartConfig>,
 }
 
-pub trait ResolvePeripheral<'a> {
+pub trait ResolvePeripheral<'a>: AsRef<str> {
     type Config;
 
     /// Returns the map containing the configs for this peripheral type

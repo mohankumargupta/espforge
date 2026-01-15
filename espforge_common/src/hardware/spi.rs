@@ -27,6 +27,12 @@ fn default_spi_frequency() -> u32 { 1000 }
 
 pub struct SpiRef<'a>(pub &'a str);
 
+impl<'a> AsRef<str> for SpiRef<'a> {
+    fn as_ref(&self) -> &str {
+        self.0
+    }
+}
+
 impl<'a> ResolvePeripheral<'a> for SpiRef<'a> {
     type Config = SpiConfig;
 

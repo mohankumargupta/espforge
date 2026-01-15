@@ -22,6 +22,12 @@ pub enum PinDirection {
 
 pub struct GpioRef<'a>(pub &'a str);
 
+impl<'a> AsRef<str> for GpioRef<'a> {
+    fn as_ref(&self) -> &str {
+        self.0
+    }
+}
+
 impl<'a> ResolvePeripheral<'a> for GpioRef<'a> {
     type Config = GpioPinConfig;
 

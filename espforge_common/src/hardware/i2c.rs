@@ -21,6 +21,12 @@ fn default_i2c_frequency() -> u32 { 100 }
 
 pub struct I2cRef<'a>(pub &'a str);
 
+impl<'a> AsRef<str> for I2cRef<'a> {
+    fn as_ref(&self) -> &str {
+        self.0
+    }
+}
+
 impl<'a> ResolvePeripheral<'a> for I2cRef<'a> {
     type Config = I2cConfig;
 
