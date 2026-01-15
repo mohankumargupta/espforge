@@ -1,15 +1,17 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod hardware;
+pub mod components;
 
-pub use hardware::ResolvePeripheral;
-pub use hardware::gpio::{GpioPinConfig, PinDirection, GpioRef};
-pub use hardware::spi::{SpiConfig, SpiRef};
-pub use hardware::i2c::{I2cConfig, I2cRef};
-pub use hardware::uart::{UartConfig, UartRef};
-
-
+pub use hardware::{
+    ResolvePeripheral,
+    Esp32Config,
+    GpioPinConfig, PinDirection, GpioRef,
+    SpiConfig, SpiRef,
+    I2cConfig, I2cRef,
+    UartConfig, UartRef,
+};
+pub use components::{Component, ComponentResource, ResourceRef};
 // ============================================================================
 // Project Model
 // ============================================================================
@@ -53,100 +55,3 @@ impl EspforgeConfiguration {
     }
 }
 
-// ============================================================================
-// Core Configuration Structures
-// ============================================================================
-
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct Esp32Config {
-    #[serde(default)]
-    pub gpio: HashMap<String, GpioPinConfig>,
-    #[serde(default)]
-    pub spi: HashMap<String, SpiConfig>,
-    #[serde(default)]
-    pub i2c: HashMap<String, I2cConfig>,
-    #[serde(default)]
-    pub uart: HashMap<String, UartConfig>,
-}
-
-// ============================================================================
-// Component System
-// ============================================================================
-/* 
-pub trait ComponentResource {
-    type ResourceRefs<'a>: Iterator<Item = ResourceRef<'a>>
-    where
-        Self: 'a;
-    fn resource_refs(&self) -> Self::ResourceRefs<'_>;
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ResourceRef<'a> {
-    pub resource_type: &'static str,
-    pub reference: &'a str,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "using", content = "with")]
-pub enum Component {
-    LED {
-        gpio: String,
-    },
-    Button {
-        gpio: String,
-        #[serde(default)]
-        pull_up: bool,
-    },
-    SpiDevice {
-        spi: String,
-        #[serde(default)]
-        cs: Option<String>,
-    },
-    I2cDevice {
-        i2c: String,
-        #[serde(default)]
-        address: u8,
-    },
-    UartDevice {
-        uart: String,
-        #[serde(default)]
-        baud: Option<u32>,
-    },
-}
-
-impl ComponentResource for Component {
-    type ResourceRefs<'a> = Box<dyn Iterator<Item = ResourceRef<'a>> + 'a>;
-
-    fn resource_refs(&self) -> Self::ResourceRefs<'_> {
-        match self {
-            Self::LED { gpio } | Self::Button { gpio, .. } => {
-                Box::new(std::iter::once(ResourceRef {
-                    resource_type: "gpio",
-                    reference: gpio,
-                }))
-            }
-            Self::SpiDevice { spi, cs } => {
-                let spi_ref = ResourceRef {
-                    resource_type: "spi",
-                    reference: spi,
-                };
-                Box::new(
-                    std::iter::once(spi_ref).chain(cs.iter().map(|cs_ref| ResourceRef {
-                        resource_type: "gpio",
-                        reference: cs_ref,
-                    })),
-                )
-            }
-            Self::I2cDevice { i2c, .. } => Box::new(std::iter::once(ResourceRef {
-                resource_type: "i2c",
-                reference: i2c,
-            })),
-            Self::UartDevice { uart, .. } => Box::new(std::iter::once(ResourceRef {
-                resource_type: "uart",
-                reference: uart,
-            })),
-        }
-    }
-}
-
-*/

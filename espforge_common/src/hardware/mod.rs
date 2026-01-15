@@ -1,11 +1,17 @@
 use crate::EspforgeConfiguration;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod gpio;
 pub mod i2c;
 pub mod spi;
 pub mod uart;
+
+pub use gpio::{GpioPinConfig, GpioRef, PinDirection};
+pub use i2c::{I2cConfig, I2cRef};
+pub use spi::{SpiConfig, SpiRef};
+pub use uart::{UartConfig, UartRef};
 
 #[derive(Debug, Error)]
 pub enum ResolutionError {
@@ -21,6 +27,18 @@ pub enum ResolutionError {
         section: &'static str,
         available: Vec<String>,
     },
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct Esp32Config {
+    #[serde(default)]
+    pub gpio: HashMap<String, GpioPinConfig>,
+    #[serde(default)]
+    pub spi: HashMap<String, SpiConfig>,
+    #[serde(default)]
+    pub i2c: HashMap<String, I2cConfig>,
+    #[serde(default)]
+    pub uart: HashMap<String, UartConfig>,
 }
 
 pub trait ResolvePeripheral<'a> {
