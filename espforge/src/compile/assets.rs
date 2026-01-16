@@ -66,9 +66,9 @@ pub fn provision_platform_assets(project_dir: &Path, src_dir: &Path) -> Result<(
     fs::create_dir_all(&platform_temp)?;
 
     // Access the embedded directory defined in lib.rs
-    crate::PLATFORM_SRC
-        .extract(&platform_temp)
-        .context("Failed to extract platform assets")?;
+    // crate::PLATFORM_SRC
+    //     .extract(&platform_temp)
+    //     .context("Failed to extract platform assets")?;
 
     let assets_dir = platform_temp.join("assets");
     let platform_dest = src_dir.join("platform");

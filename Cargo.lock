@@ -372,7 +372,6 @@ version = "0.1.0"
 name = "espforge_examples"
 version = "0.1.0"
 dependencies = [
- "espforge_platform",
  "include_dir",
 ]
 
@@ -384,10 +383,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "espforge_platform"
-version = "0.1.0"
 
 [[package]]
 name = "espforge_python_app"
