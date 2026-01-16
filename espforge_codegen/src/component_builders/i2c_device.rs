@@ -14,10 +14,10 @@ pub fn generate(
     let field = format_ident!("{}", name);
     let i2c_ref = utils::resolve_resource_ident(i2c)?;
 
-    fields.push(quote! { pub #field: platform::bus::I2cDevice<'a> });
+    fields.push(quote! { pub #field: espforge_platform::bus::I2cDevice<'a> });
     
     init_logic.push(quote! {
-       let #field = platform::bus::I2cDevice::new(&registry.#i2c_ref);
+       let #field = espforge_platform::bus::I2cDevice::new(&registry.#i2c_ref);
     });
     
     struct_init.push(quote! { #field });

@@ -27,6 +27,10 @@ pub fn add_dependencies(project_dir: &Path) -> Result<()> {
                 target_deps[dep_name] = dep_value.clone();
             }
         }
+
+        let mut platform_dep = toml_edit::InlineTable::default();
+        platform_dep.get_or_insert("path", "espforge_platform");
+        target_deps.insert("espforge_platform", toml_edit::value(platform_dep));
     }        
     
     fs::write(cargo_path, doc.to_string()).context("Failed to write Cargo.toml")?;

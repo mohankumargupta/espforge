@@ -33,7 +33,7 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
         use core::marker::PhantomData;
 
         // Platform dependencies for the Component Registry
-        use crate::platform;
+        use espforge_platform as platform;
 
         #hardware_struct
 

@@ -26,10 +26,10 @@ pub fn generate(
     let rx_pin = cfg.rx;
     let baud_rate = baud.unwrap_or(cfg.baud);
 
-    fields.push(quote! { pub #field: platform::components::uart::Uart });
+    fields.push(quote! { pub #field: espforge_platform::components::uart::Uart });
     
     init_logic.push(quote! {
-        let #field = platform::components::uart::Uart::new(
+        let #field = espforge_platform::components::uart::Uart::new(
             #uart_num,
             #tx_pin,
             #rx_pin,

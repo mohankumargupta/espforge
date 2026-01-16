@@ -16,7 +16,8 @@ pub fn render_main(crate_name: &str) -> Result<String, Box<dyn Error>> {
         use esp_backtrace as _;
         use esp_hal::main;
 
-        use #crate_ident::{Context, app, generated, platform};
+        use #crate_ident::{Context, app, generated};
+        use espforge_platform as platform;
         use static_cell::StaticCell;
         static REGISTRY: StaticCell<generated::PeripheralRegistry> = StaticCell::new();
 

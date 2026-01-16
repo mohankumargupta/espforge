@@ -23,7 +23,6 @@ pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
     let tokens = quote! {
         #![no_std]
         pub mod app;
-        pub mod platform;
         pub mod generated;
 
         pub mod prelude {
@@ -39,12 +38,16 @@ pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
         pub use prelude::*;     
 
         pub struct Context {
-            pub logger: platform::logger::Logger,
-            pub delay: platform::delay::Delay,
+            pub logger: espforge_platform::logger::Logger,
+            pub delay: espforge_platform::delay::Delay,
             pub components: generated::Components<'static>,
         }
     };
-    fs::write(src_dir.join("lib.rs"), tokens.to_string())
+// Parse the tokens into a Syntax Tree and then pretty-print it
+    let syntax_tree = syn::parse2(tokens).context("Failed to parse generated library structure")?;
+    let formatted = prettyplease::unparse(&syntax_tree);
+
+    fs::write(src_dir.join("lib.rs"), formatted)
         .context("Failed to write src/lib.rs")?;
     Ok(())
 }
