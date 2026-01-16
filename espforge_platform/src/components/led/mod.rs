@@ -1,4 +1,4 @@
-use crate::platform::gpio::GPIOOutput;
+use crate::gpio::GPIOOutput;
 use embedded_hal::digital::{OutputPin, StatefulOutputPin};
 
 pub struct LED {

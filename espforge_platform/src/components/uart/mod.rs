@@ -1,4 +1,4 @@
-use crate::platform::uart::UartDriver;
+use crate::uart::UartDriver;
 use core::str;
 use embedded_io::{ErrorType, Read, Write, ReadReady};
 

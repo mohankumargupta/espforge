@@ -1,4 +1,4 @@
-use crate::platform::gpio::GPIOInput;
+use crate::gpio::GPIOInput;
 use embedded_hal::digital::InputPin;
 
 pub struct Button {

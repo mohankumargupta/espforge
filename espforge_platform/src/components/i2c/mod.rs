@@ -1,4 +1,4 @@
-use crate::platform::i2c::I2CMaster;
+use crate::i2c::I2CMaster;
 use core::cell::RefCell;
 use embedded_hal::i2c::{ErrorType, I2c, Operation};
 
