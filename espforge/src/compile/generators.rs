@@ -26,7 +26,17 @@ pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
         pub mod platform;
         pub mod generated;
 
-        pub use platform::*;
+        pub mod prelude {
+            pub use embedded_hal::digital::{InputPin, OutputPin, StatefulOutputPin};
+            pub use embedded_hal::delay::DelayNs;
+            pub use embedded_hal::i2c::I2c;
+            pub use embedded_hal::spi::SpiBus;
+            pub use esp_hal::time::Rate;
+            
+            pub use super::generated::ergonomics::*;
+        }   
+
+        pub use prelude::*;     
 
         pub struct Context {
             pub logger: platform::logger::Logger,

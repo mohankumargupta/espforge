@@ -23,7 +23,7 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
         #[allow(unused_imports)]
 
         use esp_hal::{
-            gpio::{AnyPin, Io},
+            gpio::{AnyPin, Io, Pin, Output, Input, Level, OutputConfig, InputConfig, Pull},
             spi::{master::Spi, Mode},
             i2c::master::I2c,
             peripherals::Peripherals,
@@ -37,6 +37,44 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
         use crate::platform;
 
         #hardware_struct
+
+        pub mod ergonomics {
+            use embedded_hal::digital::{StatefulOutputPin, InputPin, OutputPin};
+
+            /// Adds simple .on() .off() .toggle() methods that panic on error
+            /// instead of returning Result.
+            pub trait EasyOutput: StatefulOutputPin {
+                fn on(&mut self) {
+                    self.set_high().unwrap_or_else(|_| panic!("GPIO Error"));
+                }
+                
+                fn off(&mut self) {
+                    self.set_low().unwrap_or_else(|_| panic!("GPIO Error"));
+                }
+                
+                fn toggle(&mut self) {
+                    StatefulOutputPin::toggle(self).unwrap_or_else(|_| panic!("GPIO Error"));
+                }
+            }
+
+            // Blanket implementation: This applies the trait to ANY pin that implements the standard trait
+            impl<T: StatefulOutputPin> EasyOutput for T {}
+            
+            /// Adds simple .is_pressed() logic
+            pub trait EasyInput: InputPin {
+                fn is_pressed(&mut self) -> bool {
+                    // Default to active low (pull-up) common for buttons
+                    self.is_low().unwrap_or(false)
+                }
+
+                fn is_released(&mut self) -> bool {
+                    self.is_high().unwrap_or(false)
+                }
+            }
+            
+            impl<T: InputPin> EasyInput for T {}
+        }
+        
 
         #components_struct
     };

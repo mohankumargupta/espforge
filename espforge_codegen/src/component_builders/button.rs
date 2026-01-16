@@ -14,15 +14,19 @@ pub fn generate(
     let field = format_ident!("{}", name);
     let pin_ref = utils::resolve_resource_ident(gpio)?;
 
-    fields.push(quote! { pub #field: platform::components::button::Button });
+    let pull = if pull_up.unwrap_or(false) {
+        quote! { Pull::Up }
+    } else {
+        quote! { Pull::None }
+    };
+
+    // Use raw HAL Input type instead of opaque wrapper
+    fields.push(quote! { pub #field: Input<'static> });
     
     init_logic.push(quote! {
-        let #field = platform::components::button::Button::new(
-            platform::gpio::GPIOInput::from_pin(
-                registry.#pin_ref.borrow_mut().take().expect("Pin already claimed"),
-                #pull_up,
-                false
-            )
++        let #field = Input::new(
++            registry.#pin_ref.borrow_mut().take().expect("Pin already claimed"),
++            InputConfig::default().with_pull(#pull)
         );
     });
     
