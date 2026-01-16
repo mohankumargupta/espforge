@@ -29,7 +29,7 @@ pub fn add_dependencies(project_dir: &Path) -> Result<()> {
         }
 
         let mut platform_dep = toml_edit::InlineTable::default();
-        platform_dep.get_or_insert("version", "0.1.0");
+        platform_dep.get_or_insert("version", "0.1.1");
         target_deps.insert("espforge_platform", toml_edit::value(platform_dep));        
     }        
     
