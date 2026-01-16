@@ -31,7 +31,6 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
         };
         use core::cell::RefCell;
         use core::marker::PhantomData;
-        use esp_hal::gpio::Pin;
 
         // Platform dependencies for the Component Registry
         use crate::platform;
