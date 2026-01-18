@@ -1,5 +1,5 @@
 use crate::parse::EspforgeConfiguration;
-use crate::parse::model::Device;
+use espforge_common::Device;
 use crate::parse::processor::{ProcessorRegistration, SectionProcessor};
 use anyhow::{Context, Result};
 use serde_yaml_ng::Value;
