@@ -60,10 +60,6 @@ pub fn provision_platform_assets(project_dir: &Path, _src_dir: &Path) -> Result<
     let lib_dir = project_dir.join("lib");
     fs::create_dir_all(&lib_dir)?;
 
-    crate::PLATFORM_SRC
-        .extract(lib_dir.join("espforge_platform"))
-        .context("Failed to extract platform assets")?;
-
     crate::DEVICES_SRC
         .extract(lib_dir.join("espforge_devices"))
         .context("Failed to extract devices assets")?;
