@@ -1,4 +1,4 @@
-use ssd1306::{prelude::*, I2CInterface, Ssd1306, mode::BufferedGraphicsMode};
+use ssd1306::{prelude::*, Ssd1306, mode::BufferedGraphicsMode};
 use embedded_graphics::{
     mono_font::{ascii::FONT_6X10, MonoTextStyleBuilder},
     pixelcolor::BinaryColor,
