@@ -4,13 +4,23 @@ use esp_hal::{
     i2c::master::I2c,
     gpio::{Output},
     Blocking,
-    delay::Delay,
+    delay::Delay as HalDelay,
 };
 use embedded_hal_bus::{spi::RefCellDevice as SpiRefCellDevice, i2c::RefCellDevice as I2cRefCellDevice};
 
 pub struct SpiDevice<'a> {
-    inner: SpiRefCellDevice<'a, Spi<'static, Blocking>, Output<'static>, Delay>,
+    inner: SpiRefCellDevice<'a, Spi<'static, Blocking>, Output<'static>, HalDelay>,
 }
+
+impl<'a> SpiDevice<'a> {
+    pub fn new(bus: &'a RefCell<Spi<'static, Blocking>>, cs: Output<'static>) -> Self {
+        let delay = HalDelay::new();
+        Self {
+            inner: SpiRefCellDevice::new(bus, cs, delay)
+        }
+    }
+}
+ 
 
 
 impl<'a> embedded_hal::spi::SpiDevice for SpiDevice<'a> {
@@ -20,7 +30,7 @@ impl<'a> embedded_hal::spi::SpiDevice for SpiDevice<'a> {
 }
 
 impl<'a> embedded_hal::spi::ErrorType for SpiDevice<'a> {
-    type Error = <SpiRefCellDevice<'a, Spi<'static, Blocking>, Output<'static>, Delay> as embedded_hal::spi::ErrorType>::Error;
+    type Error = <SpiRefCellDevice<'a, Spi<'static, Blocking>, Output<'static>, HalDelay> as embedded_hal::spi::ErrorType>::Error;
 }
 
 impl<'a> embedded_hal::i2c::I2c for I2cDevice<'a> {

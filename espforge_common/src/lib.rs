@@ -11,7 +11,7 @@ pub use hardware::{
     I2cConfig, I2cRef,
     UartConfig, UartRef,
 };
-pub use components::{Component, ComponentResource, ResourceRef};
+pub use components::{Component, ComponentResource, Device, ResourceRef};
 // ============================================================================
 // Project Model
 // ============================================================================
@@ -22,6 +22,7 @@ pub struct EspforgeConfiguration {
     pub chip: String,
     pub esp32: Option<Esp32Config>,
     pub components: HashMap<String, Component>,
+    pub devices: HashMap<String, Device>,
 }
 
 impl EspforgeConfiguration {

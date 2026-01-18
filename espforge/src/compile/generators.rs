@@ -41,6 +41,7 @@ pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
             pub logger: espforge_platform::logger::Logger,
             pub delay: espforge_platform::delay::Delay,
             pub components: generated::Components<'static>,
+            pub devices: generated::Devices<'static>,
         }
     };
 // Parse the tokens into a Syntax Tree and then pretty-print it
