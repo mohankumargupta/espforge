@@ -3,16 +3,20 @@ use std::fs;
 use std::path::Path;
 
 pub fn copy_wokwi_files(base_dir: &Path, project_dir: &Path) -> Result<()> {
-    let filename = "wokwi.toml";
-    let source_path = base_dir.join(filename);
-    
-    if source_path.exists() {
-        let dest_path = project_dir.join(filename);
-        fs::copy(&source_path, &dest_path)
-            .with_context(|| format!("Failed to copy {} to project", filename))?;
-        println!("   Included custom file: {}", filename);
+    // List of files to copy if they exist in the source directory
+    let files_to_copy = ["wokwi.toml", "diagram.json", "chip.json", "chip.wasm"];
+
+    for filename in files_to_copy {
+        let source_path = base_dir.join(filename);
+        if source_path.exists() {
+            let dest_path = project_dir.join(filename);
+            fs::copy(&source_path, &dest_path)
+                .with_context(|| format!("Failed to copy {} to project", filename))?;
+            println!("   Included custom file: {}", filename);
+        }
     }
 
+    // If chip files are present (just copied), ensure wokwi.toml is updated to load them
     let chip_wasm = project_dir.join("chip.wasm");
     let chip_json = project_dir.join("chip.json");
     if chip_wasm.exists() && chip_json.exists() {
