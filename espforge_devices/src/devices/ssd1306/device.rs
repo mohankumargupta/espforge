@@ -1,4 +1,4 @@
-use ssd1306::{prelude::*, Ssd1306, mode::BufferedGraphicsMode};
+use ssd1306::{prelude::*,I2CDisplayInterface, Ssd1306, mode::BufferedGraphicsMode};
 use embedded_graphics::{
     mono_font::{ascii::FONT_6X10, MonoTextStyleBuilder},
     pixelcolor::BinaryColor,
@@ -10,7 +10,7 @@ use embedded_hal::i2c::I2c;
 
 pub struct SSD1306Device<I> {
     display: Ssd1306<
-        I2Interface<I>,  
+        I2CInterface<I>,  
         DisplaySize128x64, 
         BufferedGraphicsMode<DisplaySize128x64>
     >,
@@ -19,7 +19,7 @@ pub struct SSD1306Device<I> {
 
 impl<I: I2c> SSD1306Device<I> {
     pub fn new(i2c: I) -> Self {
-        let interface = I2CInterface::new(i2c);
+        let interface = I2CDisplayInterface::new(i2c);
         
         let display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
             .into_buffered_graphics_mode();
