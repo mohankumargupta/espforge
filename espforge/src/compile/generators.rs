@@ -55,8 +55,8 @@ pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
 
 /// Renders and writes the main entry point (main.rs)
 pub fn generate_entry_point(src_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
-    let crate_name = model.get_name().replace('-', "_");
-    let content = espforge_templates::render_main(&crate_name)
+    let crate_name = quote::format_ident!("{}", model.get_name().replace('-', "_"));    
+     let content = espforge_templates::render_main(&crate_name.to_string())
         .map_err(|e| anyhow!("Failed to render main.rs: {}", e))?;
 
     let path = src_dir.join("bin/main.rs");

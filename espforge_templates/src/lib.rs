@@ -35,7 +35,7 @@ pub fn render_main(crate_name: &str) -> Result<String, Box<dyn Error>> {
             let components = generated::Components::new(registry);
 
             let mut delay = platform::delay::Delay::new();
-+           let mut devices = generated::Devices::new(&components, registry, &mut delay);
+            let mut devices = generated::Devices::new(&components, registry, &mut delay);
 
             let mut ctx = Context {
                 logger: platform::logger::Logger::new(),

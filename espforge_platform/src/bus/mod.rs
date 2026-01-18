@@ -17,7 +17,7 @@ impl<'a> SpiDevice<'a> {
     pub fn new(bus: &'a RefCell<Spi<'static, Blocking>>, cs: Output<'static>) -> Self {
         let delay = HalDelay::new();
         Self {
-            inner: SpiRefCellDevice::new(bus, cs, delay),
+            inner: SpiRefCellDevice::new(bus, cs, delay).expect("SPI device initialization failed"),
             bus,        }
     }
 
