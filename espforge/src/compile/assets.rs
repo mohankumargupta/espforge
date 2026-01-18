@@ -93,24 +93,3 @@ pub fn inject_app_code(base_dir: &Path, src_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Helper to copy directories recursively
-fn copy_recursive(src: &Path, dst: &Path) -> Result<()> {
-    if !dst.exists() {
-        fs::create_dir_all(dst)?;
-    }
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let target_path = dst.join(entry.file_name());
-
-        if file_type.is_dir() {
-            copy_recursive(&entry.path(), &target_path)?;
-        } else if entry.file_name() == "lib.rs" {
-            // Rename internal lib.rs to mod.rs when moving to submodules
-            fs::copy(entry.path(), dst.join("mod.rs"))?;
-        } else {
-            fs::copy(entry.path(), target_path)?;
-        }
-    }
-    Ok(())
-}
