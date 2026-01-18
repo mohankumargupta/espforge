@@ -10,15 +10,21 @@ use embedded_hal_bus::{spi::RefCellDevice as SpiRefCellDevice, i2c::RefCellDevic
 
 pub struct SpiDevice<'a> {
     inner: SpiRefCellDevice<'a, Spi<'static, Blocking>, Output<'static>, HalDelay>,
+    bus: &'a RefCell<Spi<'static, Blocking>>,
 }
 
 impl<'a> SpiDevice<'a> {
     pub fn new(bus: &'a RefCell<Spi<'static, Blocking>>, cs: Output<'static>) -> Self {
         let delay = HalDelay::new();
         Self {
-            inner: SpiRefCellDevice::new(bus, cs, delay)
-        }
+            inner: SpiRefCellDevice::new(bus, cs, delay),
+            bus,        }
     }
+
+    pub fn bus(&self) -> &'a RefCell<Spi<'static, Blocking>> {
+        self.bus
+    }    
+
 }
  
 
@@ -46,13 +52,18 @@ impl<'a> embedded_hal::i2c::ErrorType for I2cDevice<'a> {
 pub struct I2cDevice<'a> {
     // RefCellDevice handles the borrowing logic for us
     inner: I2cRefCellDevice<'a, I2c<'static, Blocking>>,
+    bus: &'a RefCell<I2c<'static, Blocking>>,
 }
 
 impl<'a> I2cDevice<'a> {
     pub fn new(bus: &'a RefCell<I2c<'static, Blocking>>) -> Self {
         // embedded-hal-bus creates a device that borrows the bus only during transactions
         let dev = I2cRefCellDevice::new(bus);
-        Self { inner: dev }
+        Self { inner: dev, bus }
+    }
+
+    pub fn bus(&self) -> &'a RefCell<I2c<'static, Blocking>> {
+        self.bus
     }
 }
 

@@ -22,9 +22,11 @@ pub fn generate(
         init_logic.push(quote! {
             let #field = espforge_platform::bus::SpiDevice::new(
                 &registry.#spi_ref,
-                espforge_platform::gpio::GPIOOutput::from_pin(
-                    registry.#cs_ref.borrow_mut().take().expect("CS Pin already claimed")
-                )
+                Output::new(
+                    registry.#cs_ref.borrow_mut().take().expect("CS Pin already claimed"),
+                    Level::High,
+                    OutputConfig::default()
+                 )
             );
         });
     } else {

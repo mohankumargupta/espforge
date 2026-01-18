@@ -10,6 +10,10 @@ impl<'a> SPI<'a> {
     pub fn new(bus: &'a RefCell<Spi<'static, Blocking>>) -> Self {
         Self { bus }
     }
+
+    pub fn bus(&self) -> &'a RefCell<Spi<'static, Blocking>> {
+        self.bus
+    }
 }
 
 impl<'a> ErrorType for SPI<'a> {

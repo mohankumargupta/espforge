@@ -24,7 +24,7 @@ pub fn generate_device_registry(model: &EspforgeConfiguration) -> Result<TokenSt
                 
                 init_logic.push(quote! {
                     let #field_name = {
-                        let bus_wrapper = espforge_platform::bus::I2cDevice::new(&components.#comp_ref);
+                        let bus_wrapper = espforge_platform::bus::I2cDevice::new(components.#comp_ref.bus());
                         espforge_devices::devices::ssd1306::device::SSD1306Device::new(bus_wrapper)
                     };
                 });
@@ -53,8 +53,7 @@ pub fn generate_device_registry(model: &EspforgeConfiguration) -> Result<TokenSt
                             OutputConfig::default()
                         );
                         
-                        let spi_dev = espforge_platform::bus::SpiDevice::new(&components.#spi_ref, cs_raw);
-                        
+                        let spi_dev = espforge_platform::bus::SpiDevice::new(components.#spi_ref.bus(), cs_raw);                        
                         let dc_pin = Output::new(
                             registry.#dc_ref.borrow_mut().take().expect("DC Pin claimed"),
                             Level::Low,
