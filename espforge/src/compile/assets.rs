@@ -56,28 +56,18 @@ fn update_wokwi_config_for_chip(project_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Extracts the platform abstraction layer (espforge_platform) into the generated project.
-pub fn provision_platform_assets(project_dir: &Path, src_dir: &Path) -> Result<()> {
-    let platform_temp = project_dir.join(".espforge_temp");
+pub fn provision_platform_assets(project_dir: &Path, _src_dir: &Path) -> Result<()> {
+    let lib_dir = project_dir.join("lib");
+    fs::create_dir_all(&lib_dir)?;
 
-    if platform_temp.exists() {
-        fs::remove_dir_all(&platform_temp)?;
-    }
-    fs::create_dir_all(&platform_temp)?;
+    crate::PLATFORM_SRC
+        .extract(lib_dir.join("espforge_platform"))
+        .context("Failed to extract platform assets")?;
 
-    // Access the embedded directory defined in lib.rs
-    // crate::PLATFORM_SRC
-    //     .extract(&platform_temp)
-    //     .context("Failed to extract platform assets")?;
+    crate::DEVICES_SRC
+        .extract(lib_dir.join("espforge_devices"))
+        .context("Failed to extract devices assets")?;
 
-    let assets_dir = platform_temp.join("assets");
-    let platform_dest = src_dir.join("platform");
-
-    if assets_dir.exists() {
-        copy_recursive(&assets_dir, &platform_dest)?;
-    }
-
-    let _ = fs::remove_dir_all(platform_temp);
     Ok(())
 }
 
