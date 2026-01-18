@@ -1,4 +1,4 @@
-#[warn(unused_variables)]
+#[allow(unused_variables)]
 
 use crate::Context;
 
