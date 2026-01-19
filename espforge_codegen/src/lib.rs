@@ -4,14 +4,46 @@ pub mod generator;
 pub mod scaffold;
 
 use anyhow::{Context, Result};
-use espforge_common::EspforgeConfiguration;
 use quote::quote;
+use espforge_common::EspforgeConfiguration;
 
 // Re-export specific items for convenience
 pub use scaffold::esp_generate;
 
+/// Generates the content for the project's lib.rs
+pub fn generate_lib_source() -> Result<String> {
+    let tokens = quote! {
+        #![no_std]
+        pub mod app;
+        pub mod generated;
+
+        pub mod prelude {
+            pub use embedded_hal::digital::{InputPin, OutputPin, StatefulOutputPin};
+            pub use embedded_hal::delay::DelayNs;
+            pub use embedded_hal::i2c::I2c;
+            pub use embedded_hal::spi::SpiBus;
+            pub use esp_hal::time::Rate;
+            
+            pub use super::generated::ergonomics::*;
+        }   
+
+        pub use prelude::*;     
+
+        pub struct Context {
+            pub logger: espforge_platform::logger::Logger,
+            pub delay: espforge_platform::delay::Delay,
+            pub components: generated::Components<'static>,
+            pub devices: generated::Devices<'static>,
+        }
+    };
+
+    let syntax_tree = syn::parse2(tokens).context("Failed to parse generated library structure")?;
+    Ok(prettyplease::unparse(&syntax_tree))
+}
+
 /// Main entry point: Generates the entire `generated.rs` content
 pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<String> {
+    // ... (existing code remains unchanged) ...
     // Generate the struct that owns the raw silicon
     let hardware_struct = generator::hardware::generate_peripheral_registry(model)?;
 
@@ -48,11 +80,11 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
                 fn on(&mut self) {
                     self.set_high().unwrap_or_else(|_| panic!("GPIO Error"));
                 }
-
+                
                 fn off(&mut self) {
                     self.set_low().unwrap_or_else(|_| panic!("GPIO Error"));
                 }
-
+                
                 fn toggle(&mut self) {
                     StatefulOutputPin::toggle(self).unwrap_or_else(|_| panic!("GPIO Error"));
                 }
@@ -60,7 +92,7 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
 
             // Blanket implementation: This applies the trait to ANY pin that implements the standard trait
             impl<T: StatefulOutputPin> EasyOutput for T {}
-
+            
             /// Adds simple .is_pressed() logic
             pub trait EasyInput: InputPin {
                 fn is_pressed(&mut self) -> bool {
@@ -72,10 +104,10 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
                     self.is_high().unwrap_or(false)
                 }
             }
-
+            
             impl<T: InputPin> EasyInput for T {}
         }
-
+        
 
         #components_struct
 
@@ -85,3 +117,4 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
     let syntax_tree = syn::parse2(output).context("Failed to parse generated tokens")?;
     Ok(prettyplease::unparse(&syntax_tree))
 }
+

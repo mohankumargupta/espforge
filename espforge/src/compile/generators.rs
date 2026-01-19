@@ -1,7 +1,6 @@
 use crate::parse::model::EspforgeConfiguration;
 use anyhow::{Context, Result, anyhow};
-use espforge_codegen::{esp_generate, generate_components_source};
-use quote::quote;
+use espforge_codegen::{esp_generate, generate_components_source, generate_lib_source};
 use std::fs;
 use std::path::Path;
 
@@ -20,42 +19,18 @@ pub fn generate_component_code(src_dir: &Path, model: &EspforgeConfiguration) ->
 
 /// Creates the lib.rs file that exports the project structure
 pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
-    let tokens = quote! {
-        #![no_std]
-        pub mod app;
-        pub mod generated;
+    // Delegate content generation to the codegen crate
+    let content = generate_lib_source()?;
 
-        pub mod prelude {
-            pub use embedded_hal::digital::{InputPin, OutputPin, StatefulOutputPin};
-            pub use embedded_hal::delay::DelayNs;
-            pub use embedded_hal::i2c::I2c;
-            pub use embedded_hal::spi::SpiBus;
-            pub use esp_hal::time::Rate;
-
-            pub use super::generated::ergonomics::*;
-        }
-
-        pub use prelude::*;
-
-        pub struct Context {
-            pub logger: espforge_platform::logger::Logger,
-            pub delay: espforge_platform::delay::Delay,
-            pub components: generated::Components<'static>,
-            pub devices: generated::Devices<'static>,
-        }
-    };
-    // Parse the tokens into a Syntax Tree and then pretty-print it
-    let syntax_tree = syn::parse2(tokens).context("Failed to parse generated library structure")?;
-    let formatted = prettyplease::unparse(&syntax_tree);
-
-    fs::write(src_dir.join("lib.rs"), formatted).context("Failed to write src/lib.rs")?;
+    fs::write(src_dir.join("lib.rs"), content)
+        .context("Failed to write src/lib.rs")?;
     Ok(())
 }
 
 /// Renders and writes the main entry point (main.rs)
 pub fn generate_entry_point(src_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
-    let crate_name = quote::format_ident!("{}", model.get_name().replace('-', "_"));
-    let content = espforge_templates::render_main(&crate_name.to_string())
+    let crate_name = quote::format_ident!("{}", model.get_name().replace('-', "_"));    
+     let content = espforge_templates::render_main(&crate_name.to_string())
         .map_err(|e| anyhow!("Failed to render main.rs: {}", e))?;
 
     let path = src_dir.join("bin/main.rs");
@@ -65,3 +40,4 @@ pub fn generate_entry_point(src_dir: &Path, model: &EspforgeConfiguration) -> Re
     fs::write(&path, content).context("Failed to write generated main.rs")?;
     Ok(())
 }
+

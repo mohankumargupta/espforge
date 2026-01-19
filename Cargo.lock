@@ -326,7 +326,6 @@ dependencies = [
  "predicates",
  "prettyplease",
  "proc-macro2",
- "quote",
  "serde",
  "serde_yaml_ng",
  "syn",
