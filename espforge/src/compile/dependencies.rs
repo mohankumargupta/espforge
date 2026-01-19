@@ -3,6 +3,10 @@ use espforge_examples::EXTRA_DEPENDENCIES;
 use std::fs;
 use std::path::Path;
 
+const PLATFORM_VERSION: &str = env!("ESPFORGE_PLATFORM_VERSION");
+const DEVICES_VERSION: &str = env!("ESPFORGE_DEVICES_VERSION");
+const ESPFORGE_REPO: &str = "https://github.com/mohankumargupta/espforge";
+
 pub fn add_dependencies(project_dir: &Path) -> Result<()> {
     let cargo_path = project_dir.join("Cargo.toml");
     let manifest = fs::read_to_string(&cargo_path).context("Failed to read Cargo.toml")?;
@@ -28,17 +32,33 @@ pub fn add_dependencies(project_dir: &Path) -> Result<()> {
             }
         }
 
-        // Add espforge_platform as a Git dependency
-        let mut platform_dep = toml_edit::InlineTable::new();
-        platform_dep.get_or_insert("git", "https://github.com/mohankumargupta/espforge");
-        platform_dep.get_or_insert("branch", "dev");
-        target_deps.insert("espforge_platform", toml_edit::value(platform_dep));
+                let create_dep = |version: &str| {
+            let mut dep = toml_edit::InlineTable::new();
+            if cfg!(debug_assertions) {
+                // Publish Mode: Use the strict version extracted from Cargo.toml
+                dep.get_or_insert("version", version);
+            } else {
+                // Dev Mode: Use git
+                dep.get_or_insert("git", ESPFORGE_REPO);
+                dep.get_or_insert("branch", "dev");
+            }
+            toml_edit::value(dep)
+        };
 
-        // Add espforge_devices as a Git dependency
-        let mut devices_dep = toml_edit::InlineTable::new();
-        devices_dep.get_or_insert("git", "https://github.com/mohankumargupta/espforge");
-        devices_dep.get_or_insert("branch", "dev");
-        target_deps.insert("espforge_devices", toml_edit::value(devices_dep));
+        target_deps.insert("espforge_platform", create_dep(PLATFORM_VERSION));
+        target_deps.insert("espforge_devices", create_dep(DEVICES_VERSION));
+
+        // // Add espforge_platform as a Git dependency
+        // let mut platform_dep = toml_edit::InlineTable::new();
+        // platform_dep.get_or_insert("git", "https://github.com/mohankumargupta/espforge");
+        // platform_dep.get_or_insert("branch", "dev");
+        // target_deps.insert("espforge_platform", toml_edit::value(platform_dep));
+
+        // // Add espforge_devices as a Git dependency
+        // let mut devices_dep = toml_edit::InlineTable::new();
+        // devices_dep.get_or_insert("git", "https://github.com/mohankumargupta/espforge");
+        // devices_dep.get_or_insert("branch", "dev");
+        // target_deps.insert("espforge_devices", toml_edit::value(devices_dep));
     }
 
     fs::write(cargo_path, doc.to_string()).context("Failed to write Cargo.toml")?;
