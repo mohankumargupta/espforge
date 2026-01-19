@@ -1,7 +1,7 @@
-use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
-use anyhow::Result;
 use crate::generator::utils;
+use anyhow::Result;
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 
 pub fn generate(
     name: &str,
@@ -39,4 +39,3 @@ pub fn generate(
     struct_init.push(quote! { #field });
     Ok(())
 }
-

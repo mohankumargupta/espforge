@@ -1,7 +1,7 @@
-use anyhow::{Context, Result, bail, anyhow};
+use crate::cli::model::ExampleConfig;
+use anyhow::{Context, Result, anyhow, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::cli::model::ExampleConfig;
 
 pub struct ConfigFile {
     path: PathBuf,
@@ -48,7 +48,8 @@ impl ConfigFile {
     }
 
     fn write_yaml(&self, doc: &serde_yaml_ng::Value) -> Result<()> {
-        let content = serde_yaml_ng::to_string(doc).context("Failed to serialize updated config")?;
+        let content =
+            serde_yaml_ng::to_string(doc).context("Failed to serialize updated config")?;
         fs::write(&self.path, content).context("Failed to write updated example.yaml")
     }
 

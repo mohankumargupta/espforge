@@ -30,7 +30,7 @@ pub fn render_main(crate_name: &str) -> Result<String, Box<dyn Error>> {
 
             let config = esp_hal::Config::default();
             let peripherals = esp_hal::init(config);
-            
+
             let registry = REGISTRY.init(generated::PeripheralRegistry::new(peripherals));
             let components = generated::Components::new(registry);
 

@@ -35,6 +35,10 @@ impl<'a> ResolvePeripheral<'a> for GpioRef<'a> {
         Some(&root.esp32.as_ref()?.gpio)
     }
 
-    fn as_str(&self) -> &str { self.0 }
-    fn section_name() -> &'static str { "gpio" }
+    fn as_str(&self) -> &str {
+        self.0
+    }
+    fn section_name() -> &'static str {
+        "gpio"
+    }
 }

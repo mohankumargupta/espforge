@@ -62,12 +62,10 @@ impl ComponentResource for Component {
                     reference: spi,
                 };
                 if let Some(cs_ref) = cs {
-                    Box::new(
-                        std::iter::once(spi_ref).chain(std::iter::once(ResourceRef {
-                            resource_type: "gpio",
-                            reference: cs_ref,
-                        })),
-                    )
+                    Box::new(std::iter::once(spi_ref).chain(std::iter::once(ResourceRef {
+                        resource_type: "gpio",
+                        reference: cs_ref,
+                    })))
                 } else {
                     Box::new(std::iter::once(spi_ref))
                 }
@@ -103,30 +101,47 @@ pub enum Device {
         dc: String,
         rst: String,
         cs: String,
-    }
+    },
 }
 
-fn default_ssd1306_addr() -> u8 { 0x3C }
-fn default_ssd1306_width() -> u16 { 128 }
-fn default_ssd1306_height() -> u16 { 64 }
+fn default_ssd1306_addr() -> u8 {
+    0x3C
+}
+fn default_ssd1306_width() -> u16 {
+    128
+}
+fn default_ssd1306_height() -> u16 {
+    64
+}
 
 impl ComponentResource for Device {
     type ResourceRefs<'a> = Box<dyn Iterator<Item = ResourceRef<'a>> + 'a>;
 
     fn resource_refs(&self) -> Self::ResourceRefs<'_> {
         match self {
-            Self::SSD1306 { component: _, .. } => {
-                 Box::new(std::iter::empty())
-            }
-            Self::ILI9341 { spi: _, dc, rst, cs } => {
-                 Box::new(
-                    vec![
-                        ResourceRef { resource_type: "gpio", reference: dc },
-                        ResourceRef { resource_type: "gpio", reference: rst },
-                        ResourceRef { resource_type: "gpio", reference: cs },
-                    ].into_iter()
-                )
-            }
+            Self::SSD1306 { component: _, .. } => Box::new(std::iter::empty()),
+            Self::ILI9341 {
+                spi: _,
+                dc,
+                rst,
+                cs,
+            } => Box::new(
+                vec![
+                    ResourceRef {
+                        resource_type: "gpio",
+                        reference: dc,
+                    },
+                    ResourceRef {
+                        resource_type: "gpio",
+                        reference: rst,
+                    },
+                    ResourceRef {
+                        resource_type: "gpio",
+                        reference: cs,
+                    },
+                ]
+                .into_iter(),
+            ),
         }
     }
 }

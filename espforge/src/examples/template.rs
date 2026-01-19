@@ -1,10 +1,10 @@
+use super::config::ConfigFile;
+use super::fs::OutputDirectory;
+use crate::cli::model::{ExampleConfig, ExportResult};
 use anyhow::{Context, Result, anyhow};
 use espforge_examples::EXAMPLES_DIR;
 use std::fs;
 use std::path::Path;
-use crate::cli::model::{ExampleConfig, ExportResult};
-use super::config::ConfigFile;
-use super::fs::OutputDirectory;
 
 pub struct ExampleExporter;
 

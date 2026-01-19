@@ -1,7 +1,7 @@
-use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
-use anyhow::Result;
 use crate::generator::utils;
+use anyhow::Result;
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 
 pub fn generate(
     name: &str,
@@ -14,7 +14,7 @@ pub fn generate(
     let pin_ref = utils::resolve_resource_ident(gpio)?;
 
     fields.push(quote! { pub #field: Output<'static> });
-    
+
     init_logic.push(quote! {
         let #field = Output::new(
             registry.#pin_ref.borrow_mut().take().expect("Pin already claimed"),
@@ -22,8 +22,7 @@ pub fn generate(
             OutputConfig::default()
         );
     });
-    
+
     struct_init.push(quote! { #field });
     Ok(())
 }
-

@@ -13,7 +13,9 @@ pub struct UartConfig {
     pub baud: u32,
 }
 
-fn default_uart_baud() -> u32 { 9600 }
+fn default_uart_baud() -> u32 {
+    9600
+}
 
 pub struct UartRef<'a>(pub &'a str);
 
@@ -30,6 +32,10 @@ impl<'a> ResolvePeripheral<'a> for UartRef<'a> {
         Some(&root.esp32.as_ref()?.uart)
     }
 
-    fn as_str(&self) -> &str { self.0 }
-    fn section_name() -> &'static str { "uart" }
+    fn as_str(&self) -> &str {
+        self.0
+    }
+    fn section_name() -> &'static str {
+        "uart"
+    }
 }

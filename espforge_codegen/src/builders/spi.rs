@@ -1,7 +1,7 @@
+use anyhow::Result;
 use espforge_common::SpiConfig;
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
-use anyhow::Result;
+use quote::{format_ident, quote};
 use std::collections::HashMap;
 
 pub fn generate_spi_buses(
@@ -19,19 +19,25 @@ pub fn generate_spi_buses(
 
         fields.push(quote! { pub #field: RefCell<Spi<'static, Blocking>> });
 
-        let miso_cfg = cfg.miso.map(|m| {
-            let m_pin = format_ident!("GPIO{}", m);
-            quote! { .with_miso(p.#m_pin.degrade()) }
-        }).unwrap_or_else(|| quote! {});
+        let miso_cfg = cfg
+            .miso
+            .map(|m| {
+                let m_pin = format_ident!("GPIO{}", m);
+                quote! { .with_miso(p.#m_pin.degrade()) }
+            })
+            .unwrap_or_else(|| quote! {});
 
-        let cs_cfg = cfg.cs.map(|c| {
-            let c_pin = format_ident!("GPIO{}", c);
-            quote! { .with_cs(p.#c_pin.degrade()) }
-        }).unwrap_or_else(|| quote! {});
+        let cs_cfg = cfg
+            .cs
+            .map(|c| {
+                let c_pin = format_ident!("GPIO{}", c);
+                quote! { .with_cs(p.#c_pin.degrade()) }
+            })
+            .unwrap_or_else(|| quote! {});
 
         init_logic.push(quote! {
             let #field = Spi::new(
-                    p.#spi_peri, 
+                    p.#spi_peri,
                     esp_hal::spi::master::Config::default()
                         .with_frequency(esp_hal::time::Rate::from_khz(#freq))
                         .with_mode(Mode::_0)

@@ -1,7 +1,7 @@
+use anyhow::Result;
 use espforge_common::GpioPinConfig;
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
-use anyhow::Result;
+use quote::{format_ident, quote};
 use std::collections::HashMap;
 
 pub fn generate_gpio_pins(

@@ -4,8 +4,8 @@ pub mod generator;
 pub mod scaffold;
 
 use anyhow::{Context, Result};
-use quote::quote;
 use espforge_common::EspforgeConfiguration;
+use quote::quote;
 
 // Re-export specific items for convenience
 pub use scaffold::esp_generate;
@@ -48,11 +48,11 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
                 fn on(&mut self) {
                     self.set_high().unwrap_or_else(|_| panic!("GPIO Error"));
                 }
-                
+
                 fn off(&mut self) {
                     self.set_low().unwrap_or_else(|_| panic!("GPIO Error"));
                 }
-                
+
                 fn toggle(&mut self) {
                     StatefulOutputPin::toggle(self).unwrap_or_else(|_| panic!("GPIO Error"));
                 }
@@ -60,7 +60,7 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
 
             // Blanket implementation: This applies the trait to ANY pin that implements the standard trait
             impl<T: StatefulOutputPin> EasyOutput for T {}
-            
+
             /// Adds simple .is_pressed() logic
             pub trait EasyInput: InputPin {
                 fn is_pressed(&mut self) -> bool {
@@ -72,10 +72,10 @@ pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<Strin
                     self.is_high().unwrap_or(false)
                 }
             }
-            
+
             impl<T: InputPin> EasyInput for T {}
         }
-        
+
 
         #components_struct
 

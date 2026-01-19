@@ -1,15 +1,12 @@
+use anyhow::Result;
 use espforge_common::EspforgeConfiguration;
 use proc_macro2::TokenStream;
-use anyhow::Result;
 
-pub mod led;
 pub mod button;
-pub mod spi_device;
 pub mod i2c_device;
+pub mod led;
+pub mod spi_device;
 pub mod uart_device;
-
-
-
 
 pub trait ComponentGenerator {
     fn generate(
@@ -21,4 +18,3 @@ pub trait ComponentGenerator {
         struct_init: &mut Vec<TokenStream>,
     ) -> Result<()>;
 }
-

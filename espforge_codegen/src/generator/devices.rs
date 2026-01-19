@@ -1,8 +1,8 @@
-use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
-use anyhow::Result;
-use espforge_common::{EspforgeConfiguration, Device};
 use crate::generator::utils;
+use anyhow::Result;
+use espforge_common::{Device, EspforgeConfiguration};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 
 pub fn generate_device_registry(model: &EspforgeConfiguration) -> Result<TokenStream> {
     let mut fields = vec![quote! { _marker: PhantomData<&'a ()> }];
@@ -14,14 +14,14 @@ pub fn generate_device_registry(model: &EspforgeConfiguration) -> Result<TokenSt
 
     for (name, device) in sorted_devices {
         let field_name = format_ident!("{}", name);
-        
+
         match device {
             Device::SSD1306 { component, .. } => {
                 let comp_ref = utils::resolve_resource_ident(component)?;
-                fields.push(quote! { 
-                    pub #field_name: espforge_devices::devices::ssd1306::device::SSD1306Device<espforge_platform::bus::I2cDevice<'a>> 
+                fields.push(quote! {
+                pub #field_name: espforge_devices::devices::ssd1306::device::SSD1306Device<espforge_platform::bus::I2cDevice<'a>>
                 });
-                
+
                 init_logic.push(quote! {
                     let #field_name = {
                         let bus_wrapper = espforge_platform::bus::I2cDevice::new(components.#comp_ref.bus());
@@ -52,8 +52,7 @@ pub fn generate_device_registry(model: &EspforgeConfiguration) -> Result<TokenSt
                             Level::High,
                             OutputConfig::default()
                         );
-                        
-                        let spi_dev = espforge_platform::bus::SpiDevice::new(components.#spi_ref.bus(), cs_raw);                        
+                        let spi_dev = espforge_platform::bus::SpiDevice::new(components.#spi_ref.bus(), cs_raw);
                         let dc_pin = Output::new(
                             registry.#dc_ref.borrow_mut().take().expect("DC Pin claimed"),
                             Level::Low,
@@ -75,7 +74,7 @@ pub fn generate_device_registry(model: &EspforgeConfiguration) -> Result<TokenSt
                 });
             }
         }
-        
+
         struct_init.push(quote! { #field_name });
     }
 
@@ -86,7 +85,7 @@ pub fn generate_device_registry(model: &EspforgeConfiguration) -> Result<TokenSt
 
         impl<'a> Devices<'a> {
             pub fn new(
-                components: &Components<'a>, 
+                components: &Components<'a>,
                 registry: &'a PeripheralRegistry,
                 delay: &mut espforge_platform::delay::Delay
             ) -> Self {

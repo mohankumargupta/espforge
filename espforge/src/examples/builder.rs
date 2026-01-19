@@ -1,7 +1,7 @@
-use anyhow::Result;
+use super::ExamplesArgs;
 use crate::cli::interactive::Prompter;
 use crate::cli::model::ExampleConfig;
-use super::ExamplesArgs;
+use anyhow::Result;
 
 pub struct ConfigBuilder<'a> {
     args: ExamplesArgs,
@@ -47,4 +47,3 @@ impl<'a> ConfigBuilder<'a> {
         }
     }
 }
-

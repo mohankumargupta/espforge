@@ -1,6 +1,6 @@
+use anyhow::{Result, anyhow};
 use proc_macro2::Ident;
 use quote::format_ident;
-use anyhow::{Result, anyhow};
 
 pub fn resolve_resource_ident(reference: &str) -> Result<Ident> {
     let name = reference

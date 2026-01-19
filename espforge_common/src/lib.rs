@@ -1,17 +1,13 @@
 use std::collections::HashMap;
 
-pub mod hardware;
 pub mod components;
+pub mod hardware;
 
-pub use hardware::{
-    ResolvePeripheral,
-    Esp32Config,
-    GpioPinConfig, PinDirection, GpioRef,
-    SpiConfig, SpiRef,
-    I2cConfig, I2cRef,
-    UartConfig, UartRef,
-};
 pub use components::{Component, ComponentResource, Device, ResourceRef};
+pub use hardware::{
+    Esp32Config, GpioPinConfig, GpioRef, I2cConfig, I2cRef, PinDirection, ResolvePeripheral,
+    SpiConfig, SpiRef, UartConfig, UartRef,
+};
 // ============================================================================
 // Project Model
 // ============================================================================
@@ -38,21 +34,26 @@ impl EspforgeConfiguration {
         &self.chip
     }
 
-    pub fn resolve<'a, R>(&'a self, reference: &R) -> Result<&'a R::Config, hardware::ResolutionError> 
-        where R: ResolvePeripheral<'a> 
+    pub fn resolve<'a, R>(
+        &'a self,
+        reference: &R,
+    ) -> Result<&'a R::Config, hardware::ResolutionError>
+    where
+        R: ResolvePeripheral<'a>,
     {
         let raw = reference.as_str();
-        let name = raw.strip_prefix('$')
+        let name = raw
+            .strip_prefix('$')
             .ok_or_else(|| hardware::ResolutionError::InvalidPrefix(raw.to_string()))?;
-        
+
         let map = R::get_map(self)
             .ok_or_else(|| hardware::ResolutionError::MissingSection(R::section_name()))?;
-        
-        map.get(name).ok_or_else(|| hardware::ResolutionError::NotFound { 
-            name: name.to_string(), 
-            section: R::section_name(),
-            available: map.keys().cloned().collect()
-        })
+
+        map.get(name)
+            .ok_or_else(|| hardware::ResolutionError::NotFound {
+                name: name.to_string(),
+                section: R::section_name(),
+                available: map.keys().cloned().collect(),
+            })
     }
 }
-

@@ -33,12 +33,18 @@ fn update_wokwi_config_for_chip(project_dir: &Path) -> Result<()> {
     }
 
     let content = fs::read_to_string(&wokwi_path).context("Failed to read wokwi.toml")?;
-    let mut doc = content.parse::<toml_edit::DocumentMut>().context("Failed to parse wokwi.toml")?;
-    
-    let chips = doc.entry("chip").or_insert(toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()));
-    
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .context("Failed to parse wokwi.toml")?;
+
+    let chips = doc.entry("chip").or_insert(toml_edit::Item::ArrayOfTables(
+        toml_edit::ArrayOfTables::new(),
+    ));
+
     if let Some(arr) = chips.as_array_of_tables_mut() {
-        let exists = arr.iter().any(|t| t.get("name").and_then(|s| s.as_str()) == Some("chip"));
+        let exists = arr
+            .iter()
+            .any(|t| t.get("name").and_then(|s| s.as_str()) == Some("chip"));
         if !exists {
             let mut table = toml_edit::Table::new();
             table.insert("name", toml_edit::value("chip"));

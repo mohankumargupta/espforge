@@ -23,7 +23,9 @@ pub struct SpiConfig {
     pub mode: u8,
 }
 
-fn default_spi_frequency() -> u32 { 1000 }
+fn default_spi_frequency() -> u32 {
+    1000
+}
 
 pub struct SpiRef<'a>(pub &'a str);
 
@@ -40,6 +42,10 @@ impl<'a> ResolvePeripheral<'a> for SpiRef<'a> {
         Some(&root.esp32.as_ref()?.spi)
     }
 
-    fn as_str(&self) -> &str { self.0 }
-    fn section_name() -> &'static str { "spi" }
+    fn as_str(&self) -> &str {
+        self.0
+    }
+    fn section_name() -> &'static str {
+        "spi"
+    }
 }

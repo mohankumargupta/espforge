@@ -1,7 +1,7 @@
+use anyhow::Result;
 use espforge_common::I2cConfig;
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
-use anyhow::Result;
+use quote::{format_ident, quote};
 use std::collections::HashMap;
 
 pub fn generate_i2c_buses(
@@ -21,7 +21,7 @@ pub fn generate_i2c_buses(
 
         init_logic.push(quote! {
             let #field = I2c::new(
-                    p.#i2c_peri, 
+                    p.#i2c_peri,
                     esp_hal::i2c::master::Config::default()
                         .with_frequency(esp_hal::time::Rate::from_khz(#freq))
                 ).unwrap()

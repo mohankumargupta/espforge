@@ -31,11 +31,11 @@ pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
             pub use embedded_hal::i2c::I2c;
             pub use embedded_hal::spi::SpiBus;
             pub use esp_hal::time::Rate;
-            
-            pub use super::generated::ergonomics::*;
-        }   
 
-        pub use prelude::*;     
+            pub use super::generated::ergonomics::*;
+        }
+
+        pub use prelude::*;
 
         pub struct Context {
             pub logger: espforge_platform::logger::Logger,
@@ -44,19 +44,18 @@ pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
             pub devices: generated::Devices<'static>,
         }
     };
-// Parse the tokens into a Syntax Tree and then pretty-print it
+    // Parse the tokens into a Syntax Tree and then pretty-print it
     let syntax_tree = syn::parse2(tokens).context("Failed to parse generated library structure")?;
     let formatted = prettyplease::unparse(&syntax_tree);
 
-    fs::write(src_dir.join("lib.rs"), formatted)
-        .context("Failed to write src/lib.rs")?;
+    fs::write(src_dir.join("lib.rs"), formatted).context("Failed to write src/lib.rs")?;
     Ok(())
 }
 
 /// Renders and writes the main entry point (main.rs)
 pub fn generate_entry_point(src_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
-    let crate_name = quote::format_ident!("{}", model.get_name().replace('-', "_"));    
-     let content = espforge_templates::render_main(&crate_name.to_string())
+    let crate_name = quote::format_ident!("{}", model.get_name().replace('-', "_"));
+    let content = espforge_templates::render_main(&crate_name.to_string())
         .map_err(|e| anyhow!("Failed to render main.rs: {}", e))?;
 
     let path = src_dir.join("bin/main.rs");

@@ -27,7 +27,7 @@ impl SectionProcessor for ProjectInfoProvisioner {
             .context("Failed to deserialize espforge configuration")?;
 
         model.name = config.name;
-        
+
         if let Some(chip) = config.chip {
             model.chip = chip;
         } else if let Some(platform) = config.platform {

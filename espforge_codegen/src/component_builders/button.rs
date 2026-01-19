@@ -1,7 +1,7 @@
-use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
-use anyhow::Result;
 use crate::generator::utils;
+use anyhow::Result;
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 
 pub fn generate(
     name: &str,
@@ -22,14 +22,14 @@ pub fn generate(
 
     // Use raw HAL Input type instead of opaque wrapper
     fields.push(quote! { pub #field: Input<'static> });
-    
+
     init_logic.push(quote! {
-+        let #field = Input::new(
-+            registry.#pin_ref.borrow_mut().take().expect("Pin already claimed"),
-+            InputConfig::default().with_pull(#pull)
-        );
-    });
-    
+    +        let #field = Input::new(
+    +            registry.#pin_ref.borrow_mut().take().expect("Pin already claimed"),
+    +            InputConfig::default().with_pull(#pull)
+            );
+        });
+
     struct_init.push(quote! { #field });
     Ok(())
 }

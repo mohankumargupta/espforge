@@ -58,3 +58,6 @@ predicates = "3.1"
 default = ["cli"]
 cli = ["dep:clap", "dep:dialoguer", "dep:dialogue-macro"]
 
+[build-dependencies]
+anyhow = "1.0"
+toml_edit = "0.23" # Required to parse Cargo.toml safely

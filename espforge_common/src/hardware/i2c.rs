@@ -17,7 +17,9 @@ pub struct I2cConfig {
     pub frequency: u32,
 }
 
-fn default_i2c_frequency() -> u32 { 100 }
+fn default_i2c_frequency() -> u32 {
+    100
+}
 
 pub struct I2cRef<'a>(pub &'a str);
 
@@ -34,6 +36,10 @@ impl<'a> ResolvePeripheral<'a> for I2cRef<'a> {
         Some(&root.esp32.as_ref()?.i2c)
     }
 
-    fn as_str(&self) -> &str { self.0 }
-    fn section_name() -> &'static str { "i2c" }
+    fn as_str(&self) -> &str {
+        self.0
+    }
+    fn section_name() -> &'static str {
+        "i2c"
+    }
 }

@@ -1,6 +1,6 @@
-use anyhow::{Context, Result, bail};
 use crate::cli::interactive::Prompter;
 use crate::cli::model::ExampleConfig;
+use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
 

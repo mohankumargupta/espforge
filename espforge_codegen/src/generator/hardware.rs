@@ -1,8 +1,8 @@
-use proc_macro2::TokenStream;
-use quote::quote;
+use crate::builders;
 use anyhow::Result;
 use espforge_common::EspforgeConfiguration;
-use crate::builders;
+use proc_macro2::TokenStream;
+use quote::quote;
 
 pub fn generate_peripheral_registry(model: &EspforgeConfiguration) -> Result<TokenStream> {
     let mut fields = Vec::new();
@@ -24,11 +24,7 @@ pub fn generate_peripheral_registry(model: &EspforgeConfiguration) -> Result<Tok
             &mut struct_init,
         )?;
 
-        builders::gpio::generate_gpio_pins(
-            &esp32.gpio,
-            &mut fields,
-            &mut struct_init,
-        )?;
+        builders::gpio::generate_gpio_pins(&esp32.gpio, &mut fields, &mut struct_init)?;
     }
 
     Ok(quote! {

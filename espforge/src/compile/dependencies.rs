@@ -1,18 +1,22 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
+use espforge_examples::EXTRA_DEPENDENCIES;
 use std::fs;
 use std::path::Path;
-use espforge_examples::EXTRA_DEPENDENCIES;
 
 pub fn add_dependencies(project_dir: &Path) -> Result<()> {
     let cargo_path = project_dir.join("Cargo.toml");
     let manifest = fs::read_to_string(&cargo_path).context("Failed to read Cargo.toml")?;
-    let mut doc = manifest.parse::<toml_edit::DocumentMut>().context("Failed to parse Cargo.toml")?;
+    let mut doc = manifest
+        .parse::<toml_edit::DocumentMut>()
+        .context("Failed to parse Cargo.toml")?;
 
     // Parse the reference dependencies from the examples crate
-    let deps_doc = EXTRA_DEPENDENCIES.parse::<toml_edit::DocumentMut>()
+    let deps_doc = EXTRA_DEPENDENCIES
+        .parse::<toml_edit::DocumentMut>()
         .context("Failed to parse reference dependencies.toml")?;
 
-    let extra_deps = deps_doc.get("dependencies")
+    let extra_deps = deps_doc
+        .get("dependencies")
         .and_then(|item| item.as_table())
         .ok_or_else(|| anyhow!("dependencies.toml is missing the [dependencies] section"))?;
 

@@ -4,8 +4,8 @@ pub mod fs;
 pub mod template;
 pub mod ui;
 
-use anyhow::Result;
 use crate::cli::interactive::{self, Prompter};
+use anyhow::Result;
 use builder::ConfigBuilder;
 use fs::OutputDirectory;
 use template::ExampleExporter;
@@ -38,4 +38,3 @@ fn execute_with_prompter(args: ExamplesArgs, prompter: &dyn Prompter) -> Result<
 
     Ok(())
 }
-

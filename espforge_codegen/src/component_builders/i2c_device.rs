@@ -1,7 +1,7 @@
-use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
-use anyhow::Result;
 use crate::generator::utils;
+use anyhow::Result;
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 
 pub fn generate(
     name: &str,
@@ -15,11 +15,11 @@ pub fn generate(
     let i2c_ref = utils::resolve_resource_ident(i2c)?;
 
     fields.push(quote! { pub #field: espforge_platform::bus::I2cDevice<'a> });
-    
+
     init_logic.push(quote! {
        let #field = espforge_platform::bus::I2cDevice::new(&registry.#i2c_ref);
     });
-    
+
     struct_init.push(quote! { #field });
     Ok(())
 }

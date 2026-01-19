@@ -1,7 +1,7 @@
+use anyhow::{Result, anyhow};
 use espforge_common::EspforgeConfiguration;
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
-use anyhow::{Result, anyhow};
+use quote::{format_ident, quote};
 
 pub fn generate(
     name: &str,
@@ -14,11 +14,15 @@ pub fn generate(
 ) -> Result<()> {
     let field = format_ident!("{}", name);
     let uart_ref = uart.strip_prefix('$').unwrap_or(uart);
-    
-    let esp32 = model.esp32.as_ref()
+
+    let esp32 = model
+        .esp32
+        .as_ref()
         .ok_or_else(|| anyhow!("No ESP32 configuration found"))?;
-    
-    let cfg = esp32.uart.get(uart_ref)
+
+    let cfg = esp32
+        .uart
+        .get(uart_ref)
         .ok_or_else(|| anyhow!("UART resource {} not found", uart))?;
 
     let uart_num = cfg.uart;
@@ -27,7 +31,7 @@ pub fn generate(
     let baud_rate = baud.unwrap_or(cfg.baud);
 
     fields.push(quote! { pub #field: espforge_platform::components::uart::Uart });
-    
+
     init_logic.push(quote! {
         let #field = espforge_platform::components::uart::Uart::new(
             #uart_num,
@@ -36,8 +40,7 @@ pub fn generate(
             #baud_rate
         );
     });
-    
+
     struct_init.push(quote! { #field });
     Ok(())
 }
-
