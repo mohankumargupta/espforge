@@ -23,10 +23,12 @@ pub fn main() -> Result<()> {
         let espforge_devices_cargo_content = fs::read_to_string(espforge_devices_cargo)?;
         let espforge_devices_doc = espforge_devices_cargo_content.parse::<DocumentMut>()?;
 
-        let platform_ver = get_dep_version(espforge_platform_doc)?;
-        let devices_ver = get_dep_version(espforge_devices_doc)?;
-        println!("cargo:warning={platform_ver}!");
-        println!("cargo:warning={devices_ver}!");
+        let platform_version = get_dep_version(espforge_platform_doc)?;
+        let devices_version = get_dep_version(espforge_devices_doc)?;
+        // println!("cargo:warning={platform_ver}!");
+        // println!("cargo:warning={devices_ver}!");
+        println!("cargo:rustc-env=ESPFORGE_PLATFORM_VERSION={}", platform_version);
+        println!("cargo:rustc-env=ESPFORGE_DEVICES_VERSION={}", devices_version);
     }
     Ok(())
 }
