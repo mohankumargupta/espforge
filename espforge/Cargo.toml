@@ -4,7 +4,8 @@ version = "0.1.4"
 include = [
     "LICENSE.md",
     "README.md",
-    "src", 
+    "src",
+    "build.rs"
 ]
 edition = "2024"
 description = "A scaffolding++ project generator for ESP32 projects"
