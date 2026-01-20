@@ -34,7 +34,8 @@ pub fn add_dependencies(project_dir: &Path) -> Result<()> {
 
                 let create_dep = |version: &str| {
             let mut dep = toml_edit::InlineTable::new();
-            if cfg!(debug_assertions) {
+            let use_git = std::env::var("ESPFORGE_USE_GIT").is_ok();
+            if !use_git {
                 // Publish Mode: Use the strict version extracted from Cargo.toml
                 dep.get_or_insert("version", version);
             } else {

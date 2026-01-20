@@ -16,6 +16,10 @@ update:
 build:
     cargo build
 
+# set environment variable 
+build_dev:
+    cargo build
+
 test:
     cargo build
     cargo test
