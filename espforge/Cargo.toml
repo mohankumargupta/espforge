@@ -1,6 +1,6 @@
 [package]
 name = "espforge"
-version = "0.1.3"
+version = "0.1.4"
 include = [
     "LICENSE.md",
     "README.md",
@@ -9,7 +9,7 @@ include = [
 edition = "2024"
 description = "A scaffolding++ project generator for ESP32 projects"
 license = "MIT"
-keywords     = ["esp32", "template"]
+keywords     = ["esp32", "template", "hal", "framework", "esphome"]
 categories   = ["command-line-utilities", "template-engine"]
 repository = "https://github.com/mohankumargupta/espforge"
 readme = "../README.md"
