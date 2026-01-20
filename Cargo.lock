@@ -319,7 +319,6 @@ dependencies = [
  "espforge_examples",
  "espforge_macros",
  "espforge_python_app",
- "espforge_templates",
  "include_dir",
  "inventory",
  "log",
@@ -388,17 +387,6 @@ name = "espforge_python_app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
-]
-
-[[package]]
-name = "espforge_templates"
-version = "0.1.0"
-dependencies = [
- "include_dir",
- "prettyplease",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
