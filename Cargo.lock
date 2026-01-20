@@ -318,7 +318,6 @@ dependencies = [
  "espforge_dialogue",
  "espforge_examples",
  "espforge_macros",
- "espforge_python_app",
  "include_dir",
  "inventory",
  "log",
