@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["espforge","espforge_codegen","espforge_dialogue", "espforge_esp32metadata","espforge_examples" ,"espforge_macros","espforge_python_app"]
+members = ["espforge","espforge_codegen","espforge_components_builder","espforge_devices_builder","espforge_dialogue", "espforge_esp32metadata","espforge_examples", "espforge_python_app"]
 
 # The profile that 'dist' will build with
 [profile.dist]

@@ -12,6 +12,7 @@ components:
     using: LED
     with:
       gpio: $gpio7
+      active_low: false
 
   button:
     using: Button

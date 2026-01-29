@@ -1,17 +1,19 @@
-use crate::uart::UartDriver;
+use espforge_platform::uart::UartDriver;
+use embedded_io::{Write, Read, ReadReady, ErrorType};
 use core::str;
-use embedded_io::{ErrorType, Read, Write, ReadReady};
+pub use espforge_common::components::uart::UartDeviceConfig;
 
 pub struct Uart {
     driver: UartDriver,
-    rx_buffer: [u8; 128], 
+    rx_buffer: [u8; 128],
     rx_len: usize,
 }
 
 impl Uart {
     pub fn new(uart: u8, tx: u8, rx: u8, baud: u32) -> Self {
+        let driver = UartDriver::new(uart, tx, rx, baud);
         Self {
-            driver: UartDriver::new(uart, tx, rx, baud),
+            driver,
             rx_buffer: [0u8; 128],
             rx_len: 0,
         }
@@ -43,23 +45,22 @@ impl Uart {
 
     pub fn buffer_until_newline(&mut self) -> bool {
         if let Some(byte) = self.read_byte() {
-            if byte == b'\n' {
-                return true; 
-            }
-            
             if self.rx_len < self.rx_buffer.len() {
                 self.rx_buffer[self.rx_len] = byte;
                 self.rx_len += 1;
+                if byte == b'\n' {
+                    return true;
+                }
+            } else {
+                // Buffer overflow, reset
+                self.rx_len = 0;
             }
         }
         false
     }
 
     pub fn get_buffered_string(&mut self) -> &str {
-        match str::from_utf8(&self.rx_buffer[0..self.rx_len]) {
-            Ok(s) => s,
-            Err(_) => "Invalid UTF-8",
-        }
+        str::from_utf8(&self.rx_buffer[..self.rx_len]).unwrap_or("")
     }
 
     pub fn clear_buffer(&mut self) {

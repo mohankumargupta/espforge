@@ -1,0 +1,8 @@
+set shell := ["sh", "-c"]
+set windows-shell := ["powershell", "-c"]
+
+export ESPFORGE_USE_GIT := "1"
+
+compile:
+  cargo build
+

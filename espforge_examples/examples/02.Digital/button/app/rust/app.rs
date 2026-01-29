@@ -11,5 +11,7 @@ pub fn forever(ctx: &mut Context) {
     let red_led = &mut ctx.components.red_led;
     if button.is_button_pressed() {
         red_led.toggle();
+        ctx.delay.delay_ms(100);
     }
+    ctx.delay.delay_ms(100);
 }

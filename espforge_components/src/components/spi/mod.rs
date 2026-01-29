@@ -1,9 +1,14 @@
 use core::cell::RefCell;
-use embedded_hal::spi::{SpiBus, ErrorType};
-use esp_hal::{Blocking, spi::master::Spi};
+use espforge_platform::esp_hal::spi::master::Spi;
+use espforge_platform::esp_hal::Blocking;
+use embedded_hal::spi::{ErrorType, SpiBus};
 
+// Re-export the config
+pub use espforge_common::components::spi::SpiDeviceConfig;
+
+#[derive(Clone, Copy)]
 pub struct SPI<'a> {
-    bus: &'a RefCell<Spi<'static, Blocking>>
+    bus: &'a RefCell<Spi<'static, Blocking>>,
 }
 
 impl<'a> SPI<'a> {
@@ -17,7 +22,7 @@ impl<'a> SPI<'a> {
 }
 
 impl<'a> ErrorType for SPI<'a> {
-    type Error = esp_hal::spi::Error;
+    type Error = espforge_platform::esp_hal::spi::Error;
 }
 
 impl<'a> SpiBus for SPI<'a> {
@@ -30,7 +35,7 @@ impl<'a> SpiBus for SPI<'a> {
     }
 
     fn transfer(&mut self, read: &mut [u8], write: &[u8]) -> Result<(), Self::Error> {
-      SpiBus::transfer(&mut *self.bus.borrow_mut(), read, write)    
+        SpiBus::transfer(&mut *self.bus.borrow_mut(), read, write)
     }
 
     fn transfer_in_place(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
@@ -41,4 +46,3 @@ impl<'a> SpiBus for SPI<'a> {
         self.bus.borrow_mut().flush()
     }
 }
-

@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "espforge"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -315,9 +315,10 @@ dependencies = [
  "dialoguer 0.12.0",
  "espforge_codegen",
  "espforge_common",
+ "espforge_components_builder",
+ "espforge_devices_builder",
  "espforge_dialogue",
  "espforge_examples",
- "espforge_macros",
  "include_dir",
  "inventory",
  "log",
@@ -333,22 +334,54 @@ dependencies = [
 
 [[package]]
 name = "espforge_codegen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "espforge_common",
  "prettyplease",
  "proc-macro2",
  "quote",
+ "serde_yaml_ng",
  "syn",
 ]
 
 [[package]]
 name = "espforge_common"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "inventory",
+ "proc-macro2",
+ "serde",
+ "serde_yaml_ng",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "espforge_components_builder"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "espforge_common",
+ "inventory",
+ "proc-macro2",
+ "quote",
  "serde",
- "thiserror 2.0.17",
+ "serde_yaml_ng",
+]
+
+[[package]]
+name = "espforge_devices_builder"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "espforge_common",
+ "inventory",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_yaml_ng",
+ "syn",
 ]
 
 [[package]]
@@ -367,18 +400,9 @@ version = "0.1.0"
 
 [[package]]
 name = "espforge_examples"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "include_dir",
-]
-
-[[package]]
-name = "espforge_macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

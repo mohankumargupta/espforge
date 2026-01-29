@@ -1,0 +1,26 @@
+[package]
+name = "espforge_components"
+version = "0.1.1"
+edition = "2024"
+description = "Components for espforge"
+license = "MIT"
+readme = "../README.md"
+keywords = ["esp32", "embedded", "hal", "framework", "esphome"]
+categories = ["embedded", "hardware-support", "no-std"]
+repository = "https://github.com/mohankumargupta/espforge"
+homepage = "https://github.com/mohankumargupta/espforge"
+documentation = "https://github.com/mohankumargupta/espforge"
+
+[dependencies]
+espforge_platform = { version = "0.1.4", path = "../espforge_platform" }
+# Remove features = ["serde"] here
+espforge_common = { version = "0.1.1", path = "../espforge_common",  default-features = false }
+embedded-hal = "1.0.0"
+embedded-io = "0.7.1"
+
+[features]
+default = []
+# If std is enabled for components (e.g. host testing), we can enable serde
+std = ["espforge_common/std"]
+
+[workspace]

@@ -5,6 +5,7 @@ use std::path::Path;
 
 const PLATFORM_VERSION: &str = env!("ESPFORGE_PLATFORM_VERSION");
 const DEVICES_VERSION: &str = env!("ESPFORGE_DEVICES_VERSION");
+const COMPONENTS_VERSION: &str = env!("ESPFORGE_COMPONENTS_VERSION");
 const ESPFORGE_REPO: &str = "https://github.com/mohankumargupta/espforge";
 
 pub fn add_dependencies(project_dir: &Path) -> Result<()> {
@@ -48,6 +49,7 @@ pub fn add_dependencies(project_dir: &Path) -> Result<()> {
 
         target_deps.insert("espforge_platform", create_dep(PLATFORM_VERSION));
         target_deps.insert("espforge_devices", create_dep(DEVICES_VERSION));
+        target_deps.insert("espforge_components", create_dep(COMPONENTS_VERSION));
 
         // // Add espforge_platform as a Git dependency
         // let mut platform_dep = toml_edit::InlineTable::new();

@@ -1,5 +1,6 @@
 use esp_hal::delay::Delay as HalDelay;
 
+#[derive(Clone, Copy)]
 pub struct Delay {
     inner: HalDelay,
 }
@@ -25,3 +26,4 @@ impl embedded_hal::delay::DelayNs for Delay {
         self.inner.delay_ns(ns);
     }
 }
+

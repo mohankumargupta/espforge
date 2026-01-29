@@ -1,6 +1,6 @@
 [package]
 name = "espforge_common"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Configuration model for espforge"
 license = "MIT"
@@ -12,6 +12,25 @@ homepage = "https://github.com/mohankumargupta/espforge"
 documentation = "https://github.com/mohankumargupta/espforge"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"], optional = true }
+thiserror = { version = "2.0", optional = true }
+serde_yaml_ng = { version = "0.10", optional = true }
+inventory = { version = "0.3", optional = true }
+anyhow = { version = "1.0", optional = true }
+proc-macro2 = { version = "1.0", optional = true }
+
+[features]
+default = ["std"]
+serde = ["dep:serde"]
+std = [
+    "dep:thiserror",
+    "dep:serde_yaml_ng",
+    "dep:inventory",
+    "dep:anyhow",
+    "dep:proc-macro2",
+    "serde",
+    "serde?/std"
+]
+
+
 

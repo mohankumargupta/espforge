@@ -10,7 +10,7 @@ esp32:
 # 2. Component Layer
 components:
   i2c_master:
-    using: i2c
+    using: I2cDevice
     with:
       i2c: $i2c0
 

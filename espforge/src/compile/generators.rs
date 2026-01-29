@@ -1,4 +1,4 @@
-use crate::parse::model::EspforgeConfiguration;
+use espforge_common::EspforgeConfiguration;
 use anyhow::{Context, Result, anyhow};
 use espforge_codegen::{esp_generate, generate_components_source,generate_entry_point_source, generate_lib_source};
 use std::fs;

@@ -4,7 +4,6 @@ use proc_macro2::TokenStream;
 
 pub mod button;
 pub mod i2c_device;
-pub mod led;
 pub mod spi_device;
 pub mod uart_device;
 

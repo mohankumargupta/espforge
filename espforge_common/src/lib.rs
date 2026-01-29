@@ -1,59 +1,57 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(feature = "std")]
 use std::collections::HashMap;
 
+#[cfg(feature = "std")]
+pub mod codegen;
 pub mod components;
+#[cfg(feature = "std")]
+pub mod config;
+#[cfg(feature = "std")]
+pub mod dependency;
+#[cfg(feature = "std")]
 pub mod hardware;
+#[cfg(feature = "std")]
+pub mod plugin;
 
-pub use components::{Component, ComponentResource, Device, ResourceRef};
-pub use hardware::{
-    Esp32Config, GpioPinConfig, GpioRef, I2cConfig, I2cRef, PinDirection, ResolvePeripheral,
-    SpiConfig, SpiRef, UartConfig, UartRef,
-};
-// ============================================================================
-// Project Model
-// ============================================================================
+#[cfg(feature = "std")]
+pub use config::ConfigParser;
 
-#[derive(Debug, Default)]
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct EspforgeConfiguration {
+    #[serde(default)]
     pub name: String,
+    
+    #[serde(default)]
     pub chip: String,
-    pub esp32: Option<Esp32Config>,
-    pub components: HashMap<String, Component>,
-    pub devices: HashMap<String, Device>,
+
+    #[serde(default)]
+    pub esp32: Option<hardware::Esp32Config>,
+
+    #[serde(default)]
+    pub components: HashMap<String, components::Component>,
+
+    #[serde(default)]
+    pub devices: HashMap<String, components::Device>,
 }
 
+#[cfg(feature = "std")]
 impl EspforgeConfiguration {
     pub fn get_name(&self) -> &str {
         if self.name.is_empty() {
-            "espforge_project"
+            "espforge-project"
         } else {
             &self.name
         }
     }
 
     pub fn get_chip(&self) -> &str {
-        &self.chip
-    }
-
-    pub fn resolve<'a, R>(
-        &'a self,
-        reference: &R,
-    ) -> Result<&'a R::Config, hardware::ResolutionError>
-    where
-        R: ResolvePeripheral<'a>,
-    {
-        let raw = reference.as_str();
-        let name = raw
-            .strip_prefix('$')
-            .ok_or_else(|| hardware::ResolutionError::InvalidPrefix(raw.to_string()))?;
-
-        let map = R::get_map(self)
-            .ok_or_else(|| hardware::ResolutionError::MissingSection(R::section_name()))?;
-
-        map.get(name)
-            .ok_or_else(|| hardware::ResolutionError::NotFound {
-                name: name.to_string(),
-                section: R::section_name(),
-                available: map.keys().cloned().collect(),
-            })
+        if self.chip.is_empty() {
+            "esp32c3"
+        } else {
+            &self.chip
+        }
     }
 }

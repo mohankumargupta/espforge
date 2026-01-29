@@ -29,7 +29,7 @@ pub enum ResolutionError {
     },
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct Esp32Config {
     #[serde(default)]
     pub gpio: HashMap<String, GpioPinConfig>,

@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
+use espforge_common::EspforgeConfiguration;
 use serde_yaml_ng::Value;
 
 use crate::parse::{
-    model::EspforgeConfiguration,
-    processor::{ProcessorRegistration, SectionProcessor},
+    processor::SectionProcessor,
 };
 
 pub mod components;
@@ -13,20 +13,24 @@ pub mod model;
 pub mod processor;
 pub mod project;
 
-pub struct ConfigurationOrchestrator;
 
-impl Default for ConfigurationOrchestrator {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct ConfigParser {
+    processors: Vec<Box<dyn SectionProcessor>>,
 }
 
-impl ConfigurationOrchestrator {
-    pub fn new() -> Self {
-        Self {}
+impl ConfigParser {
+    /// Helper to start the building process
+    pub fn builder() -> ConfigParserBuilder {
+        ConfigParserBuilder::default()
     }
 
-    pub fn compile(&self, yaml_text: &str) -> Result<EspforgeConfiguration> {
+    /// Helper to get a parser with standard defaults immediately
+    pub fn new() -> Self {
+        ConfigParserBuilder::default_processors().build()
+    }
+
+    // The logic stays here, but the name implies action now.
+    pub fn parse(&self, yaml_text: &str) -> Result<EspforgeConfiguration> {
         let raw_yaml: Value = serde_yaml_ng::from_str(yaml_text)?;
         let root_map = raw_yaml
             .as_mapping()
@@ -34,14 +38,7 @@ impl ConfigurationOrchestrator {
 
         let mut model = EspforgeConfiguration::default();
 
-        let mut processors: Vec<Box<dyn SectionProcessor>> =
-            inventory::iter::<ProcessorRegistration>
-                .into_iter()
-                .map(|reg| (reg.factory)())
-                .collect();
-
-        processors.sort_by_key(|b| std::cmp::Reverse(b.priority()));
-        for processor in processors {
+        for processor in &self.processors {
             let key = processor.section_key();
             if let Some(section_content) = root_map.get(Value::String(key.to_string())) {
                 processor
@@ -52,10 +49,51 @@ impl ConfigurationOrchestrator {
 
         if model.chip.is_empty() {
             return Err(anyhow::anyhow!(
-                "Project configuration missing required 'espforge.chip' or 'espforge.platform' definition"
+                "Project configuration missing required 'espforge.chip' or 'espforge.platform'"
             ));
         }
 
         Ok(model)
+    }
+}
+
+
+pub struct ConfigParserBuilder {
+    processors: Vec<Box<dyn SectionProcessor>>,
+}
+
+impl Default for ConfigParserBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ConfigParserBuilder {
+    pub fn new() -> Self {
+        Self {
+            processors: Vec::new(),
+        }
+    }
+
+    pub fn default_processors() -> Self {
+        Self::new()
+            .with_processor(Box::new(project::ProjectInfoProvisioner))
+            .with_processor(Box::new(esp32::PlatformProvisioner))
+            .with_processor(Box::new(components::ComponentProvisioner))
+            .with_processor(Box::new(devices::DeviceProvisioner))
+    }
+
+    pub fn with_processor(mut self, processor: Box<dyn SectionProcessor>) -> Self {
+        self.processors.push(processor);
+        self
+    }
+
+    // Returns the Parser, not another Builder
+    pub fn build(mut self) -> ConfigParser {
+        self.processors.sort_by_key(|p| std::cmp::Reverse(p.priority()));
+
+        ConfigParser {
+            processors: self.processors,
+        }
     }
 }

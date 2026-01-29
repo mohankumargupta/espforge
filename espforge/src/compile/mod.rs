@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::parse::ConfigurationOrchestrator;
-use crate::parse::model::EspforgeConfiguration;
+use crate::parse::ConfigParser;
+use espforge_common::EspforgeConfiguration;
 
 // Declare sub-modules
 mod assets;
@@ -28,8 +28,8 @@ impl ProjectCompiler {
             config_path.display()
         ))?;
 
-        let orchestrator = ConfigurationOrchestrator::new();
-        let model = orchestrator.compile(&content)?;
+        let parser = ConfigParser::new();
+        let model = parser.parse(&content)?;
 
         let base_dir = config_path
             .parent()

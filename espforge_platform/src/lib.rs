@@ -2,7 +2,6 @@
 
 pub mod logger;
 pub mod delay;
-pub mod components;
 pub mod gpio; 
 pub mod bus;
 pub mod i2c;

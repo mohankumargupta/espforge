@@ -11,3 +11,4 @@ components:
     using: LED
     with:
       gpio: $gpio2
+      active_low: false

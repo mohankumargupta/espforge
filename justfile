@@ -55,5 +55,6 @@ fix:
 espgenerate:
     esp-generate --chip esp32c3 -o esp-backtrace -o vscode blank
 
-
+debug:
+    just -f justfile.debug
 
