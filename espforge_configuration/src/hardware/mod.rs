@@ -15,7 +15,11 @@ pub enum ResolutionError {
     #[error("Configuration section 'esp32.{0}' is missing or empty")]
     MissingSection(String),
     #[error("Resource '{name}' not found in 'esp32.{section}'. Available: {available:?}")]
-    ResourceNotFound { name: String, section: String, available: Vec<String> },
+    ResourceNotFound {
+        name: String,
+        section: String,
+        available: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

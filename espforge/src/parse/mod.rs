@@ -1,7 +1,7 @@
+use crate::parse::processor::SectionProcessor;
+use anyhow::{Context, Result};
 use espforge_configuration::EspforgeConfiguration;
 use serde_yaml_ng::Value;
-use anyhow::{Result, Context};
-use crate::parse::processor::SectionProcessor;
 
 pub mod components;
 pub mod devices;
@@ -14,6 +14,12 @@ pub struct ConfigParser {
     processors: Vec<Box<dyn SectionProcessor>>,
 }
 
+impl Default for ConfigParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfigParser {
     pub fn builder() -> ConfigParserBuilder {
         ConfigParserBuilder::default()
@@ -24,9 +30,9 @@ impl ConfigParser {
     }
 
     pub fn parse(&self, yaml_text: &str) -> Result<EspforgeConfiguration> {
-        let root_value: Value = serde_yaml_ng::from_str(yaml_text)
-            .context("Failed to parse YAML")?;
-        
+        let root_value: Value =
+            serde_yaml_ng::from_str(yaml_text).context("Failed to parse YAML")?;
+
         let root_map = root_value
             .as_mapping()
             .ok_or_else(|| anyhow::anyhow!("Config must be a map"))?;
@@ -36,7 +42,7 @@ impl ConfigParser {
         for processor in &self.processors {
             let key = processor.section_key();
             // Value::String key lookup in serde_yaml_ng Mapping
-            if let Some(section_content) = root_map.get(&Value::String(key.to_string())) {
+            if let Some(section_content) = root_map.get(Value::String(key.to_string())) {
                 processor
                     .process(section_content, &mut model)
                     .with_context(|| format!("Error processing configuration section '{}'", key))?;
@@ -45,7 +51,7 @@ impl ConfigParser {
 
         // Validate chip existence by checking the map
         if !model.espforge.contains_key("platform") && !model.espforge.contains_key("chip") {
-             return Err(anyhow::anyhow!(
+            return Err(anyhow::anyhow!(
                 "Config must specify a chip/platform (e.g., 'platform: esp32c3')"
             ));
         }
@@ -54,15 +60,11 @@ impl ConfigParser {
     }
 }
 
+#[derive(Default)]
 pub struct ConfigParserBuilder {
     processors: Vec<Box<dyn SectionProcessor>>,
 }
 
-impl Default for ConfigParserBuilder {
-    fn default() -> Self {
-        Self { processors: Vec::new() }
-    }
-}
 
 impl ConfigParserBuilder {
     pub fn default_processors() -> Self {
@@ -79,7 +81,10 @@ impl ConfigParserBuilder {
     }
 
     pub fn build(mut self) -> ConfigParser {
-        self.processors.sort_by_key(|p| std::cmp::Reverse(p.priority()));
-        ConfigParser { processors: self.processors }
+        self.processors
+            .sort_by_key(|p| std::cmp::Reverse(p.priority()));
+        ConfigParser {
+            processors: self.processors,
+        }
     }
 }

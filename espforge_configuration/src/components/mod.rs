@@ -5,7 +5,7 @@ use serde_yaml_ng::Value;
 pub struct Component {
     #[serde(alias = "using")]
     pub driver: String,
-    
+
     #[serde(alias = "with", default)]
     pub properties: Value,
 }
@@ -14,7 +14,7 @@ pub struct Component {
 pub struct Device {
     #[serde(alias = "using")]
     pub driver: String,
-    
+
     #[serde(alias = "with", default)]
     pub properties: Value,
 }

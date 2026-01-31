@@ -14,7 +14,6 @@ pub struct I2cDeviceConfig {
 #[cfg(not(feature = "std"))]
 impl Default for I2cDeviceConfig {
     fn default() -> Self {
-        Self {
-        }
+        Self {}
     }
 }

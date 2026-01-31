@@ -1,6 +1,6 @@
-use espforge_configuration::EspforgeConfiguration;
 use crate::parse::processor::SectionProcessor;
 use anyhow::{Context, Result};
+use espforge_configuration::EspforgeConfiguration;
 use serde::Deserialize;
 use serde_yaml_ng::Value;
 
@@ -31,7 +31,7 @@ impl SectionProcessor for ProjectInfoProvisioner {
 
         // Store chip/platform in the map
         if let Some(chip) = config.platform.or(config.chip) {
-             model.espforge.insert("platform".to_string(), chip);
+            model.espforge.insert("platform".to_string(), chip);
         }
 
         println!("✓ Project metadata provisioned");

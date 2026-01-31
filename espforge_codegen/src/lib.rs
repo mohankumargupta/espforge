@@ -1,19 +1,19 @@
 use crate::context::CodegenContext;
-use anyhow::{Result, Context as _};
+use anyhow::{Context as _, Result};
 use espforge_configuration::EspforgeConfiguration;
-use quote::quote;
-use syn;
 use prettyplease;
 use quote::format_ident;
+use quote::quote;
+use syn;
 
 pub mod builders;
 pub mod component_builders;
-pub mod generator;
-pub mod scaffold;
 pub mod context;
-pub mod resolver;
-pub mod registry;
 pub mod dependency;
+pub mod generator;
+pub mod registry;
+pub mod resolver;
+pub mod scaffold;
 
 pub use scaffold::esp_generate;
 
@@ -39,7 +39,7 @@ pub fn generate_entry_point_source(model: &EspforgeConfiguration) -> Result<Stri
 
         use espforge_platform::esp_hal;
         use esp_backtrace as _;
-        
+
         use #crate_ident::generated::{Context, PeripheralRegistry, Components, Devices};
         use espforge_platform::logger::Logger;
         use espforge_platform::delay::Delay;
@@ -59,7 +59,7 @@ pub fn generate_entry_point_source(model: &EspforgeConfiguration) -> Result<Stri
 
             // Resource Provisioning
             let registry = PeripheralRegistry::new(peripherals);
-            
+
             // Component & Device Initialization
             let mut components = Components::new(&registry);
             let devices = Devices::new(&registry, &mut components, &mut delay);
@@ -88,24 +88,24 @@ pub fn generate_entry_point_source(model: &EspforgeConfiguration) -> Result<Stri
 pub fn generate_components_source(model: &EspforgeConfiguration) -> Result<String> {
     let ctx = CodegenContext::build(model)?;
     let tokens = ctx.generate()?;
-    
+
     let output = quote! {
         use espforge_platform::esp_hal;
         use core::cell::RefCell;
         use espforge_platform::gpio::{GPIOInput, GPIOOutput};
         use espforge_platform::esp_hal::gpio::{AnyPin, InputPin, OutputPin, Pin};
         use espforge_platform::esp_hal::delay::Delay as HalDelay;
-        
+
         use espforge_platform::bus::{SpiDevice, I2cDevice};
         use embedded_hal_bus::spi::RefCellDevice as SpiRefCellDevice;
         use embedded_hal_bus::i2c::RefCellDevice as I2cRefCellDevice;
-        
+
         use espforge_platform::esp_hal::spi::master::Spi;
         use espforge_platform::esp_hal::i2c::master::I2c;
         use espforge_platform::esp_hal::Blocking;
         use espforge_platform::esp_hal::gpio::Output;
         use espforge_components::components::button::ButtonConfig;
-        
+
         #tokens
     };
 

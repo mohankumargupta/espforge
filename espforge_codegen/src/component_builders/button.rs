@@ -24,11 +24,11 @@ pub fn generate(
     fields.push(quote! { pub #field: Input<'static> });
 
     init_logic.push(quote! {
-        let #field = Input::new(
-            registry.#pin_ref.borrow_mut().take().expect("Pin already claimed"),
-            InputConfig::default().with_pull(#pull)
-        );
-        });
+    let #field = Input::new(
+        registry.#pin_ref.borrow_mut().take().expect("Pin already claimed"),
+        InputConfig::default().with_pull(#pull)
+    );
+    });
 
     struct_init.push(quote! { #field });
     Ok(())

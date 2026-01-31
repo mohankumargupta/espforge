@@ -1,7 +1,10 @@
 use crate::registry::find_plugin;
 use crate::resolver::DependencyResolver;
 use anyhow::{Context, Result};
-use espforge_configuration::{EspforgeConfiguration, plugin::{GenerationContext, PluginKind, ResolvedDependency}};
+use espforge_configuration::{
+    EspforgeConfiguration,
+    plugin::{GenerationContext, PluginKind, ResolvedDependency},
+};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
@@ -63,7 +66,7 @@ impl CodegenContext {
 
                 if plugin.kind() == PluginKind::Component {
                     let deps = self.resolve_deps_for(name)?;
-                    
+
                     let ctx = GenerationContext {
                         model: &self.model,
                         instance_name: name,
@@ -71,9 +74,10 @@ impl CodegenContext {
                         resolved_deps: &deps,
                     };
 
-                    let code = plugin.generate(&ctx)
+                    let code = plugin
+                        .generate(&ctx)
                         .with_context(|| format!("Failed to generate component: {}", name))?;
-                    
+
                     fields.push(code.field);
                     inits.push(code.init);
                     struct_inits.push(code.struct_init);
@@ -89,7 +93,7 @@ impl CodegenContext {
             impl<'a> Components<'a> {
                 pub fn new(registry: &'a PeripheralRegistry) -> Self {
                     #(#inits)*
-                    
+
                     Self {
                         #(#struct_inits),*
                     }
@@ -105,12 +109,12 @@ impl CodegenContext {
 
         for name in &self.init_order {
             if let Some(spec) = self.model.devices.get(name) {
-                 let plugin = find_plugin(&spec.driver)
+                let plugin = find_plugin(&spec.driver)
                     .ok_or_else(|| anyhow::anyhow!("Unknown device driver: {}", spec.driver))?;
 
                 if plugin.kind() == PluginKind::Device {
                     let deps = self.resolve_deps_for(name)?;
-                    
+
                     let ctx = espforge_configuration::plugin::GenerationContext {
                         model: &self.model,
                         instance_name: name,
@@ -118,9 +122,10 @@ impl CodegenContext {
                         resolved_deps: &deps,
                     };
 
-                    let code = plugin.generate(&ctx)
+                    let code = plugin
+                        .generate(&ctx)
                         .with_context(|| format!("Failed to generate device: {}", name))?;
-                    
+
                     fields.push(code.field);
                     inits.push(code.init);
                     struct_inits.push(code.struct_init);
@@ -135,12 +140,12 @@ impl CodegenContext {
 
             impl<'a> Devices<'a> {
                 pub fn new(
-                    registry: &'a PeripheralRegistry, 
-                    components: &mut Components<'a>, 
+                    registry: &'a PeripheralRegistry,
+                    components: &mut Components<'a>,
                     delay: &mut espforge_platform::delay::Delay
                 ) -> Self {
                     #(#inits)*
-                    
+
                     Self {
                         #(#struct_inits),*
                     }
@@ -151,7 +156,7 @@ impl CodegenContext {
 
     fn resolve_deps_for(&self, instance: &str) -> Result<HashMap<String, ResolvedDependency>> {
         let mut resolved = HashMap::new();
-        
+
         let (driver, props) = if let Some(c) = self.model.components.get(instance) {
             (&c.driver, &c.properties)
         } else if let Some(d) = self.model.devices.get(instance) {
@@ -164,23 +169,23 @@ impl CodegenContext {
             if let Ok(deps) = plugin.dependencies(props) {
                 for dep in deps {
                     let dep_name = dep.name.strip_prefix('$').unwrap_or(&dep.name);
-                    
+
                     let access_path = if self.model.components.contains_key(dep_name) {
                         format!("components.{}", dep_name)
                     } else if self.model.devices.contains_key(dep_name) {
-                         format!("devices.{}", dep_name)
+                        format!("devices.{}", dep_name)
                     } else {
                         // Assume it is a hardware resource
                         format!("registry.{}", dep_name)
                     };
 
                     resolved.insert(
-                        dep_name.to_string(), 
+                        dep_name.to_string(),
                         ResolvedDependency {
                             name: dep_name.to_string(),
                             access_path,
                             kind: dep.kind,
-                        }
+                        },
                     );
                 }
             }

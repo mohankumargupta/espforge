@@ -25,7 +25,7 @@ macro_rules! config_struct {
                 pub $field: $ty,
             )*
         }
-        
+
         impl $crate::ConfigParser for $name {
             fn parse(value: &serde_yaml_ng::Value) -> anyhow::Result<Self> {
                 serde_yaml_ng::from_value(value.clone())
@@ -36,7 +36,12 @@ macro_rules! config_struct {
 }
 
 // Helper functions for common defaults
-pub fn default_false() -> bool { false }
-pub fn default_true() -> bool { true }
-pub fn default_i2c_addr() -> u8 { 0x3C }
-
+pub fn default_false() -> bool {
+    false
+}
+pub fn default_true() -> bool {
+    true
+}
+pub fn default_i2c_addr() -> u8 {
+    0x3C
+}

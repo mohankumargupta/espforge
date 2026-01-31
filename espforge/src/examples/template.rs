@@ -8,6 +8,12 @@ use std::path::Path;
 
 pub struct ExampleExporter;
 
+impl Default for ExampleExporter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExampleExporter {
     pub fn new() -> Self {
         Self

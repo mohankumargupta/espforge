@@ -13,15 +13,15 @@ impl SectionProcessor for DeviceProvisioner {
     }
 
     fn priority(&self) -> u32 {
-        100 
+        100
     }
 
     fn process(&self, content: &Value, model: &mut EspforgeConfiguration) -> Result<()> {
-        let devices: HashMap<String, Device> = 
+        let devices: HashMap<String, Device> =
             serde_yaml_ng::from_value(content.clone()).context("Failed to deserialize devices")?;
-        
+
         model.devices.extend(devices);
-        
+
         println!("✓ {} devices provisioned", model.devices.len());
         Ok(())
     }

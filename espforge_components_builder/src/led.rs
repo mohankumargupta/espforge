@@ -1,41 +1,41 @@
-use anyhow::{Context, Result};
 use espforge_common::components::led::LedConfig;
-use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext, Plugin, PluginKind, PluginRegistration};
-use quote::{format_ident, quote};
-use serde_yaml_ng;
+use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext};
+use espforge_macros::ComponentPlugin;
+use anyhow::{Result, Context};
+use quote::{quote, format_ident};
 
+#[derive(ComponentPlugin)]
+#[plugin(name = "LED")]
 pub struct LedPlugin;
 
-impl Plugin for LedPlugin {
-    fn name(&self) -> &'static str { "LED" }
-    fn kind(&self) -> PluginKind { PluginKind::Component }
-    
-    fn validate(&self, properties: &serde_yaml_ng::Value) -> Result<()> {
+impl LedPlugin {
+    fn validate_properties(&self, properties: &serde_yaml_ng::Value) -> Result<()> {
         let _config: LedConfig = serde_yaml_ng::from_value(properties.clone())?;
         Ok(())
     }
-
-    fn dependencies(&self, properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
+    
+    fn resolve_dependencies(&self, properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
         let config: LedConfig = serde_yaml_ng::from_value(properties.clone())?;
         let pin_name = config.gpio.strip_prefix('$').unwrap_or(&config.gpio);
         Ok(vec![Dependency::pin(pin_name)])
     }
-
-    fn generate(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
+    
+    fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
         let config: LedConfig = serde_yaml_ng::from_value(ctx.properties.clone())
             .context("Invalid LED configuration")?;
         let field_ident = format_ident!("{}", ctx.instance_name);
-        
         let pin_name = config.gpio.strip_prefix('$').unwrap_or(&config.gpio);
         let pin_ident = format_ident!("{}", pin_name);
-
+        
         let active_low = config.active_low;
-
+        
         Ok(GeneratedCode {
             field: quote! { pub #field_ident: espforge_components::components::led::component::LED },
             init: quote! {
                 let #field_ident = espforge_components::components::led::component::LED::new(
-                    espforge_platform::gpio::GPIOOutput::from_pin(registry.#pin_ident.borrow_mut().take().unwrap()),
+                    espforge_platform::gpio::GPIOOutput::from_pin(
+                        registry.#pin_ident.borrow_mut().take().unwrap(),
+                    ),
                     espforge_components::components::led::component::LedConfig {
                         active_low: #active_low,
                         ..Default::default()
@@ -45,8 +45,4 @@ impl Plugin for LedPlugin {
             struct_init: quote! { #field_ident },
         })
     }
-}
-
-inventory::submit! {
-    PluginRegistration(&LedPlugin)
 }

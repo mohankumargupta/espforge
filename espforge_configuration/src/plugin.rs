@@ -1,11 +1,11 @@
+use crate::EspforgeConfiguration;
 use anyhow::Result;
+use proc_macro2::TokenStream;
 use serde_yaml_ng::Value;
 use std::collections::HashMap;
-use crate::EspforgeConfiguration;
-use proc_macro2::TokenStream;
 
-// Note: dependency module was not moved, but Plugin relies on it. 
-// We need to decide where Dependency lives. 
+// Note: dependency module was not moved, but Plugin relies on it.
+// We need to decide where Dependency lives.
 // If Dependency is used for graph resolution, it belongs in codegen or configuration.
 // Let's assume it's part of the Plugin trait interface.
 // For now, we will define a simple struct here or import if it exists.
@@ -30,16 +30,28 @@ pub enum DependencyKind {
 
 impl Dependency {
     pub fn component(name: impl Into<String>) -> Self {
-        Self { name: name.into(), kind: DependencyKind::Component }
+        Self {
+            name: name.into(),
+            kind: DependencyKind::Component,
+        }
     }
     pub fn device(name: impl Into<String>) -> Self {
-        Self { name: name.into(), kind: DependencyKind::Device }
+        Self {
+            name: name.into(),
+            kind: DependencyKind::Device,
+        }
     }
     pub fn peripheral(name: impl Into<String>) -> Self {
-        Self { name: name.into(), kind: DependencyKind::Peripheral }
+        Self {
+            name: name.into(),
+            kind: DependencyKind::Peripheral,
+        }
     }
     pub fn pin(name: impl Into<String>) -> Self {
-        Self { name: name.into(), kind: DependencyKind::Pin }
+        Self {
+            name: name.into(),
+            kind: DependencyKind::Pin,
+        }
     }
 }
 
@@ -71,12 +83,15 @@ pub struct GenerationContext<'a> {
 pub trait Plugin: Sync + Send {
     fn name(&self) -> &'static str;
     fn kind(&self) -> PluginKind;
-    fn validate(&self, _properties: &Value) -> Result<()> { Ok(()) }
-    fn dependencies(&self, _properties: &Value) -> Result<Vec<Dependency>> { Ok(vec![]) }
+    fn validate(&self, _properties: &Value) -> Result<()> {
+        Ok(())
+    }
+    fn dependencies(&self, _properties: &Value) -> Result<Vec<Dependency>> {
+        Ok(vec![])
+    }
     fn generate(&self, ctx: &GenerationContext) -> Result<GeneratedCode>;
 }
 
 pub struct PluginRegistration(pub &'static dyn Plugin);
 
 inventory::collect!(PluginRegistration);
-

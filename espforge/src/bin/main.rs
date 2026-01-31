@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use espforge_lib::cli;
 
-fn main() -> Result<()> {  
+fn main() -> Result<()> {
     use espforge_components_builder;
     use espforge_devices_builder;
 

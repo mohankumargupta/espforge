@@ -1,4 +1,3 @@
-
 use crate::builders;
 use anyhow::Result;
 use espforge_configuration::EspforgeConfiguration;
@@ -12,8 +11,18 @@ pub fn generate_peripheral_registry(model: &EspforgeConfiguration) -> Result<Tok
 
     if let Some(esp32) = &model.esp32 {
         builders::gpio::generate_gpio_pins(&esp32.gpio, &mut fields, &mut struct_init)?;
-        builders::i2c::generate_i2c_buses(&esp32.i2c, &mut fields, &mut init_logic, &mut struct_init)?;
-        builders::spi::generate_spi_buses(&esp32.spi, &mut fields, &mut init_logic, &mut struct_init)?;
+        builders::i2c::generate_i2c_buses(
+            &esp32.i2c,
+            &mut fields,
+            &mut init_logic,
+            &mut struct_init,
+        )?;
+        builders::spi::generate_spi_buses(
+            &esp32.spi,
+            &mut fields,
+            &mut init_logic,
+            &mut struct_init,
+        )?;
     }
 
     Ok(quote! {
@@ -24,7 +33,7 @@ pub fn generate_peripheral_registry(model: &EspforgeConfiguration) -> Result<Tok
         impl PeripheralRegistry {
             pub fn new(mut p: espforge_platform::esp_hal::peripherals::Peripherals) -> Self {
                 #(#init_logic)*
-                
+
                 Self {
                     #(#struct_init),*
                 }

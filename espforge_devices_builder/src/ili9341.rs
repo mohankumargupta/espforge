@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Context, Result};
-use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext, Plugin, PluginKind, PluginRegistration};
-use quote::{format_ident, quote};
-use inventory;
+use anyhow::{Context, Result, anyhow};
+use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext};
+use espforge_macros::DevicePlugin;
 use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 use serde::Deserialize;
 use serde_yaml_ng;
 use std::str::FromStr;
@@ -15,20 +15,18 @@ pub struct ILI9341Config {
     pub cs: String,
 }
 
+#[derive(DevicePlugin)]
+#[plugin(name = "ili9341")]
 pub struct ILI9341Plugin;
 
-impl Plugin for ILI9341Plugin {
-    fn name(&self) -> &'static str { "ili9341" }
-
-    fn kind(&self) -> PluginKind { PluginKind::Device }
-
-    fn validate(&self, properties: &serde_yaml_ng::Value) -> Result<()> {
+impl ILI9341Plugin {
+    fn validate_properties(&self, properties: &serde_yaml_ng::Value) -> Result<()> {
         let _config: ILI9341Config = serde_yaml_ng::from_value(properties.clone())
             .context("Invalid ILI9341 configuration")?;
         Ok(())
     }
 
-    fn dependencies(&self, properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
+    fn resolve_dependencies(&self, properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
         let config: ILI9341Config = serde_yaml_ng::from_value(properties.clone())?;
         let spi_name = config.spi.strip_prefix('$').unwrap_or(&config.spi);
         let dc_name = config.dc.strip_prefix('$').unwrap_or(&config.dc);
@@ -43,7 +41,7 @@ impl Plugin for ILI9341Plugin {
         ])
     }
 
-    fn generate(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
+    fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
         let config: ILI9341Config = serde_yaml_ng::from_value(ctx.properties.clone())
             .context("Failed to parse ILI9341 properties")?;
 
@@ -56,13 +54,21 @@ impl Plugin for ILI9341Plugin {
         let cs_name = config.cs.strip_prefix('$').unwrap_or(&config.cs);
 
         // Retrieve resolved dependencies
-        let spi_dep = ctx.resolved_deps.get(spi_name)
+        let spi_dep = ctx
+            .resolved_deps
+            .get(spi_name)
             .ok_or_else(|| anyhow!("SPI component '{}' not found", spi_name))?;
-        let dc_dep = ctx.resolved_deps.get(dc_name)
+        let dc_dep = ctx
+            .resolved_deps
+            .get(dc_name)
             .ok_or_else(|| anyhow!("DC pin '{}' not found", dc_name))?;
-        let rst_dep = ctx.resolved_deps.get(rst_name)
+        let rst_dep = ctx
+            .resolved_deps
+            .get(rst_name)
             .ok_or_else(|| anyhow!("RST pin '{}' not found", rst_name))?;
-        let cs_dep = ctx.resolved_deps.get(cs_name)
+        let cs_dep = ctx
+            .resolved_deps
+            .get(cs_name)
             .ok_or_else(|| anyhow!("CS pin '{}' not found", cs_name))?;
 
         let spi_access: TokenStream = TokenStream::from_str(&spi_dep.access_path)
@@ -123,8 +129,3 @@ impl Plugin for ILI9341Plugin {
         })
     }
 }
-
-inventory::submit! {
-    PluginRegistration(&ILI9341Plugin)
-}
-

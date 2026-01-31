@@ -15,8 +15,6 @@ pub struct LedConfig {
 #[cfg(not(feature = "std"))]
 impl Default for LedConfig {
     fn default() -> Self {
-        Self {
-            active_low: false,
-        }
+        Self { active_low: false }
     }
 }

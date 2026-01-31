@@ -20,8 +20,8 @@ pub struct ButtonConfig {
 impl Default for ButtonConfig {
     fn default() -> Self {
         Self {
-            pull_up: false, 
-            pull_down: false, 
+            pull_up: false,
+            pull_down: false,
         }
     }
 }

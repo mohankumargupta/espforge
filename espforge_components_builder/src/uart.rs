@@ -1,39 +1,36 @@
-use anyhow::{Context, Result};
 use espforge_common::components::uart::UartDeviceConfig;
-use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext, Plugin, PluginKind, PluginRegistration};
-use quote::{format_ident, quote};
-use serde_yaml_ng;
+use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext};
+use espforge_macros::ComponentPlugin;
+use anyhow::{Result, Context};
+use quote::{quote, format_ident};
 
+#[derive(ComponentPlugin)]
+#[plugin(name = "UartDevice")]
 pub struct UartDevicePlugin;
 
-impl Plugin for UartDevicePlugin {
-    fn name(&self) -> &'static str { "UartDevice" }
-    fn kind(&self) -> PluginKind { PluginKind::Component }
-    
-    fn validate(&self, properties: &serde_yaml_ng::Value) -> Result<()> {
+impl UartDevicePlugin {
+    fn validate_properties(&self, properties: &serde_yaml_ng::Value) -> Result<()> {
         let _config: UartDeviceConfig = serde_yaml_ng::from_value(properties.clone())?;
         Ok(())
     }
-
-    fn dependencies(&self, _properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
-        // We don't return dependency on peripheral here because UARTs are not typically
-        // in the generated registry (they are often created on demand via UartDevice).
-        // If they were in the registry, we would use Dependency::peripheral.
-        Ok(vec![])
+    
+    fn resolve_dependencies(&self, properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
+        let config: UartDeviceConfig = serde_yaml_ng::from_value(properties.clone())?;
+        let uart_name = config.uart.strip_prefix('$').unwrap_or(&config.uart);
+        Ok(vec![Dependency::peripheral(uart_name)])
     }
-
-    fn generate(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
+    
+    fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
         let config: UartDeviceConfig = serde_yaml_ng::from_value(ctx.properties.clone())
             .context("Invalid UartDevice configuration")?;
         let field_ident = format_ident!("{}", ctx.instance_name);
         
         let uart_name = config.uart.strip_prefix('$').unwrap_or(&config.uart);
-
+        
         let esp32 = ctx.model.esp32.as_ref().context("ESP32 config missing")?;
         let uart_conf = esp32.uart.get(uart_name).context("UART config missing")?;
         
         let baud = config.baud.unwrap_or(uart_conf.baud);
-        
         let uart_num = uart_conf.uart as u8;
         let tx = uart_conf.tx as u8;
         let rx = uart_conf.rx as u8;
@@ -51,8 +48,4 @@ impl Plugin for UartDevicePlugin {
             struct_init: quote! { #field_ident },
         })
     }
-}
-
-inventory::submit! {
-    PluginRegistration(&UartDevicePlugin)
 }

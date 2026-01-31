@@ -1,5 +1,7 @@
 use anyhow::{Context, Result, anyhow};
-use espforge_codegen::{esp_generate, generate_components_source,generate_entry_point_source, generate_lib_source};
+use espforge_codegen::{
+    esp_generate, generate_components_source, generate_entry_point_source, generate_lib_source,
+};
 use espforge_configuration::EspforgeConfiguration;
 use std::fs;
 use std::path::Path;
@@ -22,15 +24,14 @@ pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
     // Delegate content generation to the codegen crate
     let content = generate_lib_source()?;
 
-    fs::write(src_dir.join("lib.rs"), content)
-        .context("Failed to write src/lib.rs")?;
+    fs::write(src_dir.join("lib.rs"), content).context("Failed to write src/lib.rs")?;
     Ok(())
 }
 
 /// Renders and writes the main entry point (main.rs)
 pub fn generate_entry_point(src_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
     let content = generate_entry_point_source(model)
-         .map_err(|e| anyhow!("Failed to render main.rs: {}", e))?;
+        .map_err(|e| anyhow!("Failed to render main.rs: {}", e))?;
 
     let path = src_dir.join("bin/main.rs");
     if let Some(p) = path.parent() {
@@ -39,4 +40,3 @@ pub fn generate_entry_point(src_dir: &Path, model: &EspforgeConfiguration) -> Re
     fs::write(&path, content).context("Failed to write generated main.rs")?;
     Ok(())
 }
-
