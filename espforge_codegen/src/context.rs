@@ -1,9 +1,7 @@
+use crate::registry::find_plugin;
 use crate::resolver::DependencyResolver;
 use anyhow::{Context, Result};
-use espforge_common::codegen::{find_plugin};
-use espforge_common::dependency::ResolvedDependency;
-use espforge_common::EspforgeConfiguration;
-use espforge_common::plugin::PluginKind;
+use espforge_configuration::{EspforgeConfiguration, plugin::{GenerationContext, PluginKind, ResolvedDependency}};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
@@ -66,7 +64,7 @@ impl CodegenContext {
                 if plugin.kind() == PluginKind::Component {
                     let deps = self.resolve_deps_for(name)?;
                     
-                    let ctx = espforge_common::plugin::GenerationContext {
+                    let ctx = GenerationContext {
                         model: &self.model,
                         instance_name: name,
                         properties: &spec.properties,
@@ -113,7 +111,7 @@ impl CodegenContext {
                 if plugin.kind() == PluginKind::Device {
                     let deps = self.resolve_deps_for(name)?;
                     
-                    let ctx = espforge_common::plugin::GenerationContext {
+                    let ctx = espforge_configuration::plugin::GenerationContext {
                         model: &self.model,
                         instance_name: name,
                         properties: &spec.properties,

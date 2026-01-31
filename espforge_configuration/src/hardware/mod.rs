@@ -8,45 +8,31 @@ pub mod i2c;
 pub mod spi;
 pub mod uart;
 
-pub use gpio::{GpioPinConfig, GpioRef, PinDirection};
-pub use i2c::{I2cConfig, I2cRef};
-pub use spi::{SpiConfig, SpiRef};
-pub use uart::{UartConfig, UartRef};
-
-#[derive(Debug, Error)]
+#[derive(Error, Debug)]
 pub enum ResolutionError {
     #[error("Reference '{0}' is invalid: missing '$' prefix")]
-    InvalidPrefix(String),
-
+    InvalidReference(String),
     #[error("Configuration section 'esp32.{0}' is missing or empty")]
-    MissingSection(&'static str),
-
+    MissingSection(String),
     #[error("Resource '{name}' not found in 'esp32.{section}'. Available: {available:?}")]
-    NotFound {
-        name: String,
-        section: &'static str,
-        available: Vec<String>,
-    },
+    ResourceNotFound { name: String, section: String, available: Vec<String> },
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Esp32Config {
     #[serde(default)]
-    pub gpio: HashMap<String, GpioPinConfig>,
+    pub gpio: HashMap<String, gpio::GpioPinConfig>,
     #[serde(default)]
-    pub spi: HashMap<String, SpiConfig>,
+    pub i2c: HashMap<String, i2c::I2cConfig>,
     #[serde(default)]
-    pub i2c: HashMap<String, I2cConfig>,
+    pub spi: HashMap<String, spi::SpiConfig>,
     #[serde(default)]
-    pub uart: HashMap<String, UartConfig>,
+    pub uart: HashMap<String, uart::UartConfig>,
 }
 
 pub trait ResolvePeripheral<'a>: AsRef<str> {
     type Config;
-
-    /// Returns the map containing the configs for this peripheral type
     fn get_map(root: &'a EspforgeConfiguration) -> Option<&'a HashMap<String, Self::Config>>;
-
-    fn as_str(&self) -> &str;
     fn section_name() -> &'static str;
+    fn as_str(&self) -> &str;
 }

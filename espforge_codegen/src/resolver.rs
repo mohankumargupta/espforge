@@ -1,5 +1,8 @@
+use crate::registry::find_plugin;
 use anyhow::Result;
-use espforge_common::{EspforgeConfiguration, codegen::find_plugin, dependency::DependencyGraph};
+use espforge_configuration::EspforgeConfiguration;
+
+use crate::dependency::DependencyGraph;
 
 pub struct DependencyResolver<'a> {
     model: &'a EspforgeConfiguration,

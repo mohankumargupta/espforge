@@ -1,5 +1,5 @@
 use anyhow::Result;
-use espforge_common::EspforgeConfiguration;
+use espforge_configuration::EspforgeConfiguration;
 use serde_yaml_ng::Value;
 
 //use crate::parse::model::EspforgeConfiguration;

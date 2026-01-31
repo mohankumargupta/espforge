@@ -1,57 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use anyhow::{anyhow, Result};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum DependencyKind {
-    Component,
-    Device,
-    Pin,
-    Peripheral,
-}
-
-#[derive(Debug, Clone)]
-pub struct Dependency {
-    pub kind: DependencyKind,
-    pub name: String,
-}
-
-impl Dependency {
-    pub fn component(name: impl Into<String>) -> Self {
-        Self {
-            kind: DependencyKind::Component,
-            name: name.into(),
-        }
-    }
-    
-    pub fn device(name: impl Into<String>) -> Self {
-        Self {
-            kind: DependencyKind::Device,
-            name: name.into(),
-        }
-    }
-    
-    pub fn pin(name: impl Into<String>) -> Self {
-        Self {
-            kind: DependencyKind::Pin,
-            name: name.into(),
-            
-        }
-    }
-    
-    pub fn peripheral(name: impl Into<String>) -> Self {
-        Self {
-            kind: DependencyKind::Peripheral,
-            name: name.into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ResolvedDependency {
-    pub kind: DependencyKind,
-    pub name: String,
-    pub access_path: String,
-}
+pub use espforge_configuration::plugin::{Dependency, DependencyKind, ResolvedDependency};
 
 pub struct DependencyGraph {
     nodes: HashSet<String>,

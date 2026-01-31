@@ -1,6 +1,6 @@
-use espforge_common::EspforgeConfiguration;
 use anyhow::{Context, Result, anyhow};
 use espforge_codegen::{esp_generate, generate_components_source,generate_entry_point_source, generate_lib_source};
+use espforge_configuration::EspforgeConfiguration;
 use std::fs;
 use std::path::Path;
 

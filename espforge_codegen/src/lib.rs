@@ -1,6 +1,6 @@
-use espforge_common::EspforgeConfiguration;
 use crate::context::CodegenContext;
 use anyhow::{Result, Context as _};
+use espforge_configuration::EspforgeConfiguration;
 use quote::quote;
 use syn;
 use prettyplease;
@@ -12,6 +12,8 @@ pub mod generator;
 pub mod scaffold;
 pub mod context;
 pub mod resolver;
+pub mod registry;
+pub mod dependency;
 
 pub use scaffold::esp_generate;
 

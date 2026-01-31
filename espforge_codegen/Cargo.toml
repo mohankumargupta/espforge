@@ -13,9 +13,11 @@ documentation = "https://github.com/mohankumargupta/espforge"
 
 [dependencies]
 espforge_common = {version="0.1.1", path = "../espforge_common" }
+espforge_configuration = { path = "../espforge_configuration", version = "0.1.0" }
 quote = "1.0"
 proc-macro2 = "1.0"
 prettyplease = "0.2" 
 syn = { version = "2.0", features = ["full", "parsing"] }
 anyhow = "1.0"
 serde_yaml_ng="0.10"
+inventory = "0.3"

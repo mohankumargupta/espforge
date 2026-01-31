@@ -1,5 +1,5 @@
 use anyhow::Result;
-use espforge_common::hardware::spi::SpiConfig;
+use espforge_configuration::hardware::spi::SpiConfig;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::HashMap;

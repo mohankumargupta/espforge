@@ -1,7 +1,7 @@
 use anyhow::Result;
+use espforge_configuration::EspforgeConfiguration;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use espforge_common::EspforgeConfiguration;
 
 pub fn generate(
     name: &str,

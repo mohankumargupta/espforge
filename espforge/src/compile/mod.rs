@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
+use espforge_configuration::EspforgeConfiguration;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::parse::ConfigParser;
-use espforge_common::EspforgeConfiguration;
 
 // Declare sub-modules
 mod assets;

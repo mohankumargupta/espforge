@@ -1,6 +1,5 @@
-use espforge_common::dependency::Dependency;
-use espforge_common::plugin::{GeneratedCode, GenerationContext, Plugin, PluginKind};
 use anyhow::{anyhow, Context, Result};
+use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext, Plugin, PluginKind, PluginRegistration};
 use quote::{format_ident, quote};
 use inventory;
 use proc_macro2::TokenStream;
@@ -126,6 +125,6 @@ impl Plugin for ILI9341Plugin {
 }
 
 inventory::submit! {
-    espforge_common::plugin::PluginRegistration(&ILI9341Plugin)
+    PluginRegistration(&ILI9341Plugin)
 }
 

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use espforge_common::hardware::i2c::I2cConfig;
+use espforge_configuration::hardware::i2c::I2cConfig;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::HashMap;

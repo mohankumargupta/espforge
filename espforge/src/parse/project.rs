@@ -1,5 +1,5 @@
-use crate::parse::EspforgeConfiguration;
-use crate::parse::processor::{ProcessorRegistration, SectionProcessor};
+use espforge_configuration::EspforgeConfiguration;
+use crate::parse::processor::SectionProcessor;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_yaml_ng::Value;
@@ -26,22 +26,15 @@ impl SectionProcessor for ProjectInfoProvisioner {
         let config: ProjectConfig = serde_yaml_ng::from_value(content.clone())
             .context("Failed to deserialize espforge configuration")?;
 
-        model.name = config.name;
+        // Store name in the map
+        model.espforge.insert("name".to_string(), config.name);
 
-        if let Some(chip) = config.chip {
-            model.chip = chip;
-        } else if let Some(platform) = config.platform {
-            model.chip = platform;
+        // Store chip/platform in the map
+        if let Some(chip) = config.platform.or(config.chip) {
+             model.espforge.insert("platform".to_string(), chip);
         }
 
         println!("✓ Project metadata provisioned");
-
         Ok(())
-    }
-}
-
-inventory::submit! {
-    ProcessorRegistration {
-        factory: || Box::new(ProjectInfoProvisioner),
     }
 }

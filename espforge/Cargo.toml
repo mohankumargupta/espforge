@@ -28,6 +28,7 @@ required-features = ["cli"]
 [dependencies]
 espforge_common = { version="0.1.1", path = "../espforge_common"}
 espforge_components_builder = { version="0.1.0", path = "../espforge_components_builder" }
+espforge_configuration = { path = "../espforge_configuration", version = "0.1.0" }
 espforge_devices_builder = { version="0.1.0", path = "../espforge_devices_builder" }
 espforge_codegen = { version="0.1.1", path = "../espforge_codegen" }
 espforge_dialogue = { version = "0.1.0", path = "../espforge_dialogue" }

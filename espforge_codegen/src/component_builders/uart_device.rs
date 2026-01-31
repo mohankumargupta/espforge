@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use espforge_common::EspforgeConfiguration;
+use espforge_configuration::EspforgeConfiguration;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 

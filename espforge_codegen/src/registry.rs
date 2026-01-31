@@ -1,4 +1,4 @@
-use crate::plugin::{Plugin, PluginKind, PluginRegistration};
+use espforge_configuration::plugin::{Plugin, PluginKind, PluginRegistration};
 
 pub fn find_plugin(name: &str) -> Option<&'static dyn Plugin> {
     inventory::iter::<PluginRegistration>

@@ -1,7 +1,7 @@
 
 use crate::builders;
 use anyhow::Result;
-use espforge_common::EspforgeConfiguration;
+use espforge_configuration::EspforgeConfiguration;
 use proc_macro2::TokenStream;
 use quote::quote;
 

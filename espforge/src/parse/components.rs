@@ -1,12 +1,11 @@
 use crate::parse::EspforgeConfiguration;
 use crate::parse::processor::SectionProcessor;
 use anyhow::{Context, Result, bail};
-use espforge_common::components::Component;
-use espforge_common::dependency::DependencyKind;
-use espforge_common::hardware::Esp32Config;
+use espforge_codegen::{dependency::DependencyKind, registry::find_plugin};
+use espforge_configuration::{components::Component, hardware::Esp32Config};
 use serde_yaml_ng::Value;
 use std::collections::HashMap;
-use espforge_common::codegen::find_plugin;
+
 
 pub struct ComponentProvisioner;
 

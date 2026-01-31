@@ -1,7 +1,7 @@
 use crate::parse::EspforgeConfiguration;
 use crate::parse::processor::SectionProcessor;
 use anyhow::{Context, Result};
-use espforge_common::components::Device;
+use espforge_configuration::components::Device;
 use serde_yaml_ng::Value;
 use std::collections::HashMap;
 

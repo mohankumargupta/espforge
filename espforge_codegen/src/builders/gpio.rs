@@ -1,5 +1,5 @@
 use anyhow::Result;
-use espforge_common::hardware::gpio::GpioPinConfig;
+use espforge_configuration::hardware::gpio::GpioPinConfig;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::HashMap;

@@ -1,5 +1,4 @@
-use espforge_common::dependency::Dependency;
-use espforge_common::plugin::{GeneratedCode, GenerationContext, Plugin, PluginKind};
+use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext, Plugin, PluginKind, PluginRegistration};
 use inventory;
 use anyhow::{anyhow, Context, Result};
 use quote::{format_ident, quote};
@@ -76,5 +75,5 @@ impl Plugin for SSD1306Plugin {
 }
 
 inventory::submit!(
-    espforge_common::plugin::PluginRegistration(&SSD1306Plugin)
+    PluginRegistration(&SSD1306Plugin)
 );

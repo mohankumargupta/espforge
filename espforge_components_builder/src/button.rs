@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use espforge_common::components::button::ButtonConfig;
-use espforge_common::dependency::Dependency;
-use espforge_common::plugin::{GeneratedCode, GenerationContext, Plugin, PluginKind, PluginRegistration};
+use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext, Plugin, PluginKind, PluginRegistration};
 use quote::{format_ident, quote};
 use serde_yaml_ng;
 
