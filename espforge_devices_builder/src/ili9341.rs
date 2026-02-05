@@ -89,7 +89,7 @@ impl ILI9341Plugin {
         Ok(GeneratedCode {
             field: quote! {
                 pub #field_ident: espforge_devices::devices::ili9341::device::ILI9341Device<
-                    espforge_platform::bus::SpiDevice<'a>,
+                    espforge_platform::bus::SpiDevice<'static>,
                     espforge_platform::gpio::GPIOOutput,
                     espforge_platform::gpio::GPIOOutput
                 >

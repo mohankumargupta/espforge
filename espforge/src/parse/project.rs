@@ -9,6 +9,7 @@ struct ProjectConfig {
     name: String,
     chip: Option<String>,
     platform: Option<String>,
+    runtime: Option<String>,
 }
 
 pub struct ProjectInfoProvisioner;
@@ -26,12 +27,16 @@ impl SectionProcessor for ProjectInfoProvisioner {
         let config: ProjectConfig = serde_yaml_ng::from_value(content.clone())
             .context("Failed to deserialize espforge configuration")?;
 
-        // Store name in the map
         model.espforge.insert("name".to_string(), config.name);
 
-        // Store chip/platform in the map
         if let Some(chip) = config.platform.or(config.chip) {
             model.espforge.insert("platform".to_string(), chip);
+        }
+
+        if let Some(runtime) = config.runtime {
+            if runtime == "embassy" {
+                model.espforge.insert("runtime".to_string(), runtime);
+            } 
         }
 
         println!("✓ Project metadata provisioned");

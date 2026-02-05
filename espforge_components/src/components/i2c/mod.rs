@@ -6,24 +6,25 @@ use embedded_hal::i2c::{I2c, Operation, ErrorType};
 pub use espforge_common::components::i2c::I2cDeviceConfig;
 
 #[derive(Copy, Clone)]
-pub struct I2C<'a> {
-    pub device: espforge_platform::bus::I2cDevice<'a>,
+pub struct I2C {
+    pub device: espforge_platform::bus::I2cDevice<'static>,
 }
 
-impl<'a> I2C<'a> {
-    pub fn new(bus: &'a RefCell<HalI2c<'static, Blocking>>) -> Self {
+impl I2C {
+    pub fn new(bus: &'static RefCell<HalI2c<'static, Blocking>>) -> Self {
         Self {
             device: espforge_platform::bus::I2cDevice::new(bus),
         }
     }
 }
 
-impl<'a> ErrorType for I2C<'a> {
-    type Error = <espforge_platform::bus::I2cDevice<'a> as ErrorType>::Error;
+impl ErrorType for I2C {
+    type Error = <espforge_platform::bus::I2cDevice<'static> as ErrorType>::Error;
 }
 
-impl<'a> I2c for I2C<'a> {
+impl I2c for I2C {
     fn transaction(&mut self, address: u8, operations: &mut [Operation<'_>]) -> Result<(), Self::Error> {
         self.device.transaction(address, operations)
     }
 }
+

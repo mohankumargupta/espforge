@@ -20,5 +20,6 @@ embedded-io = "0.7.1"
 [features]
 default = []
 std = ["espforge_common/std"]
+embassy = ["espforge_platform/embassy"]
 
 [workspace]

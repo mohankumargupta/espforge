@@ -23,3 +23,29 @@ impl Button {
         }
     }
 }
+
+#[cfg(feature = "embassy")]
+impl Button {
+    /// Wait for the button to be pressed (async)
+    pub async fn wait_for_pressed(&mut self) {
+        if self.config.pull_up {
+            self.input.wait_for_falling_edge().await;
+        } else {
+            self.input.wait_for_rising_edge().await;
+        }
+    }
+
+    /// Wait for the button to be released (async)
+    pub async fn wait_for_released(&mut self) {
+        if self.config.pull_up {
+            self.input.wait_for_rising_edge().await;
+        } else {
+            self.input.wait_for_falling_edge().await;
+        }
+    }
+
+    /// Wait for any edge (press or release)
+    pub async fn wait_for_any_edge(&mut self) {
+        self.input.wait_for_any_edge().await;
+    }
+}

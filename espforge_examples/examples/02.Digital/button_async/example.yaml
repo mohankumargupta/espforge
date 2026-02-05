@@ -1,0 +1,22 @@
+espforge:
+  name: button_async
+  platform: esp32c3
+  runtime: embassy
+
+esp32:
+  gpio:
+    gpio7: { pin: 7, direction: output }
+    gpio9: { pin: 9, direction: input  }
+
+components:
+  red_led:
+    using: LED
+    with:
+      gpio: $gpio7
+      active_low: false
+
+  button:
+    using: Button
+    with:
+      gpio: $gpio9
+      pull_up: true

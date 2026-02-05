@@ -1,10 +1,12 @@
-use crate::Context;
+use crate::{component, Context};
 use embedded_hal::i2c::I2c;
 
 pub fn setup(ctx: &mut Context) {
-    ctx.logger.info("I2C Scanner Example");
-    
-    let i2c = &mut ctx.components.my_i2c;
+    let logger = ctx.logger;
+    let delay = ctx.delay;
+    let i2c = component!(my_i2c);
+
+    logger.info("I2C Scanner Example");
     
     // Scan addresses 1 to 127
     for address in 1..127 {
@@ -12,7 +14,7 @@ pub fn setup(ctx: &mut Context) {
         // If it ACKs, there is a device there
         match i2c.write(address, &[]) {
             Ok(_) => {
-                ctx.logger.info(format_args!("Found device at address 0x{:02x}", address));
+                logger.info(format_args!("Found device at address 0x{:02x}", address));
             },
             Err(_) => {
                 // No device or error
@@ -20,7 +22,7 @@ pub fn setup(ctx: &mut Context) {
         }
         
         // Small delay between scans not to flood
-        ctx.delay.delay_ms(10);
+        delay.delay_ms(10);
     }
     
     ctx.logger.info("Scan complete");

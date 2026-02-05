@@ -7,25 +7,25 @@ use embedded_hal::spi::{ErrorType, SpiBus};
 pub use espforge_common::components::spi::SpiDeviceConfig;
 
 #[derive(Clone, Copy)]
-pub struct SPI<'a> {
-    bus: &'a RefCell<Spi<'static, Blocking>>,
+pub struct SPI {
+    bus: &'static RefCell<Spi<'static, Blocking>>,
 }
 
-impl<'a> SPI<'a> {
-    pub fn new(bus: &'a RefCell<Spi<'static, Blocking>>) -> Self {
+impl SPI {
+    pub fn new(bus: &'static RefCell<Spi<'static, Blocking>>) -> Self {
         Self { bus }
     }
 
-    pub fn bus(&self) -> &'a RefCell<Spi<'static, Blocking>> {
+    pub fn bus(&self) -> &'static RefCell<Spi<'static, Blocking>> {
         self.bus
     }
 }
 
-impl<'a> ErrorType for SPI<'a> {
+impl ErrorType for SPI {
     type Error = espforge_platform::esp_hal::spi::Error;
 }
 
-impl<'a> SpiBus for SPI<'a> {
+impl SpiBus for SPI {
     fn read(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
         self.bus.borrow_mut().read(words)
     }

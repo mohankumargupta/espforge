@@ -39,12 +39,9 @@ impl CodegenContext {
 
             #devices
 
-            pub struct Context<'a> {
+            pub struct Context {
                 pub logger: espforge_platform::logger::Logger,
                 pub delay: espforge_platform::delay::Delay,
-                pub registry: &'a PeripheralRegistry,
-                pub components: Components<'a>,
-                pub devices: Devices<'a>,
             }
         })
     }
@@ -54,9 +51,9 @@ impl CodegenContext {
     }
 
     fn generate_components(&self) -> Result<TokenStream> {
-        let mut fields = vec![quote! { _marker: core::marker::PhantomData<&'a ()> }];
+        let mut fields = vec![];
         let mut inits = vec![];
-        let mut struct_inits = vec![quote! { _marker: core::marker::PhantomData }];
+        let mut struct_inits = vec![];
 
         // We iterate based on the topological sort order to ensure dependencies are initialized first
         for name in &self.init_order {
@@ -86,12 +83,12 @@ impl CodegenContext {
         }
 
         Ok(quote! {
-            pub struct Components<'a> {
+            pub struct Components {
                 #(#fields),*
             }
 
-            impl<'a> Components<'a> {
-                pub fn new(registry: &'a PeripheralRegistry) -> Self {
+            impl Components {
+                pub fn new(registry: &'static mut PeripheralRegistry) -> Self {
                     #(#inits)*
 
                     Self {
@@ -103,9 +100,9 @@ impl CodegenContext {
     }
 
     fn generate_devices(&self) -> Result<TokenStream> {
-        let mut fields = vec![quote! { _marker: core::marker::PhantomData<&'a ()> }];
+        let mut fields = vec![];
         let mut inits = vec![];
-        let mut struct_inits = vec![quote! { _marker: core::marker::PhantomData }];
+        let mut struct_inits = vec![];
 
         for name in &self.init_order {
             if let Some(spec) = self.model.devices.get(name) {
@@ -134,14 +131,14 @@ impl CodegenContext {
         }
 
         Ok(quote! {
-            pub struct Devices<'a> {
+            pub struct Devices {
                 #(#fields),*
             }
 
-            impl<'a> Devices<'a> {
+            impl Devices {
                 pub fn new(
-                    registry: &'a PeripheralRegistry,
-                    components: &mut Components<'a>,
+                    components: &'static mut Components,
+                    registry: &'static mut PeripheralRegistry,
                     delay: &mut espforge_platform::delay::Delay
                 ) -> Self {
                     #(#inits)*

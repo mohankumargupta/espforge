@@ -40,7 +40,7 @@ impl I2cDevicePlugin {
             .map_err(|e| anyhow::anyhow!("Failed to parse access path: {}", e))?;
 
         Ok(GeneratedCode {
-            field: quote! { pub #field_ident: espforge_components::components::i2c::I2C<'a> },
+            field: quote! { pub #field_ident: espforge_components::components::i2c::I2C },
             init: quote! {
                 let #field_ident = espforge_components::components::i2c::I2C::new(&#bus_access);
             },

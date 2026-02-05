@@ -8,7 +8,7 @@ use std::path::Path;
 
 /// Invokes the esp-generate CLI tool to create the initial project structure
 pub fn generate_scaffold(model: &EspforgeConfiguration) -> Result<()> {
-    esp_generate(model.get_name(), model.get_chip(), false)
+    esp_generate(model.get_name(), model.get_chip(), model.is_embassy())
 }
 
 /// Generates the generated.rs file containing component definitions
@@ -21,7 +21,7 @@ pub fn generate_component_code(src_dir: &Path, model: &EspforgeConfiguration) ->
 
 /// Creates the lib.rs file that exports the project structure
 pub fn setup_library_structure(src_dir: &Path) -> Result<()> {
-    // Delegate content generation to the codegen crate
+    // Delegate content generation to the espforge_codegen crate
     let content = generate_lib_source()?;
 
     fs::write(src_dir.join("lib.rs"), content).context("Failed to write src/lib.rs")?;

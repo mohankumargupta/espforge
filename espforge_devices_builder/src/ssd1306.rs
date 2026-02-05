@@ -70,7 +70,7 @@ impl SSD1306Plugin {
 
         Ok(GeneratedCode {
             field: quote! {
-                pub #field_ident: espforge_devices::devices::ssd1306::device::SSD1306Device<espforge_components::components::i2c::I2C<'a>>
+                pub #field_ident: espforge_devices::devices::ssd1306::device::SSD1306Device<espforge_components::components::i2c::I2C>
             },
             init: quote! {
                 let mut #field_ident = espforge_devices::devices::ssd1306::device::SSD1306Device::new(

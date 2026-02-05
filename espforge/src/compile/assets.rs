@@ -57,11 +57,11 @@ fn update_wokwi_config_for_chip(project_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn provision_platform_assets(_project_dir: &Path, _src_dir: &Path) -> Result<()> {
-    // Platform assets are now handled via Git dependencies in Cargo.toml
-    // No local extraction required.
-    Ok(())
-}
+// pub fn provision_platform_assets(_project_dir: &Path, _src_dir: &Path) -> Result<()> {
+//     // Platform assets are now handled via Git dependencies in Cargo.toml
+//     // No local extraction required.
+//     Ok(())
+// }
 
 pub fn inject_app_code(base_dir: &Path, src_dir: &Path) -> Result<()> {
     let rust_source = base_dir.join("app/rust/app.rs");

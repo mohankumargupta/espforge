@@ -8,6 +8,9 @@ pub mod i2c;
 pub mod spi;
 pub mod uart;
 
+#[cfg(feature = "embassy")]
+pub mod signal;
+
 pub use esp_hal;
 
  

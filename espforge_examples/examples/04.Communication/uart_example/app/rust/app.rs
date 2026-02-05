@@ -1,24 +1,26 @@
-#[warn(unused_variables)]
+#[allow(unused_variables)]
 
-use crate::Context;
+use crate::{component, Context};
 
 pub fn setup(ctx: &mut Context) {
-    ctx.logger.info("UART Example");
-    // Access component by mutable reference to avoid move
-    let uart = &mut ctx.components.my_uart; 
+    let logger = ctx.logger;
+    let delay = ctx.delay;
+    let uart = component!(my_uart); 
+    
+    logger.info("UART Example");
     uart.write("Hello\n");
 }
 
 pub fn forever(ctx: &mut Context) {
-    let uart = &mut ctx.components.my_uart;
+    let logger = ctx.logger;
+    let delay = ctx.delay;
+    let uart = component!(my_uart);
     
-    // Check for buffered line (non-blocking)
     if uart.buffer_until_newline() {        
-        ctx.logger.info("Message received:");
-        ctx.logger.info(uart.get_buffered_string());
+        logger.info("Message received:");
+        logger.info(uart.get_buffered_string());
         uart.clear_buffer();
     }
     
-    // Use delay from context
-    ctx.delay.delay_ms(10);
+    delay.delay_ms(10);
 }

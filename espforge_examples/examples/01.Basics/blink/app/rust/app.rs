@@ -1,16 +1,18 @@
 #[allow(unused_variables)]
 
-use crate::Context;
+use crate::{component, Context};
 
 pub fn setup(ctx: &mut Context) {
-    ctx.logger.info("Starting Blink Example");
+    let logger = ctx.logger;
+
+    logger.info("Starting Blink Example");
 }
 
 pub fn forever(ctx: &mut Context) {
-    // Access the red_led defined in example.yaml
-    ctx.components.red_led.toggle();
-    
-    // Use the delay from context
-    ctx.delay.delay_ms(1000);
+    let delay = ctx.delay;
+    let led = component!(red_led);
+
+    led.toggle();
+    delay.delay_ms(1000);
 }
 

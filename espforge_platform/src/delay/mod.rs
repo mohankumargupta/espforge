@@ -1,29 +1,27 @@
-use esp_hal::delay::Delay as HalDelay;
+//! Unified delay abstraction for both blocking and async modes
+//! 
+//! # Usage
+//! 
+//! ## Blocking mode
+//! ```rust,ignore
+//! pub fn forever(ctx: &mut Context) {
+//!     ctx.delay.delay_ms(1000);
+//! }
+//! ```
+//! 
+//! ## Async mode (Embassy)
+//! ```rust,ignore
+//! pub async fn forever(ctx: &mut Context<'_>) {
+//!     ctx.delay.delay_ms(1000).await;
+//! }
+//! ```
 
-#[derive(Clone, Copy)]
-pub struct Delay {
-    inner: HalDelay,
-}
+#[cfg(not(feature = "embassy"))]
+mod blocking;
+#[cfg(not(feature = "embassy"))]
+pub use blocking::Delay;
 
-impl Delay {
-    pub fn new() -> Self {
-        Self {
-            inner: HalDelay::new(),
-        }
-    }
-
-    pub fn delay_ms(&self, ms: u32) {
-        self.inner.delay_millis(ms);
-    }
-
-    pub fn delay_us(&self, us: u32) {
-        self.inner.delay_micros(us);
-    }
-}
-
-impl embedded_hal::delay::DelayNs for Delay {
-    fn delay_ns(&mut self, ns: u32) {
-        self.inner.delay_ns(ns);
-    }
-}
-
+#[cfg(feature = "embassy")]
+mod embassy;
+#[cfg(feature = "embassy")]
+pub use embassy::Delay;

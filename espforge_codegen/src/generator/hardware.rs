@@ -9,6 +9,22 @@ pub fn generate_peripheral_registry(model: &EspforgeConfiguration) -> Result<Tok
     let mut init_logic = Vec::new();
     let mut struct_init = Vec::new();
 
+    if model.is_embassy() {
+        fields.push(quote! { 
+            pub sw_interrupt: core::cell::RefCell<Option<esp_hal::peripherals::SW_INTERRUPT<'static>>> 
+        });
+        struct_init.push(quote! { 
+            sw_interrupt: core::cell::RefCell::new(Some(p.SW_INTERRUPT)) 
+        });
+        fields.push(quote! { 
+            pub timg0: core::cell::RefCell<Option<esp_hal::peripherals::TIMG0<'static>>> 
+        });
+        struct_init.push(quote! { 
+            timg0: core::cell::RefCell::new(Some(p.TIMG0)) 
+        });
+
+    }
+
     if let Some(esp32) = &model.esp32 {
         builders::gpio::generate_gpio_pins(&esp32.gpio, &mut fields, &mut struct_init)?;
         builders::i2c::generate_i2c_buses(

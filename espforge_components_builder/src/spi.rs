@@ -40,7 +40,7 @@ impl SpiDevicePlugin {
             .map_err(|e| anyhow::anyhow!("Failed to parse access path: {}", e))?;
 
         Ok(GeneratedCode {
-            field: quote! { pub #field_ident: espforge_components::components::spi::SPI<'a> },
+            field: quote! { pub #field_ident: espforge_components::components::spi::SPI },
             init: quote! {
                 let #field_ident = espforge_components::components::spi::SPI::new(&#bus_access);
             },

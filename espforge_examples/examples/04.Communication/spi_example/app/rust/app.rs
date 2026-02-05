@@ -1,13 +1,13 @@
 #[warn(unused_variables)]
 
-use crate::Context;
+use crate::{component, Context};
 use embedded_hal::spi::SpiBus;
 
 pub fn setup(ctx: &mut Context) {
-    let logger = &ctx.logger;
-    logger.info("SPI Example");
+    let logger = ctx.logger;
+    let spi = component!(my_spi);
     
-    let spi = &mut ctx.components.my_spi;
+    logger.info("SPI Example");
     
     // Example: Transfer data (Write 0x03, Read next byte)
     // In full-duplex SPI, read and write happen simultaneously.

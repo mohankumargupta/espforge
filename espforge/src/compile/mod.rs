@@ -42,7 +42,7 @@ impl ProjectCompiler {
     fn run(&self) -> Result<()> {
         println!("   Project: {}", self.model.get_name());
         println!("   Chip:    {}", self.model.get_chip());
-
+        println!("   Runtime: {}", self.model.runtime_name());
         println!("🔨 Generating artifacts...");
 
         // Step 1: Scaffold
@@ -52,11 +52,11 @@ impl ProjectCompiler {
         let src_dir = project_dir.join("src");
 
         // Step 2: Dependencies
-        dependencies::add_dependencies(&project_dir)?;
+        dependencies::add_dependencies(&project_dir, &self.model)?;
 
         // Step 3: Assets (Wokwi, Platform, User App)
         assets::copy_wokwi_files(&self.base_dir, &project_dir)?;
-        assets::provision_platform_assets(&project_dir, &src_dir)?;
+        //assets::provision_platform_assets(&project_dir, &src_dir)?;
         assets::inject_app_code(&self.base_dir, &src_dir)?;
 
         // Step 4: Code Generation
