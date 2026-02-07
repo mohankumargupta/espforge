@@ -2,10 +2,14 @@
 
 pub mod logger;
 pub mod delay;
-pub mod gpio; 
+pub mod gpio;
+#[cfg(any(feature = "spi", feature = "i2c"))]
 pub mod bus;
+#[cfg(feature = "i2c")]
 pub mod i2c;
+#[cfg(feature = "spi")]
 pub mod spi;
+#[cfg(feature = "uart")]
 pub mod uart;
 
 #[cfg(feature = "embassy")]

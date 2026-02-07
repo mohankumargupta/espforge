@@ -77,6 +77,7 @@ pub fn main() -> Result<()> {
     println!("cargo:rustc-env=ESPFORGE_COMPONENTS_VERSION={}", c_ver);
     println!("cargo:rustc-env=ESPFORGE_DEVICES_VERSION={}", d_ver);
     println!("cargo:rerun-if-changed=embedded_versions.toml");
+    println!("cargo:rerun-if-changed=dependencies.toml");
 
     Ok(())
 }

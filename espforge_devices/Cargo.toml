@@ -13,12 +13,16 @@ documentation = "https://github.com/mohankumargupta/espforge"
 
 
 [dependencies]
-espforge_platform = {version="0.1.4", path = "../espforge_platform" }
-ssd1306 = "0.10.0"
-ili9341 = "0.6.0"
-display-interface-spi = "0.5.0"
+espforge_platform = { version = "0.1.4", path = "../espforge_platform" }
+ssd1306 = { version = "0.10.0", optional = true }
+ili9341 = { version = "0.6.0", optional = true }
+display-interface-spi = { version = "0.5.0", optional = true }
 embedded-graphics = "0.8.1"
 embedded-hal = "1.0.0"
-display-interface-i2c = "0.5.0"
+display-interface-i2c = { version = "0.5.0", optional = true }
+
+[features]
+ssd1306 = ["dep:ssd1306", "dep:display-interface-i2c"]
+ili9341 = ["dep:ili9341", "dep:display-interface-spi"]
 
 [workspace]

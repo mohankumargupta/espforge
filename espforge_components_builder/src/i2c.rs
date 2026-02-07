@@ -1,12 +1,12 @@
+use anyhow::{Context, Result};
 use espforge_common::components::i2c::I2cDeviceConfig;
 use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext};
 use espforge_macros::ComponentPlugin;
-use anyhow::{Result, Context};
-use quote::{quote, format_ident};
+use quote::{format_ident, quote};
 use std::str::FromStr;
 
 #[derive(ComponentPlugin)]
-#[plugin(name = "I2cDevice")]
+#[plugin(name = "I2cDevice", features = "i2c")]
 pub struct I2cDevicePlugin;
 
 impl I2cDevicePlugin {
@@ -14,13 +14,13 @@ impl I2cDevicePlugin {
         let _config: I2cDeviceConfig = serde_yaml_ng::from_value(properties.clone())?;
         Ok(())
     }
-    
+
     fn resolve_dependencies(&self, properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
         let config: I2cDeviceConfig = serde_yaml_ng::from_value(properties.clone())?;
         let i2c_name = config.i2c.strip_prefix('$').unwrap_or(&config.i2c);
         Ok(vec![Dependency::peripheral(i2c_name)])
     }
-    
+
     fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
         let config: I2cDeviceConfig = serde_yaml_ng::from_value(ctx.properties.clone())
             .context("Invalid I2cDevice configuration")?;

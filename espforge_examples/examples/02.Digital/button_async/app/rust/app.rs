@@ -2,12 +2,11 @@
 
 use crate::{component, Context};
 use embassy_executor::Spawner;
-
 use espforge_platform::signal;
 
 signal!(BUTTON_PRESSED);
 
-pub async fn setup(ctx: &mut Context, spawner: Spawner) {
+pub async fn setup(_ctx: &mut Context, spawner: Spawner) {
   spawner.spawn(button_task()).ok();
 }
 

@@ -1,0 +1,18 @@
+[dependencies]
+static_cell = "2.1"
+embedded-hal = "1.0.0"
+
+[dependencies.embedded-hal-bus]
+version = "0.3.0"
+optional = true
+
+[dependencies.embedded-io]
+version = "0.7.1"
+optional = true
+
+[features]
+default = []
+i2c = ["embedded-hal-bus"]
+spi = ["embedded-hal-bus"]
+uart = ["embedded-io"]
+

@@ -21,6 +21,7 @@ pub fn derive_device_plugin(input: TokenStream) -> TokenStream {
 fn derive_plugin_internal(input: TokenStream, kind_path: proc_macro2::TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
+    let mut required_features = quote!(vec![]);
 
     // Extract name from #[plugin(name = "...")]
     let plugin_name = input
@@ -35,6 +36,19 @@ fn derive_plugin_internal(input: TokenStream, kind_path: proc_macro2::TokenStrea
                     let lit: LitStr = value.parse()?;
                     name_val = Some(lit.value());
                 }
+
+                if meta.path.is_ident("features") {
+                    let value = meta.value()?;
+                    let lit: LitStr = value.parse()?;
+                    let feats: Vec<String> = lit
+                        .value()
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    required_features = quote!(vec![#(#feats.to_string()),*]);
+                }
+
                 Ok(())
             });
             name_val
@@ -64,6 +78,8 @@ fn derive_plugin_internal(input: TokenStream, kind_path: proc_macro2::TokenStrea
                 -> ::anyhow::Result<::espforge_configuration::plugin::GeneratedCode> {
                 self.generate_code(ctx)
             }
+
+            fn required_features(&self) -> Vec<String> { #required_features }
         }
 
         ::inventory::submit! {

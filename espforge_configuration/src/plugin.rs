@@ -86,6 +86,9 @@ pub trait Plugin: Sync + Send {
     fn validate(&self, _properties: &Value) -> Result<()> {
         Ok(())
     }
+    fn required_features(&self) -> Vec<String> {
+        vec![]
+    }
     fn dependencies(&self, _properties: &Value) -> Result<Vec<Dependency>> {
         Ok(vec![])
     }

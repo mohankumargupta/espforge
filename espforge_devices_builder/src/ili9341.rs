@@ -16,7 +16,7 @@ pub struct ILI9341Config {
 }
 
 #[derive(DevicePlugin)]
-#[plugin(name = "ili9341")]
+#[plugin(name = "ili9341", features = "ili9341")]
 pub struct ILI9341Plugin;
 
 impl ILI9341Plugin {

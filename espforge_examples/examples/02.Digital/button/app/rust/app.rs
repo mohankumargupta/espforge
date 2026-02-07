@@ -3,11 +3,11 @@
 use crate::{component, Context};
 
 pub fn setup(ctx: &mut Context) {
-  ctx.logger.info("Button Example");
+  let logger = ctx.logger;
+  logger.info("Button Example");
 }
 
 pub fn forever(ctx: &mut Context) {
-    let logger = ctx.logger;
     let delay = ctx.delay;
     let button = component!(button);
     let led = component!(red_led);

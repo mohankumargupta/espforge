@@ -19,8 +19,8 @@ pub struct EspforgeConfiguration {
 #[derive(Default, Debug, Clone, PartialEq)]
 pub enum RuntimeMode {
     #[default]
-    None,     
-    Embassy,   
+    None,
+    Embassy,
 }
 
 impl EspforgeConfiguration {
@@ -39,7 +39,7 @@ impl EspforgeConfiguration {
             .unwrap_or("esp32")
     }
 
-        pub fn get_runtime(&self) -> RuntimeMode {
+    pub fn get_runtime(&self) -> RuntimeMode {
         self.espforge
             .get("runtime")
             .map(|s| s.as_str())
@@ -52,11 +52,11 @@ impl EspforgeConfiguration {
             })
             .unwrap_or(RuntimeMode::None)
     }
-    
+
     pub fn is_embassy(&self) -> bool {
         matches!(self.get_runtime(), RuntimeMode::Embassy)
     }
-    
+
     pub fn runtime_name(&self) -> &'static str {
         match self.get_runtime() {
             RuntimeMode::Embassy => "embassy",

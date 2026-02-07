@@ -15,10 +15,13 @@ documentation = "https://github.com/mohankumargupta/espforge"
 espforge_common = { version = "0.1.1", path = "../espforge_common", default-features = false }
 espforge_platform = { version = "0.1.4", path = "../espforge_platform" }
 embedded-hal = "1.0.0"
-embedded-io = "0.7.1"
+embedded-io = { version = "0.7.1", optional = true }
 
 [features]
 default = []
+i2c = [ "espforge_platform/i2c" ]
+spi = [ "espforge_platform/spi" ]
+uart = ["dep:embedded-io", "espforge_platform/uart"]
 std = ["espforge_common/std"]
 embassy = ["espforge_platform/embassy"]
 

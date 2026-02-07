@@ -36,10 +36,10 @@ impl SectionProcessor for ProjectInfoProvisioner {
         if let Some(runtime) = config.runtime {
             if runtime == "embassy" {
                 model.espforge.insert("runtime".to_string(), runtime);
-            } 
+            }
         }
 
-        println!("✓ Project metadata provisioned");
+        println!("✓ Project configuration valid and processed.");
         Ok(())
     }
 }

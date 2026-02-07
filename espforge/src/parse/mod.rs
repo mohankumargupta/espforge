@@ -65,7 +65,6 @@ pub struct ConfigParserBuilder {
     processors: Vec<Box<dyn SectionProcessor>>,
 }
 
-
 impl ConfigParserBuilder {
     pub fn default_processors() -> Self {
         Self::default()

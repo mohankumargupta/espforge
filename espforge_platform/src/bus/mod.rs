@@ -3,11 +3,13 @@ use esp_hal::spi::master::Spi;
 use esp_hal::Blocking;
 use crate::gpio::GPIOOutput;
 
+#[cfg(feature = "spi")]
 pub struct SpiDevice<'a> {
     bus: &'a RefCell<Spi<'static, Blocking>>,
     cs: GPIOOutput,
 }
 
+#[cfg(feature = "spi")]
 impl<'a> SpiDevice<'a> {
     pub fn new(bus: &'a RefCell<Spi<'static, Blocking>>, cs: GPIOOutput) -> Self {
         Self { bus, cs }
@@ -18,10 +20,12 @@ impl<'a> SpiDevice<'a> {
     }
 }
 
+#[cfg(feature = "spi")]
 impl<'a> embedded_hal::spi::ErrorType for SpiDevice<'a> {
     type Error = esp_hal::spi::Error;
 }
 
+#[cfg(feature = "spi")]
 impl<'a> embedded_hal::spi::SpiDevice for SpiDevice<'a> {
     fn transaction(&mut self, operations: &mut [embedded_hal::spi::Operation<'_, u8>]) -> Result<(), Self::Error> {
         let mut bus = self.bus.borrow_mut();
@@ -37,11 +41,13 @@ impl<'a> embedded_hal::spi::SpiDevice for SpiDevice<'a> {
     }
 }
 
+#[cfg(feature = "i2c")]
 #[derive(Copy, Clone)]
 pub struct I2cDevice<'a> {
     bus: &'a RefCell<esp_hal::i2c::master::I2c<'static, Blocking>>,
 }
 
+#[cfg(feature = "i2c")]
 impl<'a> I2cDevice<'a> {
     pub fn new(bus: &'a RefCell<esp_hal::i2c::master::I2c<'static, Blocking>>) -> Self {
         Self { bus }
@@ -52,10 +58,12 @@ impl<'a> I2cDevice<'a> {
     }
 }
 
+#[cfg(feature = "i2c")]
 impl<'a> embedded_hal::i2c::ErrorType for I2cDevice<'a> {
     type Error = esp_hal::i2c::master::Error;
 }
 
+#[cfg(feature = "i2c")]
 impl<'a> embedded_hal::i2c::I2c for I2cDevice<'a> {
     fn transaction(&mut self, address: u8, operations: &mut [embedded_hal::i2c::Operation<'_>]) -> Result<(), Self::Error> {
         // Create a temporary RefCellDevice to manage shared bus access

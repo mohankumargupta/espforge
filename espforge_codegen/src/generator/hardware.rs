@@ -13,16 +13,15 @@ pub fn generate_peripheral_registry(model: &EspforgeConfiguration) -> Result<Tok
         fields.push(quote! { 
             pub sw_interrupt: core::cell::RefCell<Option<esp_hal::peripherals::SW_INTERRUPT<'static>>> 
         });
-        struct_init.push(quote! { 
-            sw_interrupt: core::cell::RefCell::new(Some(p.SW_INTERRUPT)) 
+        struct_init.push(quote! {
+            sw_interrupt: core::cell::RefCell::new(Some(p.SW_INTERRUPT))
         });
-        fields.push(quote! { 
-            pub timg0: core::cell::RefCell<Option<esp_hal::peripherals::TIMG0<'static>>> 
+        fields.push(quote! {
+            pub timg0: core::cell::RefCell<Option<esp_hal::peripherals::TIMG0<'static>>>
         });
-        struct_init.push(quote! { 
-            timg0: core::cell::RefCell::new(Some(p.TIMG0)) 
+        struct_init.push(quote! {
+            timg0: core::cell::RefCell::new(Some(p.TIMG0))
         });
-
     }
 
     if let Some(esp32) = &model.esp32 {

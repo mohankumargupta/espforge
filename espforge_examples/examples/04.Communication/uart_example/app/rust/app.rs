@@ -4,7 +4,6 @@ use crate::{component, Context};
 
 pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
-    let delay = ctx.delay;
     let uart = component!(my_uart); 
     
     logger.info("UART Example");

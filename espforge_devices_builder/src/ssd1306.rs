@@ -16,7 +16,7 @@ pub struct SSD1306Config {
 }
 
 #[derive(DevicePlugin)]
-#[plugin(name = "ssd1306")]
+#[plugin(name = "ssd1306", features = "ssd1306")]
 pub struct SSD1306Plugin;
 
 impl SSD1306Plugin {

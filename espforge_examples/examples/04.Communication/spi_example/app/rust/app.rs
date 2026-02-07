@@ -25,6 +25,7 @@ pub fn setup(ctx: &mut Context) {
 }
 
 pub fn forever(ctx: &mut Context) {
-    // nothing
+    let delay = ctx.delay;
+    delay.delay_ms(1000);
 }
 

@@ -8,7 +8,7 @@ pub async fn setup(ctx: &mut Context, _spawner: Spawner) {
 }
 
 pub async fn forever(ctx: &mut Context) {
-    let mut led = component!(red_led);
+    let led = component!(red_led);
     led.toggle();
     ctx.delay.delay_ms(1000).await;
 }
