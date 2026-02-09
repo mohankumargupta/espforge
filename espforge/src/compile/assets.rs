@@ -1,9 +1,57 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Ok, Result};
+use espforge_configuration::EspforgeConfiguration;
+use espforge_esp32metadata::BoardDatabase;
 use std::fs;
 use std::path::Path;
 
+pub fn generate_wokwi_config(
+    base_dir: &Path,
+    project_dir: &Path,
+    model: &EspforgeConfiguration,
+) -> Result<()> {
+    let diagram_json = base_dir.join("diagram.json");
+    if !diagram_json.exists() {
+        return Ok(());
+    }
+
+    let db = BoardDatabase::load();
+    let chip = model.get_chip();
+
+    let board_id = db.wokwi_board(chip)
+        .ok_or_else(|| anyhow::anyhow!("Unsupported chip variant for Wokwi: {}", chip))?;
+
+    let content = fs::read_to_string(&diagram_json)
+        .context("Failed to read diagram.json template")?;
+
+    // Replace board type placeholder (both formats for compatibility)
+    let mut processed = content
+        .replace("PLACEHOLDER_WOKWI_BOARD", &board_id);
+
+    // Replace GND pin placeholders
+    if let Some(gnd_tl) = db.gnd_top_left(chip) {
+        processed = processed.replace("PLACEHOLDER_GND_TOP_LEFT", &gnd_tl);
+    }
+    if let Some(gnd_tr) = db.gnd_top_right(chip) {
+        processed = processed.replace("PLACEHOLDER_GND_TOP_RIGHT", &gnd_tr);
+    }
+    if let Some(gnd_bl) = db.gnd_bottom_left(chip) {
+        processed = processed.replace("PLACEHOLDER_GND_BOTTOM_LEFT", &gnd_bl);
+    }
+    if let Some(gnd_br) = db.gnd_bottom_right(chip) {
+        processed = processed.replace("PLACEHOLDER_GND_BOTTOM_RIGHT", &gnd_br);
+    }
+
+    serde_json::from_str::<serde_json::Value>(&processed)
+        .context("Processed diagram.json is not valid JSON")?;
+
+    fs::write(project_dir.join("diagram.json"), processed)
+        .context("Failed to write processed diagram.json")?;
+
+    println!("   ✓ Processed diagram.json for {}", board_id);
+    Ok(())
+}
+
 pub fn copy_wokwi_files(base_dir: &Path, project_dir: &Path) -> Result<()> {
-    // List of files to copy if they exist in the source directory
     let files_to_copy = ["wokwi.toml", "diagram.json", "chip.json", "chip.wasm"];
 
     for filename in files_to_copy {
@@ -16,7 +64,6 @@ pub fn copy_wokwi_files(base_dir: &Path, project_dir: &Path) -> Result<()> {
         }
     }
 
-    // If chip files are present (just copied), ensure wokwi.toml is updated to load them
     let chip_wasm = project_dir.join("chip.wasm");
     let chip_json = project_dir.join("chip.json");
     if chip_wasm.exists() && chip_json.exists() {
@@ -56,12 +103,6 @@ fn update_wokwi_config_for_chip(project_dir: &Path) -> Result<()> {
     }
     Ok(())
 }
-
-// pub fn provision_platform_assets(_project_dir: &Path, _src_dir: &Path) -> Result<()> {
-//     // Platform assets are now handled via Git dependencies in Cargo.toml
-//     // No local extraction required.
-//     Ok(())
-// }
 
 pub fn inject_app_code(base_dir: &Path, src_dir: &Path) -> Result<()> {
     let rust_source = base_dir.join("app/rust/app.rs");

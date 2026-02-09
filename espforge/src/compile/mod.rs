@@ -56,6 +56,7 @@ impl ProjectCompiler {
 
         // Step 3: Assets (Wokwi, Platform, User App)
         assets::copy_wokwi_files(&self.base_dir, &project_dir)?;
+        assets::generate_wokwi_config(&self.base_dir, &project_dir, &self.model)?;
         //assets::provision_platform_assets(&project_dir, &src_dir)?;
         assets::inject_app_code(&self.base_dir, &src_dir)?;
 

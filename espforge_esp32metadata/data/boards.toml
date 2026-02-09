@@ -1,0 +1,47 @@
+[[board]]
+id = "board-esp32-devkit-c-v4"
+name = "ESP32 DevKit C V4"
+gnd_top_left = "GND.1"
+gnd_top_right = "GND.2"
+gnd_bottom_left = "GND.1"
+gnd_bottom_right = "GND.3"
+
+[[board]]
+id = "board-esp32-c3-devkitm-1"
+name = "ESP32-C3-DevKitM-1"
+gnd_top_left = "GND.1"
+gnd_top_right = "GND.10"
+gnd_bottom_left = "GND.5"
+gnd_bottom_right = "GND.6"
+
+[[board]]
+id = "board-esp32-s3-devkitc-1"
+name = "ESP32-S3-DevKitC-1"
+gnd_top_left = "GND.1"
+gnd_top_right = "GND.2"
+gnd_bottom_left = "GND.1"
+gnd_bottom_right = "GND.4"
+
+[[board]]
+id = "board-esp32-c6-devkitc-1"
+name = "ESP32-C6-DevKitC-1"
+gnd_top_left = "GND.1"
+gnd_top_right = "GND.4"
+gnd_bottom_left = "GND.1"
+gnd_bottom_right = "GND.2"
+
+[[board]]
+id = "board-esp32-s2-devkitm-1"
+name = "ESP32-S2-DevKitM-1"
+gnd_top_left = "GND.1"
+gnd_top_right = "GND.2"
+gnd_bottom_left = "GND.1"
+gnd_bottom_right = "GND.2"
+
+[[board]]
+id = "board-esp32-h2-devkitm-1"
+name = "ESP32-H2-DevKitM-1"
+gnd_top_left = "GND.1"
+gnd_top_right = "GND.6"
+gnd_bottom_left = "GND.2"
+gnd_bottom_right = "GND.3"

@@ -33,6 +33,7 @@ espforge_configuration = { path = "../espforge_configuration", version = "0.1.0"
 espforge_devices_builder = { version="0.1.0", path = "../espforge_devices_builder" }
 espforge_codegen = { version="0.1.1", path = "../espforge_codegen" }
 espforge_dialogue = { version = "0.1.0", path = "../espforge_dialogue" }
+espforge_esp32metadata = { path = "../espforge_esp32metadata", version = "0.1.0" }
 espforge_examples = { version = "0.1.1", path = "../espforge_examples" }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -50,6 +51,7 @@ syn = { version = "2.0", features = ["full", "parsing"] }
 clap = { version = "4.5", features = ["derive"], optional = true }
 dialoguer = { version = "0.12", optional = true }
 dialogue-macro = {version = "0.3", optional = true }
+serde_json = "1.0.149"
 
 [dev-dependencies]
 assert_cmd = "2.1"

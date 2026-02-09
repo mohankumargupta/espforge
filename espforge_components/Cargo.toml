@@ -22,6 +22,8 @@ default = []
 i2c = [ "espforge_platform/i2c" ]
 spi = [ "espforge_platform/spi" ]
 uart = ["dep:embedded-io", "espforge_platform/uart"]
+button = []
+led = []
 std = ["espforge_common/std"]
 embassy = ["espforge_platform/embassy"]
 

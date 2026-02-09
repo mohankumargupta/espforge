@@ -3,7 +3,7 @@
   "author": "Raspberry Pi",
   "editor": "wokwi",
   "parts": [
-    { "type": "board-esp32-c3-devkitm-1", "id": "esp", "top": 9.3, "left": -128.58, "attrs": {} },
+    { "type": "PLACEHOLDER_WOKWI_BOARD", "id": "esp", "top": 9.3, "left": -128.58, "attrs": {} },
     { "type": "chip-chip", "id": "chip1", "top": -8.58, "left": 33.6, "attrs": {} }
   ],
   "connections": [

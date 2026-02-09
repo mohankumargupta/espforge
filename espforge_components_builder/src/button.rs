@@ -5,7 +5,7 @@ use espforge_macros::ComponentPlugin;
 use quote::{format_ident, quote};
 
 #[derive(ComponentPlugin)]
-#[plugin(name = "Button")]
+#[plugin(name = "Button", features = "button")]
 pub struct ButtonPlugin;
 
 impl ButtonPlugin {

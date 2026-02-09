@@ -61,7 +61,7 @@ pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Re
                 }
             };
 
-            add_embassy_feature(&mut platform_dep);
+            //add_embassy_feature(&mut platform_dep);
             add_embassy_feature(&mut components_dep);
             platform_features.push("embassy".to_string());
         }

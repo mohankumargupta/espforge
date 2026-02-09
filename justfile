@@ -3,58 +3,62 @@ set windows-shell := ["powershell", "-c"]
 
 _main:
     @just --list
-
+    
 prerequisites:
-    cargo install cargo-binstall
-    cargo binstall espup
-    cargo binstall esp-generate
-
-update:
-    espup update
-    cargo binstall esp-generate
-
+  cargo install cargo-binstall
+  cargo install espup
+  espup update
+  cargo binstall esp-generate
+  cargo binstall espforge
+  
 build:
-    cargo build
-
-# set environment variable 
-build_dev:
-    cargo build
-
-test:
-    cargo build
-    cargo test
-
-check:
-    cargo check
-
-run:
-    cargo run
-
-minimal:
-    cargo run -- compile examples/001-minimal.yaml
-
-examples:
-    cargo run -- examples
-
-test_with_output:
-    cargo test -- --no-capture
-
-format:
-    cargo fmt
-
-lint:
-    cargo clippy
-
+  cargo build
+  
+# when editing espforge_examples need to do this
+clean:
+  cargo clean
+ 
 tidy:
     @just format
     @just lint
 
-fix:
-    cargo clippy --fix --bin espforge
+# copy_generated name rust_project_path espforge_path:
+#   Get-ChildItem -Path {{rust_project_path}} -Include .cargo, src, build.rs, rust-toolchain.toml,wokwi.toml,Cargo.toml,diagram.json -Recurse -Force | Copy-Item -Destination "{{espforge_path}}/espforge_examples_generated/{{name}}" -Recurse -Container
+  
+copy_generated name rust_project_path espforge_path:
+  #!powershell.exe
+  $destRoot = "{{espforge_path}}/espforge_examples_generated/{{name}}"
+  $sourceRoot = "{{rust_project_path}}"
+  
+  # Clean destination
+  if (Test-Path $destRoot) {
+    Remove-Item -Path $destRoot -Recurse -Force
+  }
+  New-Item -ItemType Directory -Path $destRoot -Force | Out-Null
+  
+  # Files to copy (use Copy-Item)
+  $files = @('build.rs', 'rust-toolchain.toml', 'wokwi.toml', 'Cargo.toml', 'diagram.json', 'config.toml')
+  foreach ($file in $files) {
+    $sourceFile = Join-Path $sourceRoot $file
+    if (Test-Path $sourceFile) {
+      Copy-Item -Path $sourceFile -Destination $destRoot -Force
+    }
+  }
+  
+  # Directories to copy (use robocopy)
+  $dirs = @('.cargo', 'src')
+  foreach ($dir in $dirs) {
+    $sourceDir = Join-Path $sourceRoot $dir
+    $destDir = Join-Path $destRoot $dir
+    if (Test-Path $sourceDir) {
+      robocopy $sourceDir $destDir /E /NFL /NDL /NJH /NJS /nc /ns /np 2>$null
+    }
+  }
 
-espgenerate:
-    esp-generate --chip esp32c3 -o esp-backtrace -o vscode blank
 
-debug:
-    just -f justfile.debug
 
+# publish: dry_run = True, level=patch
+#   cargo publish --workspace level dry_run
+    
+# test_with_output:
+#   cargo test -- --no-capture

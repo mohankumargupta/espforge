@@ -3,7 +3,7 @@
   "author": "Raspberry Pi",
   "editor": "wokwi",
   "parts": [
-    { "type": "board-esp32-c3-devkitm-1", "id": "esp", "top": 18.9, "left": -90.18, "attrs": {} },
+    { "type": "PLACEHOLDER_WOKWI_BOARD", "id": "esp", "top": 18.9, "left": -90.18, "attrs": {} },
     { "type": "wokwi-led", "id": "led1", "top": 111.6, "left": 90.2, "attrs": { "color": "red" } },
     {
       "type": "wokwi-pushbutton",
@@ -27,7 +27,7 @@
     [ "r1:2", "led1:C", "black", [ "v0" ] ],
     [ "led1:A", "esp:7", "green", [ "v0", "h28.8", "v-48" ] ],
     [ "btn1:2.l", "esp:9", "green", [ "h0" ] ],
-    [ "esp:GND.10", "btn1:1.l", "black", [ "h0" ] ]
+    [ "esp:PLACEHOLDER_GND_TOP_RIGHT", "btn1:1.l", "black", [ "h0" ] ]
   ],
   "dependencies": {}
 }
