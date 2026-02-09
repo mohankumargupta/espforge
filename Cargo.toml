@@ -1,6 +1,22 @@
 [workspace]
 resolver = "2"
-members = ["espforge","espforge_codegen","espforge_configuration","espforge_components_builder","espforge_devices_builder","espforge_dialogue", "espforge_esp32metadata","espforge_examples", "espforge_macros",  "espforge_python_app"]
+members = [
+    "espforge",
+    "espforge_codegen",
+    "espforge_common",
+    "espforge_components_builder",
+    "espforge_configuration",
+    "espforge_devices_builder",
+    "espforge_dialogue", 
+    "espforge_esp32metadata",
+    "espforge_examples", 
+    "espforge_macros",  
+]
+
+[workspace.dependencies]
+espforge_platform = { version = "0.1.4", path = "espforge_platform" }
+espforge_components = { version = "0.1.1", path = "espforge_components" }
+espforge_devices = { version = "0.1.3", path = "espforge_devices" }
 
 # The profile that 'dist' will build with
 [profile.dist]

@@ -27,4 +27,3 @@ led = []
 std = ["espforge_common/std"]
 embassy = ["espforge_platform/embassy"]
 
-[workspace]
