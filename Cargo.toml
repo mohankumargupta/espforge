@@ -41,7 +41,7 @@ license = "MIT"
 repository = "https://github.com/mohankumargupta/espforge"
 homepage = "https://github.com/mohankumargupta/espforge"
 documentation = "https://github.com/mohankumargupta/espforge"
-keywords = ["esp32", "embedded", "hal", "framework", "esphome", "template"]
+keywords = ["esp32", "embedded", "hal", "framework", "esphome"]
 categories = ["embedded", "hardware-support", "no-std"]
 
 [workspace.dependencies]
