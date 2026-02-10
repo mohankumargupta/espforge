@@ -1,0 +1,48 @@
+[workspace]
+git_tag_name = "{{version}}"
+changelog_update = false
+dependencies_update = false
+git_release_enable = false
+publish_no_verify = false
+
+[[package]]
+name = "espforge"
+
+[[package]]
+name = "espforge_codegen"
+
+[[package]]
+name = "espforge_common"
+
+[[package]]
+name = "espforge_components"
+publish_no_verify = true
+
+[[package]]
+name = "espforge_components_builder"
+
+[[package]]
+name = "espforge_configuration"
+
+[[package]]
+name = "espforge_devices"
+publish_no_verify = true
+
+[[package]]
+name = "espforge_devices_builder"
+
+[[package]]
+name = "espforge_dialogue"
+
+[[package]]
+name = "espforge_esp32metadata"
+
+[[package]]
+name = "espforge_examples"
+
+[[package]]
+name = "espforge_macros"
+
+[[package]]
+name = "espforge_platform"
+publish_no_verify = true

@@ -11,8 +11,11 @@ prerequisites:
   cargo binstall esp-generate
   cargo binstall espforge
   
+prerequisites_dev:
+  cargo binstall release-plz
+
 build:
-  cargo build
+  cargo build -p esforge
   
 # when editing espforge_examples need to do this
 clean:
@@ -21,9 +24,6 @@ clean:
 tidy:
     @just format
     @just lint
-
-# copy_generated name rust_project_path espforge_path:
-#   Get-ChildItem -Path {{rust_project_path}} -Include .cargo, src, build.rs, rust-toolchain.toml,wokwi.toml,Cargo.toml,diagram.json -Recurse -Force | Copy-Item -Destination "{{espforge_path}}/espforge_examples_generated/{{name}}" -Recurse -Container
   
 copy_generated name rust_project_path espforge_path:
   #!powershell.exe
@@ -55,7 +55,15 @@ copy_generated name rust_project_path espforge_path:
     }
   }
 
+# dry_run_std_crates:
 
+
+# dry_run_esp32_crates:
+
+# publish_std_crates:
+  
+
+# publish_esp32_crates:
 
 # publish: dry_run = True, level=patch
 #   cargo publish --workspace level dry_run

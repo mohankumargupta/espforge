@@ -1,24 +1,24 @@
 [package]
 name = "espforge_platform"
 version = "0.1.4"
-edition = "2024"
 description = "Platform abstractions for espforge projects"
-license = "MIT"
-readme = "README.md"
-keywords = ["esp32", "embedded", "hal", "framework", "esphome"]
-categories = ["embedded", "hardware-support", "no-std"]
-repository = "https://github.com/mohankumargupta/espforge"
-homepage = "https://github.com/mohankumargupta/espforge"
-documentation = "https://github.com/mohankumargupta/espforge"
+edition.workspace = true
+license.workspace = true
+readme.workspace = true 
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true 
+homepage.workspace = true
+documentation.workspace = true
 
 [dependencies]
-embedded-hal = "1.0.0"
-embedded-hal-bus = { version = "0.3.0", optional = true }
-embedded-io = { version = "0.7.1", optional = true }
-log = "0.4"
-esp-hal = "1.0.0"
-embassy-sync = { version = "0.7", optional = true }
-embassy-time = { version = "0.5", optional = true }
+embedded-hal.workspace = true
+embedded-hal-bus = { workspace = true, optional = true }
+embedded-io = { workspace = true, optional = true }
+esp-hal = "1.0"
+log.workspace = true
+embassy-sync = { workspace = true, optional = true }
+embassy-time = { workspace = true, optional = true }
 
 [features]
 default = []

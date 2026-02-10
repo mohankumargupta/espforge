@@ -1,21 +1,21 @@
 [package]
 name = "espforge"
 version = "0.1.5"
+description = "A scaffolding++ project generator for ESP32 projects"
 include = [
     "LICENSE.md",
     "README.md",
     "src",
     "build.rs",
-    "embedded_versions.toml",
-    "dependencies.toml"
+    "dependencies.toml",
+    "espforge_versions.toml"
 ]
-edition = "2024"
-description = "A scaffolding++ project generator for ESP32 projects"
-license = "MIT"
-keywords     = ["esp32", "template", "hal", "framework", "esphome"]
-categories   = ["command-line-utilities", "template-engine"]
-repository = "https://github.com/mohankumargupta/espforge"
-readme = "../README.md"
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true 
+categories.workspace = true
+repository.workspace = true
+readme.workspace = true
 
 [lib]
 name = "espforge_lib"
@@ -35,33 +35,34 @@ espforge_codegen = { version="0.1.1", path = "../espforge_codegen" }
 espforge_dialogue = { version = "0.1.0", path = "../espforge_dialogue" }
 espforge_esp32metadata = { path = "../espforge_esp32metadata", version = "0.1.0" }
 espforge_examples = { version = "0.1.1", path = "../espforge_examples" }
-anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-include_dir = { version = "0.7.4", features = ["glob"] }
-toml = { version = "0.9", features = ["preserve_order"] }
-serde_yaml_ng = "0.10"
-inventory = "0.3"
-toml_edit = "0.23"
-log = "0.4"
-proc-macro2 = "1.0"
-prettyplease = "0.2" 
-syn = { version = "2.0", features = ["full", "parsing"] }
+
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+include_dir = { workspace = true, features = ["glob"] }
+toml = { workspace = true, features = ["preserve_order"] }
+serde_yaml_ng.workspace = true
+inventory.workspace = true
+toml_edit.workspace = true
+log.workspace = true
+proc-macro2.workspace = true
+prettyplease.workspace = true 
+syn = { workspace = true, features = ["full", "parsing"] }
 
 # CLI Specific Dependencies (Optional)
-clap = { version = "4.5", features = ["derive"], optional = true }
-dialoguer = { version = "0.12", optional = true }
-dialogue-macro = {version = "0.3", optional = true }
-serde_json = "1.0.149"
+clap = { workspace = true, features = ["derive"], optional = true }
+dialoguer = { workspace = true, optional = true }
+dialogue-macro = { workspace = true, optional = true }
+serde_json.workspace = true
 
 [dev-dependencies]
-assert_cmd = "2.1"
-assert_fs = "1.1"
-predicates = "3.1"
+assert_cmd.workspace = true
+assert_fs.workspace = true
+predicates.workspace = true
 
 [features]
 default = ["cli"]
 cli = ["dep:clap", "dep:dialoguer", "dep:dialogue-macro"]
 
 [build-dependencies]
-anyhow = "1.0"
-toml_edit = "0.23" # Required to parse Cargo.toml safely
+anyhow.workspace = true
+toml_edit.workspace = true

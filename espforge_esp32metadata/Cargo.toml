@@ -1,9 +1,15 @@
 [package]
 name = "espforge_esp32metadata"
 version = "0.1.0"
-edition = "2024"
 description = "Embedded examples for espforge"
-license = "MIT"
+edition.workspace = true
+license.workspace = true
+readme.workspace = true 
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true 
+homepage.workspace = true
+documentation.workspace = true
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

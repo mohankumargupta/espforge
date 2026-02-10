@@ -55,6 +55,12 @@ Change to this directory, then run
 cargo build
 ```
 
+## Building from source
+
+```shell
+cargo build -p espforge
+```
+
 ## Wokwi 
 
 If using VSCode, enable wokwi extension, then double-click on diagram.json
