@@ -11,8 +11,9 @@ prerequisites:
   cargo binstall esp-generate
   cargo binstall espforge
   
-prerequisites_dev:
+prerequisites_publish:
   cargo binstall release-plz
+  cargo binstall cargo-semver-checks
 
 build:
   cargo build -p esforge

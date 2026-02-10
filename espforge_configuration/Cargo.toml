@@ -1,6 +1,6 @@
 [package]
 name = "espforge_configuration"
-version = "0.1.0"
+version = "0.1.1"
 description = "Used by espforge project"
 edition.workspace = true
 license.workspace = true
@@ -12,7 +12,7 @@ homepage.workspace = true
 documentation.workspace = true
 
 [dependencies]
-espforge_common = { path = "../espforge_common", version = "0.1.1" }
+espforge_common = { path = "../espforge_common", version = "0.1.2" }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml_ng = "0.10"
 anyhow = "1.0"
