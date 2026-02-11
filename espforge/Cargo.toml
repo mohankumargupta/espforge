@@ -1,6 +1,6 @@
 [package]
 name = "espforge"
-version = "0.1.8"
+version = "0.1.9"
 description = "A scaffolding++ project generator for ESP32 projects"
 include = [
     "LICENSE.md",
