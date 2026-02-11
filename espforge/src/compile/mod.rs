@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use crate::parse::ConfigParser;
 
-// Declare sub-modules
 mod assets;
 mod dependencies;
 mod generators;
@@ -65,7 +64,11 @@ impl ProjectCompiler {
         generators::setup_library_structure(&src_dir)?;
         generators::generate_entry_point(&src_dir, &self.model)?;
 
-        println!("✨ Project compiled successfully!");
+        println!("✨ Rust project generated successfully!");
+        println!();
+        println!("To compile the rust project:");
+        println!("  cd {}", self.model.get_name());
+        println!("  cargo build");
         Ok(())
     }
 
