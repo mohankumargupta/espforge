@@ -1,6 +1,6 @@
 # The version numbers in this file are populated by build.rs
 
 [espforge]
-espforge_platform= "0.1.5"
-espforge_components= "0.1.2"
-espforge_devices= "0.1.4"
+espforge_platform= "0.1.6"
+espforge_components= "0.1.3"
+espforge_devices= "0.1.5"
