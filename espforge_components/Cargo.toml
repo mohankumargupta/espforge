@@ -27,3 +27,5 @@ led = []
 std = ["espforge_common/std"]
 embassy = ["espforge_platform/embassy"]
 
+[package.metadata.dist]
+dist = false
