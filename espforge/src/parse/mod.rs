@@ -6,7 +6,6 @@ use serde_yaml_ng::Value;
 pub mod components;
 pub mod devices;
 pub mod esp32;
-pub mod model;
 pub mod processor;
 pub mod project;
 

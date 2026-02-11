@@ -22,7 +22,6 @@ impl SectionProcessor for ComponentProvisioner {
             .context("Failed to deserialize components")?;
 
         for _spec in components.values() {
-            // Early validation using the plugin system if available
             if let Some(esp32) = &model.esp32 {
                 self.validate(&components, esp32)?;
             }
