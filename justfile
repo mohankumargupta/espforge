@@ -56,18 +56,9 @@ copy_generated name rust_project_path espforge_path:
     }
   }
 
-# dry_run_std_crates:
+bump_version:
+  release-plz update
 
+release:
+  release-plz release --git-token=<GIT_TOKEN>
 
-# dry_run_esp32_crates:
-
-# publish_std_crates:
-  
-
-# publish_esp32_crates:
-
-# publish: dry_run = True, level=patch
-#   cargo publish --workspace level dry_run
-    
-# test_with_output:
-#   cargo test -- --no-capture
