@@ -5,8 +5,6 @@ dependencies_update = false
 git_release_enable = false
 publish_no_verify = false
 
-[[package]]
-name = "espforge"
 
 [[package]]
 name = "espforge_codegen"
@@ -46,3 +44,6 @@ name = "espforge_macros"
 [[package]]
 name = "espforge_platform"
 publish_no_verify = true
+
+[[package]]
+name = "espforge"
