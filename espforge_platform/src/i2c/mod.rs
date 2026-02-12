@@ -1,11 +1,11 @@
 #![allow(unexpected_cfgs)]
+use embedded_hal::i2c::{ErrorType, I2c as EmbeddedI2c, Operation};
 use esp_hal::{
+    Blocking,
     gpio::AnyPin,
     i2c::master::{Config, I2c},
     time::Rate,
-    Blocking,
 };
-use embedded_hal::i2c::{ErrorType, I2c as EmbeddedI2c, Operation};
 
 /// User-friendly I2C Master wrapper.
 ///
@@ -41,20 +41,24 @@ impl I2CMaster {
             0 => {
                 let peripheral = unsafe { esp_hal::peripherals::I2C0::steal() };
                 I2c::new(peripheral, config).expect("i2c peripheral not created")
-            },
+            }
             // Enable I2C1 only for chips that have it (ESP32, S2, S3, H2, C6)
-            #[cfg(any(feature = "esp32", feature = "esp32s2", feature = "esp32s3", feature = "esp32h2", feature = "esp32c6"))]
+            #[cfg(any(
+                feature = "esp32",
+                feature = "esp32s2",
+                feature = "esp32s3",
+                feature = "esp32h2",
+                feature = "esp32c6"
+            ))]
             1 => {
                 let peripheral = unsafe { esp_hal::peripherals::I2C1::steal() };
                 I2c::new(peripheral, config).expect("i2c peripheral not created")
-            },
+            }
             _ => panic!("Invalid or unsupported I2C bus number: {}", i2c_num),
         };
 
         // Attach pins after creation
-        let i2c = i2c_driver
-            .with_sda(sda_pin)
-            .with_scl(scl_pin);
+        let i2c = i2c_driver.with_sda(sda_pin).with_scl(scl_pin);
 
         I2CMaster { i2c }
     }
@@ -75,13 +79,16 @@ impl I2CMaster {
     // }
 }
 
-
 impl ErrorType for I2CMaster {
     type Error = esp_hal::i2c::master::Error;
 }
 
 impl EmbeddedI2c for I2CMaster {
-    fn transaction(&mut self, address: u8, operations: &mut [Operation<'_>]) -> Result<(), Self::Error> {
+    fn transaction(
+        &mut self,
+        address: u8,
+        operations: &mut [Operation<'_>],
+    ) -> Result<(), Self::Error> {
         EmbeddedI2c::transaction(&mut self.i2c, address, operations)
     }
 }

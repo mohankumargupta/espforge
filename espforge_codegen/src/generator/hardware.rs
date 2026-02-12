@@ -10,8 +10,8 @@ pub fn generate_peripheral_registry(model: &EspforgeConfiguration) -> Result<Tok
     let mut struct_init = Vec::new();
 
     if model.is_embassy() {
-        fields.push(quote! { 
-            pub sw_interrupt: core::cell::RefCell<Option<esp_hal::peripherals::SW_INTERRUPT<'static>>> 
+        fields.push(quote! {
+            pub sw_interrupt: core::cell::RefCell<Option<esp_hal::peripherals::SW_INTERRUPT<'static>>>
         });
         struct_init.push(quote! {
             sw_interrupt: core::cell::RefCell::new(Some(p.SW_INTERRUPT))

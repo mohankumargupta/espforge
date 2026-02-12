@@ -1,7 +1,5 @@
-use esp_hal::{
-    gpio::{AnyPin, Input, InputConfig, Level, Output, OutputConfig, Pull},
-};
 use embedded_hal::digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin};
+use esp_hal::gpio::{AnyPin, Input, InputConfig, Level, Output, OutputConfig, Pull};
 
 /// User-friendly GPIO output wrapper implementing embedded-hal traits
 pub struct GPIOOutput {
@@ -45,7 +43,7 @@ impl StatefulOutputPin for GPIOOutput {
     fn is_set_low(&mut self) -> Result<bool, Self::Error> {
         Ok(self.output.is_set_low())
     }
-    
+
     fn toggle(&mut self) -> Result<(), Self::Error> {
         Ok(self.output.toggle())
     }
@@ -59,7 +57,13 @@ pub struct GPIOInput {
 impl GPIOInput {
     /// Creates a wrapper from an existing owned pin (Registry Pattern)
     pub fn from_pin(pin: AnyPin<'static>, pull_up: bool, pull_down: bool) -> Self {
-        let pull = if pull_up { Pull::Up } else if pull_down { Pull::Down } else { Pull::None };
+        let pull = if pull_up {
+            Pull::Up
+        } else if pull_down {
+            Pull::Down
+        } else {
+            Pull::None
+        };
         let config = InputConfig::default().with_pull(pull);
         let input = Input::new(pin, config);
         Self { input }

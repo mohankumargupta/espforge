@@ -1,7 +1,7 @@
-use core::cell::RefCell;
-use esp_hal::spi::master::Spi;
-use esp_hal::Blocking;
 use crate::gpio::GPIOOutput;
+use core::cell::RefCell;
+use esp_hal::Blocking;
+use esp_hal::spi::master::Spi;
 
 #[cfg(feature = "spi")]
 pub struct SpiDevice<'a> {
@@ -27,16 +27,22 @@ impl<'a> embedded_hal::spi::ErrorType for SpiDevice<'a> {
 
 #[cfg(feature = "spi")]
 impl<'a> embedded_hal::spi::SpiDevice for SpiDevice<'a> {
-    fn transaction(&mut self, operations: &mut [embedded_hal::spi::Operation<'_, u8>]) -> Result<(), Self::Error> {
+    fn transaction(
+        &mut self,
+        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
+    ) -> Result<(), Self::Error> {
         let mut bus = self.bus.borrow_mut();
         // Create a temporary ExclusiveDevice to manage CS and transaction
         // We use esp_hal::delay::Delay directly as it implements DelayNs
         let delay = esp_hal::delay::Delay::new();
         // ExclusiveDevice::new returns Result in embedded-hal-bus 0.3.0, so we unwrap (it fails only on pin misuse usually)
-        let mut dev = embedded_hal_bus::spi::ExclusiveDevice::new(&mut *bus, &mut self.cs, delay).unwrap();
-           dev.transaction(operations).map_err(|e| match e {
+        let mut dev =
+            embedded_hal_bus::spi::ExclusiveDevice::new(&mut *bus, &mut self.cs, delay).unwrap();
+        dev.transaction(operations).map_err(|e| match e {
             embedded_hal_bus::spi::DeviceError::Spi(e) => e,
-            embedded_hal_bus::spi::DeviceError::Cs(_) => unreachable!("CS pin error should be impossible"),
+            embedded_hal_bus::spi::DeviceError::Cs(_) => {
+                unreachable!("CS pin error should be impossible")
+            }
         })
     }
 }
@@ -65,7 +71,11 @@ impl<'a> embedded_hal::i2c::ErrorType for I2cDevice<'a> {
 
 #[cfg(feature = "i2c")]
 impl<'a> embedded_hal::i2c::I2c for I2cDevice<'a> {
-    fn transaction(&mut self, address: u8, operations: &mut [embedded_hal::i2c::Operation<'_>]) -> Result<(), Self::Error> {
+    fn transaction(
+        &mut self,
+        address: u8,
+        operations: &mut [embedded_hal::i2c::Operation<'_>],
+    ) -> Result<(), Self::Error> {
         // Create a temporary RefCellDevice to manage shared bus access
         let mut dev = embedded_hal_bus::i2c::RefCellDevice::new(self.bus);
         dev.transaction(address, operations)

@@ -13,16 +13,17 @@ const VERSIONS_TOML: &str = include_str!("../../espforge_versions.toml");
 pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
     let cargo_path = project_dir.join("Cargo.toml");
     let manifest = fs::read_to_string(&cargo_path).context("Failed to read Cargo.toml")?;
-    
-    let mut doc: DocumentMut = manifest.parse()
-        .context("Failed to parse Cargo.toml")?;
+
+    let mut doc: DocumentMut = manifest.parse().context("Failed to parse Cargo.toml")?;
 
     // Parse versions from the embedded versions TOML
-    let versions_doc: DocumentMut = VERSIONS_TOML.parse()
+    let versions_doc: DocumentMut = VERSIONS_TOML
+        .parse()
         .context("Failed to parse embedded espforge_versions.toml")?;
-    
+
     let get_ver = |key: &str| -> Result<&str> {
-        versions_doc.get("espforge")
+        versions_doc
+            .get("espforge")
             .and_then(|t| t.get(key))
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing version for {}", key))
@@ -34,7 +35,7 @@ pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Re
 
     if let Some(target_deps) = doc.get_mut("dependencies").and_then(|i| i.as_table_mut()) {
         let use_git = std::env::var("ESPFORGE_USE_GIT").is_ok();
-        
+
         let create_dep = |version: &str| -> Item {
             let mut dep = toml_edit::InlineTable::new();
             if use_git {
@@ -51,9 +52,15 @@ pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Re
         let mut platform_features = vec![];
 
         if let Some(esp32) = &model.esp32 {
-            if !esp32.spi.is_empty() { platform_features.push("spi".to_string()); }
-            if !esp32.i2c.is_empty() { platform_features.push("i2c".to_string()); }
-            if !esp32.uart.is_empty() { platform_features.push("uart".to_string()); }
+            if !esp32.spi.is_empty() {
+                platform_features.push("spi".to_string());
+            }
+            if !esp32.i2c.is_empty() {
+                platform_features.push("i2c".to_string());
+            }
+            if !esp32.uart.is_empty() {
+                platform_features.push("uart".to_string());
+            }
         }
 
         if model.is_embassy() {
@@ -91,23 +98,25 @@ pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Re
         platform_features.dedup();
 
         add_features(&mut components_dep, component_features);
-        
+
         let mut devices_dep = create_dep(devices_version);
         add_features(&mut devices_dep, device_features);
         add_features(&mut platform_dep, platform_features.clone());
 
         target_deps.insert("espforge_platform", platform_dep);
         target_deps.insert("espforge_components", components_dep);
-        
+
         if !model.devices.is_empty() {
             target_deps.insert("espforge_devices", devices_dep);
         }
 
         // Apply external dependencies from dependencies.toml
-        let deps_template: DocumentMut = DEPENDENCIES_TOML.parse()
+        let deps_template: DocumentMut = DEPENDENCIES_TOML
+            .parse()
             .context("Failed to parse embedded dependencies.toml")?;
 
-        if let Some(additional_deps) = deps_template.get("dependencies").and_then(|d| d.as_table()) {
+        if let Some(additional_deps) = deps_template.get("dependencies").and_then(|d| d.as_table())
+        {
             for (name, value) in additional_deps.iter() {
                 if !target_deps.contains_key(name) {
                     target_deps.insert(name, value.clone());
@@ -115,30 +124,33 @@ pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Re
             }
         }
 
-        // Apply Feature flags for external dependencies
-        if let Some(features) = deps_template.get("features").and_then(|f| f.as_table()) {
-            for feature in &platform_features {
-                if let Some(feature_deps) = features.get(feature.as_str()).and_then(|v| v.as_array()) {
-                    for dep_name_val in feature_features_iter(feature_deps) {
-                        let dep_name = dep_name_val.as_str().unwrap_or_default();
-                         
-                        // Find config for this dep in dependencies.toml template
-                         if let Some(dep_config) = deps_template.get("dependencies")
-                            .and_then(|d| d.as_table())
-                            .and_then(|t| t.get(dep_name))
-                            .and_then(|i| i.as_inline_table()) 
-                        {
-                            // If dep already exists in target (added above), verify/update features/optionality
-                            if let Some(target_dep) = target_deps.get_mut(dep_name) {
-                                if let Some(inline) = target_dep.as_inline_table_mut() {
-                                    // Make sure it is not optional anymore if required by feature
-                                    inline.remove("optional");
+        if let Some(features_table) = deps_template.get("features").and_then(|f| f.as_table()) {
+            for used_feature in &platform_features {
+                if let Some(enabled_deps) =
+                    features_table.get(used_feature).and_then(|v| v.as_array())
+                {
+                    for dep_val in enabled_deps.iter() {
+                        if let Some(dep_name) = dep_val.as_str() {
+                            // Ensure the dependency exists in target_deps
+                            if !target_deps.contains_key(dep_name) {
+                                // If it's in the template dependencies, add it
+                                if let Some(template_deps) =
+                                    deps_template.get("dependencies").and_then(|d| d.as_table())
+                                {
+                                    if let Some(dep_value) = template_deps.get(dep_name) {
+                                        target_deps.insert(dep_name, dep_value.clone());
+                                    }
                                 }
-                            } else {
-                                // Add it if not present (though loop above should have added it)
-                                let mut new_item = dep_config.clone();
-                                new_item.remove("optional");
-                                target_deps.insert(dep_name, Item::Value(Value::InlineTable(new_item)));
+                            }
+                            // Now remove the optional flag
+                            if let Some(dep_item) = target_deps.get_mut(dep_name) {
+                                if let Some(inline_table) = dep_item.as_inline_table_mut() {
+                                    inline_table.remove("optional");
+                                }
+
+                                else if let Some(table) = dep_item.as_table_like_mut() {
+                                    table.remove("optional");
+                                }
                             }
                         }
                     }
@@ -151,24 +163,19 @@ pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Re
     Ok(())
 }
 
-fn feature_features_iter(arr: &toml_edit::Array) -> impl Iterator<Item = &Value> {
-    arr.iter()
-}
-
 fn add_features(dep_item: &mut Item, features_list: Vec<String>) {
-    if features_list.is_empty() { return; }
-    
+    if features_list.is_empty() {
+        return;
+    }
+
     if let Some(table) = dep_item.as_inline_table_mut() {
-         let existing_features = table
+        let existing_features = table
             .entry("features")
             .or_insert(Value::Array(toml_edit::Array::new()));
-        
+
         if let Some(arr) = existing_features.as_array_mut() {
             for f in features_list {
-                // simple check to avoid duplicates if array already has content
                 let s = Value::from(f);
-                // Check simplistic non-existence or just push (toml_edit handles it?) 
-                // We'll just push, usually it's empty
                 arr.push(s);
             }
         }

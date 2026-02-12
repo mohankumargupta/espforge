@@ -1,7 +1,7 @@
 use core::cell::RefCell;
-use espforge_platform::esp_hal::spi::master::Spi;
-use espforge_platform::esp_hal::Blocking;
 use embedded_hal::spi::{ErrorType, SpiBus};
+use espforge_platform::esp_hal::Blocking;
+use espforge_platform::esp_hal::spi::master::Spi;
 
 // Re-export the config
 pub use espforge_common::components::spi::SpiDeviceConfig;

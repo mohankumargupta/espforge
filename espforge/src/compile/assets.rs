@@ -17,15 +17,15 @@ pub fn generate_wokwi_config(
     let db = BoardDatabase::load();
     let chip = model.get_chip();
 
-    let board_id = db.wokwi_board(chip)
+    let board_id = db
+        .wokwi_board(chip)
         .ok_or_else(|| anyhow::anyhow!("Unsupported chip variant for Wokwi: {}", chip))?;
 
-    let content = fs::read_to_string(&diagram_json)
-        .context("Failed to read diagram.json template")?;
+    let content =
+        fs::read_to_string(&diagram_json).context("Failed to read diagram.json template")?;
 
     // Replace board type placeholder (both formats for compatibility)
-    let mut processed = content
-        .replace("PLACEHOLDER_WOKWI_BOARD", &board_id);
+    let mut processed = content.replace("PLACEHOLDER_WOKWI_BOARD", &board_id);
 
     // Replace GND pin placeholders
     if let Some(gnd_tl) = db.gnd_top_left(chip) {

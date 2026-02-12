@@ -1,6 +1,6 @@
-use espforge_platform::gpio::GPIOInput;
 use embedded_hal::digital::InputPin;
 pub use espforge_common::components::button::ButtonConfig;
+use espforge_platform::gpio::GPIOInput;
 
 pub struct Button {
     input: GPIOInput,
@@ -9,10 +9,7 @@ pub struct Button {
 
 impl Button {
     pub fn new(input: GPIOInput, config: ButtonConfig) -> Self {
-        Button {
-            input,
-            config,
-        }
+        Button { input, config }
     }
 
     pub fn is_button_pressed(&mut self) -> bool {

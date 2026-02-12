@@ -6,7 +6,7 @@ pub trait SectionProcessor {
     fn section_key(&self) -> &'static str;
     fn priority(&self) -> u32 {
         50
-    } 
+    }
     fn process(&self, content: &Value, model: &mut EspforgeConfiguration) -> Result<()>;
 }
 

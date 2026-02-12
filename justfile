@@ -23,8 +23,8 @@ clean:
   cargo clean
  
 tidy:
-    @just format
-    @just lint
+    cargo fmt
+    cargo clippy
   
 copy_generated name rust_project_path espforge_path:
   #!powershell.exe

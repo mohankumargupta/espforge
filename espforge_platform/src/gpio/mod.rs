@@ -1,7 +1,7 @@
 // GPIO Module for espforge_platform
 //
 // This module provides GPIO abstractions for both blocking and async (Embassy) modes.
-// 
+//
 // - In blocking mode: Uses standard Input/Output types
 // - In async mode: Uses Flex-based types with interrupt-driven async operations
 //
@@ -24,4 +24,3 @@ pub use embassy::{GPIOInput, GPIOOutput};
 
 // Re-export AnyPin for convenience
 pub use esp_hal::gpio::AnyPin;
-

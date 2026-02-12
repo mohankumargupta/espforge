@@ -1,10 +1,10 @@
 #![allow(unexpected_cfgs)]
+use embedded_io::{ErrorType, Read, ReadReady, Write, WriteReady};
 use esp_hal::{
+    Blocking,
     gpio::AnyPin,
     uart::{Config, Uart},
-    Blocking,
 };
-use embedded_io::{ErrorType, Read, Write, ReadReady, WriteReady};
 
 pub struct UartDriver {
     uart: Uart<'static, Blocking>,
@@ -28,22 +28,20 @@ impl UartDriver {
             0 => {
                 let peri = unsafe { esp_hal::peripherals::UART0::steal() };
                 Uart::new(peri, config).unwrap()
-            },
+            }
             1 => {
                 let peri = unsafe { esp_hal::peripherals::UART1::steal() };
                 Uart::new(peri, config).unwrap()
-            },
-             #[cfg(any(feature = "esp32", feature = "esp32s3"))]
+            }
+            #[cfg(any(feature = "esp32", feature = "esp32s3"))]
             2 => {
-                 let peri = unsafe { esp_hal::peripherals::UART2::steal() };
-                 Uart::new(peri, config).unwrap()
-            },
+                let peri = unsafe { esp_hal::peripherals::UART2::steal() };
+                Uart::new(peri, config).unwrap()
+            }
             _ => panic!("Invalid UART bus number: {}", uart_num),
-        };        
+        };
 
-        let uart = uart_driver
-            .with_tx(tx_pin)
-            .with_rx(rx_pin);
+        let uart = uart_driver.with_tx(tx_pin).with_rx(rx_pin);
 
         Self { uart }
     }
@@ -80,4 +78,3 @@ impl WriteReady for UartDriver {
         Ok(self.uart.write_ready())
     }
 }
-

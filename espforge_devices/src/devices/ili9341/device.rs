@@ -1,13 +1,13 @@
 use display_interface_spi::SPIInterface;
-use embedded_hal::spi::SpiDevice;
-use embedded_hal::digital::OutputPin;
-use embedded_hal::delay::DelayNs;
-use ili9341::{Ili9341, Orientation, DisplaySize240x320};
-use embedded_graphics::pixelcolor::Rgb565;
-use embedded_graphics::mono_font::{ascii::FONT_10X20, MonoTextStyleBuilder};
-use embedded_graphics::text::Text;
-use embedded_graphics::prelude::*;
 use embedded_graphics::Drawable;
+use embedded_graphics::mono_font::{MonoTextStyleBuilder, ascii::FONT_10X20};
+use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::prelude::*;
+use embedded_graphics::text::Text;
+use embedded_hal::delay::DelayNs;
+use embedded_hal::digital::OutputPin;
+use embedded_hal::spi::SpiDevice;
+use ili9341::{DisplaySize240x320, Ili9341, Orientation};
 
 pub struct ILI9341Device<SPI, DC, RST> {
     display: Ili9341<SPIInterface<SPI, DC>, RST>,
@@ -21,7 +21,14 @@ where
 {
     pub fn new(spi: SPI, dc: DC, rst: RST, delay: &mut impl DelayNs) -> Self {
         let interface = SPIInterface::new(spi, dc);
-        let display = Ili9341::new(interface, rst, delay, Orientation::Portrait, DisplaySize240x320).unwrap();
+        let display = Ili9341::new(
+            interface,
+            rst,
+            delay,
+            Orientation::Portrait,
+            DisplaySize240x320,
+        )
+        .unwrap();
         Self { display }
     }
 
@@ -41,4 +48,3 @@ where
             .ok();
     }
 }
-

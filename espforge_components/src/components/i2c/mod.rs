@@ -1,7 +1,7 @@
 use core::cell::RefCell;
-use espforge_platform::esp_hal::i2c::master::I2c as HalI2c;
+use embedded_hal::i2c::{ErrorType, I2c, Operation};
 use espforge_platform::esp_hal::Blocking;
-use embedded_hal::i2c::{I2c, Operation, ErrorType};
+use espforge_platform::esp_hal::i2c::master::I2c as HalI2c;
 
 pub use espforge_common::components::i2c::I2cDeviceConfig;
 
@@ -23,8 +23,11 @@ impl ErrorType for I2C {
 }
 
 impl I2c for I2C {
-    fn transaction(&mut self, address: u8, operations: &mut [Operation<'_>]) -> Result<(), Self::Error> {
+    fn transaction(
+        &mut self,
+        address: u8,
+        operations: &mut [Operation<'_>],
+    ) -> Result<(), Self::Error> {
         self.device.transaction(address, operations)
     }
 }
-

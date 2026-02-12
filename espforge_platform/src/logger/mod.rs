@@ -2,13 +2,13 @@
 pub struct Logger;
 
 impl Logger {
-   pub fn new() -> Self{
-     Self{}
-   }
-   
-   pub fn info(&self, msg: impl core::fmt::Display) {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub fn info(&self, msg: impl core::fmt::Display) {
         log::info!("{}", msg);
-   }
+    }
 
     pub fn warn(&self, msg: impl core::fmt::Display) {
         log::warn!("{}", msg);

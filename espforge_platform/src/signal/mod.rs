@@ -308,10 +308,10 @@ impl Default for SimpleSignal {
 ///
 /// The macro expands to:
 /// ```rust,ignore
-/// static BUTTON_PRESSED: espforge_platform::signal::SimpleSignal = 
+/// static BUTTON_PRESSED: espforge_platform::signal::SimpleSignal =
 ///     espforge_platform::signal::SimpleSignal::new();
 ///
-/// static LED_BRIGHTNESS: espforge_platform::signal::Signal<u8> = 
+/// static LED_BRIGHTNESS: espforge_platform::signal::Signal<u8> =
 ///     espforge_platform::signal::Signal::new();
 /// ```
 #[macro_export]
@@ -320,7 +320,7 @@ macro_rules! signal {
     ($name:ident) => {
         static $name: $crate::signal::SimpleSignal = $crate::signal::SimpleSignal::new();
     };
-    
+
     // Signal with data type - expands to Signal<T>
     ($name:ident, $ty:ty) => {
         static $name: $crate::signal::Signal<$ty> = $crate::signal::Signal::new();
@@ -436,13 +436,12 @@ mod tests {
             Start,
             Stop,
         }
-        
+
         signal!(TEST_CMD, TestCmd);
         TEST_CMD.signal(TestCmd::Start);
         assert_eq!(TEST_CMD.try_take(), Some(TestCmd::Start));
-        
+
         TEST_CMD.signal(TestCmd::Stop);
         assert_eq!(TEST_CMD.try_take(), Some(TestCmd::Stop));
     }
 }
-

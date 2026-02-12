@@ -1,7 +1,7 @@
-use espforge_platform::uart::UartDriver;
-use embedded_io::{Write, Read, ReadReady, ErrorType};
 use core::str;
+use embedded_io::{ErrorType, Read, ReadReady, Write};
 pub use espforge_common::components::uart::UartDeviceConfig;
+use espforge_platform::uart::UartDriver;
 
 pub struct Uart {
     driver: UartDriver,

@@ -26,4 +26,3 @@ impl embedded_hal::delay::DelayNs for Delay {
         self.inner.delay_ns(ns);
     }
 }
-

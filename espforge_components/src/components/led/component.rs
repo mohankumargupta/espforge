@@ -1,7 +1,6 @@
-use espforge_platform::gpio::GPIOOutput;
 use embedded_hal::digital::{OutputPin, StatefulOutputPin};
 pub use espforge_common::components::led::LedConfig;
-
+use espforge_platform::gpio::GPIOOutput;
 
 pub struct LED {
     output: GPIOOutput,

@@ -1,12 +1,12 @@
 #![no_std]
 
-pub mod logger;
-pub mod delay;
-pub mod gpio;
 #[cfg(any(feature = "spi", feature = "i2c"))]
 pub mod bus;
+pub mod delay;
+pub mod gpio;
 #[cfg(feature = "i2c")]
 pub mod i2c;
+pub mod logger;
 #[cfg(feature = "spi")]
 pub mod spi;
 #[cfg(feature = "uart")]
@@ -17,7 +17,6 @@ pub mod signal;
 
 pub use esp_hal;
 
- 
 pub struct Context {
     pub logger: logger::Logger,
     pub delay: delay::Delay,
@@ -31,4 +30,3 @@ impl Context {
         }
     }
 }
-
