@@ -7,6 +7,7 @@ pub mod gpio;
 pub mod i2c;
 pub mod spi;
 pub mod uart;
+pub mod psram;
 
 #[derive(Error, Debug)]
 pub enum ResolutionError {
@@ -32,6 +33,8 @@ pub struct Esp32Config {
     pub spi: HashMap<String, spi::SpiConfig>,
     #[serde(default)]
     pub uart: HashMap<String, uart::UartConfig>,
+    #[serde(default)]
+    pub psram: Option<psram::PsramConfig>, 
 }
 
 pub trait ResolvePeripheral<'a>: AsRef<str> {

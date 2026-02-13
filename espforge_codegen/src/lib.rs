@@ -18,10 +18,18 @@ pub mod scaffold;
 
 pub use scaffold::esp_generate;
 
-pub fn generate_lib_source() -> Result<String> {
+pub fn generate_lib_source(additional_modules: &[String]) -> Result<String> {
+    let mut mod_declarations = quote! {};
+    for module in additional_modules {
+        let mod_ident = format_ident!("{}", module);
+        mod_declarations.extend(quote! {
+            pub mod #mod_ident;
+        });
+    }
     let tokens = quote! {
         #![no_std]
 
+        #mod_declarations
         pub mod generated;
         pub mod app;
 
@@ -123,6 +131,23 @@ fn generate_blocking_entry_point(model: &EspforgeConfiguration) -> Result<String
     let crate_name = model.get_name().replace('-', "_");
     let crate_ident = format_ident!("{}", crate_name);
 
+    // Generate heap allocator with chip-specific size
+    let heap_allocator = if let Some(size) = model.get_heap_size() {
+        quote! {
+            esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: #size);
+        }
+    } else {
+        quote! {}
+    };
+
+    let psram_allocator = if let Some(_) = model.has_psram() {
+        quote! {
+            esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+        }
+    } else {
+        quote! {}
+    };
+
     let tokens = quote! {
         #![no_std]
         #![no_main]
@@ -142,6 +167,10 @@ fn generate_blocking_entry_point(model: &EspforgeConfiguration) -> Result<String
             esp_println::print!("\x1b[20h");
             // Initialize peripherals
             let peripherals = esp_hal::init(esp_hal::Config::default());
+
+             #heap_allocator
+
+             #psram_allocator
 
             // Initialize registry with static lifetime
             let registry = REGISTRY_CELL.init(PeripheralRegistry::new(peripherals));
@@ -191,6 +220,25 @@ fn generate_embassy_entry_point(model: &EspforgeConfiguration) -> Result<String>
     let crate_name = model.get_name().replace('-', "_");
     let crate_ident = format_ident!("{}", crate_name);
 
+    // Generate heap allocator with chip-specific size
+    let heap_allocator = if let Some(size) = model.get_heap_size() {
+        quote! {
+            esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: #size);
+        }
+    } else {
+        quote! {}
+    };
+
+    let psram_allocator = if let Some(_) = model.has_psram() {
+        quote! {
+            esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+        }
+    } else {
+        quote! {}
+    };
+
+    
+
     let tokens = quote! {
         #![no_std]
         #![no_main]
@@ -213,6 +261,12 @@ fn generate_embassy_entry_point(model: &EspforgeConfiguration) -> Result<String>
             esp_println::print!("\x1b[20h");
             // Initialize peripherals
             let peripherals = esp_hal::init(esp_hal::Config::default());
+
+            
+
+            #heap_allocator
+
+            #psram_allocator
 
             // Initialize registry
             let registry = REGISTRY_CELL.init(PeripheralRegistry::new(peripherals));

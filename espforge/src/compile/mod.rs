@@ -51,17 +51,17 @@ impl ProjectCompiler {
         let src_dir = project_dir.join("src");
 
         // Step 2: Dependencies
-        dependencies::add_dependencies(&project_dir, &self.model)?;
+        dependencies::add_dependencies(&project_dir, &self.model, &self.base_dir)?;
 
         // Step 3: Assets (Wokwi, Platform, User App)
         assets::copy_wokwi_files(&self.base_dir, &project_dir)?;
         assets::generate_wokwi_config(&self.base_dir, &project_dir, &self.model)?;
         //assets::provision_platform_assets(&project_dir, &src_dir)?;
-        assets::inject_app_code(&self.base_dir, &src_dir)?;
+        let additional_modules = assets::inject_app_code(&self.base_dir, &src_dir)?;
 
         // Step 4: Code Generation
         generators::generate_component_code(&src_dir, &self.model)?;
-        generators::setup_library_structure(&src_dir)?;
+        generators::setup_library_structure(&src_dir, &additional_modules)?;
         generators::generate_entry_point(&src_dir, &self.model)?;
 
         println!("✨ Rust project generated successfully!");

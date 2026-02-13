@@ -22,6 +22,7 @@ pub struct Chip {
     pub wokwi_board_id: String,
     #[serde(rename = "serial_interface")]
     pub serial_interface: String,
+    pub max_heap_size: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,4 +117,11 @@ impl BoardDatabase {
     pub fn all_chips(&self) -> Vec<String> {
         self.chips.keys().cloned().collect()
     }
+
+    /// Get maximum heap size for a chip
+    pub fn max_heap_size(&self, chip_id: &str) -> Option<usize> {
+        self.chips
+            .get(chip_id)
+            .map(|chip| chip.max_heap_size)
+    }    
 }

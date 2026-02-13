@@ -10,6 +10,8 @@ struct ProjectConfig {
     chip: Option<String>,
     platform: Option<String>,
     runtime: Option<String>,
+    #[serde(default)]
+    alloc: bool,
 }
 
 pub struct ProjectInfoProvisioner;
@@ -37,6 +39,10 @@ impl SectionProcessor for ProjectInfoProvisioner {
             if runtime == "embassy" {
                 model.espforge.insert("runtime".to_string(), runtime);
             }
+        }
+
+        if config.alloc {
+            model.espforge.insert("alloc".to_string(), "true".to_string());
         }
 
         println!("✓ Project configuration valid and processed.");

@@ -2,28 +2,40 @@
 id = "esp32"
 wokwi_board_id = "board-esp32-devkit-c-v4"
 serial_interface = "uart"
+max_heap_size = 98768
+
+[[chip]]
+id = "esp32c2"
+wokwi_board_id = "board-esp32-c2-devkitm-1"
+serial_interface = "uart"
+max_heap_size = 66416
 
 [[chip]]
 id = "esp32c3"
 wokwi_board_id = "board-esp32-c3-devkitm-1"
 serial_interface = "usb_jtag"
+max_heap_size = 66320
 
 [[chip]]
 id = "esp32s3"
 wokwi_board_id = "board-esp32-s3-devkitc-1"
 serial_interface = "usb_jtag"
+max_heap_size = 73744
 
 [[chip]]
 id = "esp32c6"
 wokwi_board_id = "board-esp32-c6-devkitc-1"
 serial_interface = "usb_jtag"
+max_heap_size = 65536
 
 [[chip]]
 id = "esp32s2"
 wokwi_board_id = "board-esp32-s2-devkitm-1"
 serial_interface = "uart"
+max_heap_size = 139264
 
 [[chip]]
 id = "esp32h2"
 wokwi_board_id = "board-esp32-h2-devkitm-1"
 serial_interface = "usb_jtag"
+max_heap_size = 69392

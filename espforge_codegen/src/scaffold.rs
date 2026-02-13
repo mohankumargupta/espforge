@@ -10,6 +10,7 @@ pub fn esp_generate(project_name: &str, chip: &str, enable_async: bool) -> Resul
         "--chip", chip,
         "-o", "log",
         "-o", "unstable-hal",
+        "-o",  "alloc",
         "-o", "esp-backtrace",
         "-o", "wokwi",
         "-o", "vscode",

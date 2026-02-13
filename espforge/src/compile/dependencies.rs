@@ -10,7 +10,7 @@ const ESPFORGE_REPO: &str = "https://github.com/mohankumargupta/espforge";
 const DEPENDENCIES_TOML: &str = include_str!("../../dependencies.toml");
 const VERSIONS_TOML: &str = include_str!("../../espforge_versions.toml");
 
-pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
+pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration, config_dir: &Path) -> Result<()> {
     let cargo_path = project_dir.join("Cargo.toml");
     let manifest = fs::read_to_string(&cargo_path).context("Failed to read Cargo.toml")?;
 
@@ -60,6 +60,10 @@ pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Re
             }
             if !esp32.uart.is_empty() {
                 platform_features.push("uart".to_string());
+            }
+
+            if esp32.psram.is_some() {
+                platform_features.push("psram".to_string());
             }
         }
 
@@ -158,6 +162,60 @@ pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Re
             }
         }
     }
+
+
+    let external_deps_path = config_dir.join("dependencies.toml");
+    if external_deps_path.exists() {
+        println!("   Merging dependencies from external dependencies.toml...");
+        let content = fs::read_to_string(&external_deps_path)
+            .context("Failed to read external dependencies.toml")?;
+        let ext_doc: DocumentMut = content.parse()
+            .context("Failed to parse external dependencies.toml")?;
+
+        if let Some(ext_deps) = ext_doc.get("dependencies").and_then(|d| d.as_table()) {
+            if let Some(target_deps) = doc.get_mut("dependencies").and_then(|i| i.as_table_mut()) {
+                for (name, value) in ext_deps.iter() {
+                    target_deps.insert(name, value.clone());
+                }
+            }
+        }
+    }    
+
+    if model.esp32.as_ref().and_then(|e| e.psram.as_ref()).is_some() {
+        println!("   Detected PSRAM configuration - adding 'psram' feature to esp-hal");
+        if let Some(deps_table) = doc.get_mut("dependencies").and_then(|i| i.as_table_mut()) {
+            if let Some(esp_hal_item) = deps_table.get_mut("esp-hal") {
+                // Handle both inline table and regular table formats
+                if let Some(inline_table) = esp_hal_item.as_inline_table_mut() {
+                    if let Some(features_value) = inline_table.get_mut("features") {
+                        if let Some(features_array) = features_value.as_array_mut() {
+                            // Check if psram is already present
+                            let has_psram = features_array.iter()
+                                .any(|v| v.as_str() == Some("psram"));
+                            
+                            if !has_psram {
+                                features_array.push("psram");
+                            }
+                        }
+                    }
+                } else if let Some(table) = esp_hal_item.as_table_mut() {
+                    if let Some(features_item) = table.get_mut("features") {
+                        if let Some(features_value) = features_item.as_value_mut() {
+                            if let Some(features_array) = features_value.as_array_mut() {
+                                // Check if psram is already present
+                                let has_psram = features_array.iter()
+                                    .any(|v| v.as_str() == Some("psram"));
+                                
+                                if !has_psram {
+                                    features_array.push("psram");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }    
 
     fs::write(cargo_path, doc.to_string()).context("Failed to write Cargo.toml")?;
     Ok(())

@@ -63,4 +63,28 @@ impl EspforgeConfiguration {
             RuntimeMode::None => "blocking",
         }
     }
+
+    /// Check if heap allocation is enabled
+    pub fn has_alloc(&self) -> bool {
+        self.espforge
+            .get("alloc")
+            .map(|s| s == "true")
+            .unwrap_or(false)
+    }
+
+    /// Get heap size for the configured chip
+    /// Returns None if alloc is not enabled or chip not found
+    pub fn get_heap_size(&self) -> Option<usize> {
+        if !self.has_alloc() {
+            return None;
+        }
+
+        // Load chip database and get heap size for the configured chip
+        let db = espforge_esp32metadata::BoardDatabase::load();
+        db.max_heap_size(self.get_chip())
+    }
+    
+    pub fn has_psram(&self) -> Option<bool> {
+        self.esp32.as_ref().map(|s| s.psram.is_some())
+    }
 }
