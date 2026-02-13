@@ -1,6 +1,6 @@
 [package]
 name = "espforge_components_builder"
-version = "0.1.1"
+version = "0.1.2"
 description = "Component registration for espforge"
 edition.workspace = true
 license.workspace = true
@@ -13,7 +13,7 @@ documentation.workspace = true
 
 [dependencies]
 espforge_common = { path = "../espforge_common", version = "0.1.2" }
-espforge_configuration = { path = "../espforge_configuration", version = "0.1.1" }
+espforge_configuration = { path = "../espforge_configuration", version = "0.2.0" }
 espforge_macros = { path = "../espforge_macros", version = "0.1.1" }
 anyhow = "1.0"
 quote = "1.0"
