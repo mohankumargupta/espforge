@@ -5,8 +5,9 @@ A scaffolding++ tool for esp32 no_std rust projects.
 ## Features
 - Uses esphome-like YAML configuration
 - Pre-built components and devices that sit on top of esphal https://github.com/esp-rs/esp-hal
-- Wire "main" code using Ruchy scripting language https://github.com/paiml/ruchy
+- Wire "app" code in rust. 
 - Wokwi integration and working examples
+- Project samples
 
 ## Prerequisites
 **Rust**: [Install Rust](https://rustup.rs/)

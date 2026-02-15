@@ -140,7 +140,7 @@ fn generate_blocking_entry_point(model: &EspforgeConfiguration) -> Result<String
         quote! {}
     };
 
-    let psram_allocator = if let Some(_) = model.has_psram() {
+    let psram_allocator = if model.has_psram() == Some(true) {
         quote! {
             esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
         }
@@ -229,7 +229,7 @@ fn generate_embassy_entry_point(model: &EspforgeConfiguration) -> Result<String>
         quote! {}
     };
 
-    let psram_allocator = if let Some(_) = model.has_psram() {
+    let psram_allocator = if model.has_psram() == Some(true) {
         quote! {
             esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
         }
