@@ -1,6 +1,6 @@
 [package]
 name = "espforge_codegen"
-version = "0.2.0"
+version = "0.2.1"
 description = "code generation for espforge"
 edition.workspace = true
 license.workspace = true
@@ -12,8 +12,8 @@ homepage.workspace = true
 documentation.workspace = true
 
 [dependencies]
-espforge_common = { version = "0.1.2", path = "../espforge_common" }
-espforge_configuration = { path = "../espforge_configuration", version = "0.2.0" }
+espforge_common = { version = "0.1.3", path = "../espforge_common" }
+espforge_configuration = { path = "../espforge_configuration", version = "0.2.1" }
 quote = "1.0"
 proc-macro2 = "1.0"
 prettyplease = "0.2" 

@@ -1,6 +1,6 @@
 [package]
 name = "espforge_components"
-version = "0.1.5"
+version = "0.1.6"
 description = "Components for espforge"
 edition.workspace = true
 license.workspace = true
@@ -12,8 +12,8 @@ homepage.workspace = true
 documentation.workspace = true
 
 [dependencies]
-espforge_common = { version = "0.1.2", path = "../espforge_common", default-features = false }
-espforge_platform = { version = "0.1.8", path = "../espforge_platform" }
+espforge_common = { version = "0.1.3", path = "../espforge_common", default-features = false }
+espforge_platform = { version = "0.1.9", path = "../espforge_platform" }
 embedded-hal = "1.0.0"
 embedded-io = { version = "0.7.1", optional = true }
 

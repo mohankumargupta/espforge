@@ -1,6 +1,6 @@
 [package]
 name = "espforge_examples"
-version = "0.1.2"
+version = "0.1.3"
 description = "Embedded examples for espforge"
 edition.workspace = true
 license.workspace = true
