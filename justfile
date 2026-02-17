@@ -38,7 +38,7 @@ copy_generated name rust_project_path espforge_path:
   New-Item -ItemType Directory -Path $destRoot -Force | Out-Null
   
   # Files to copy (use Copy-Item)
-  $files = @('build.rs', 'rust-toolchain.toml', 'wokwi.toml', 'Cargo.toml', 'diagram.json', 'config.toml')
+  $files = @('build.rs', 'rust-toolchain.toml', 'wokwi.toml', 'Cargo.toml', 'diagram.json', 'config.toml', '.gitignore', '.clippy.toml')
   foreach ($file in $files) {
     $sourceFile = Join-Path $sourceRoot $file
     if (Test-Path $sourceFile) {

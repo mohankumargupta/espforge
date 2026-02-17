@@ -66,6 +66,11 @@ cargo build -p espforge
 
 If using VSCode, enable wokwi extension, then double-click on diagram.json
 
+## Projects
+in the **espforge_projects** folder
+
+1. using mousefood/ratatui with ili9341 to create a menu
+
 ## License
 
 MIT
