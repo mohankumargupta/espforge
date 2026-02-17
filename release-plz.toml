@@ -7,9 +7,11 @@ publish_no_verify = false
 
 [[package]]
 name = "espforge_codegen"
+publish_no_verify = true
 
 [[package]]
 name = "espforge_common"
+publish_no_verify = true
 
 [[package]]
 name = "espforge_components"
@@ -17,9 +19,11 @@ publish_no_verify = true
 
 [[package]]
 name = "espforge_components_builder"
+publish_no_verify = true
 
 [[package]]
 name = "espforge_configuration"
+publish_no_verify = true
 
 [[package]]
 name = "espforge_devices"
@@ -27,9 +31,11 @@ publish_no_verify = true
 
 [[package]]
 name = "espforge_devices_builder"
+publish_no_verify = true
 
 [[package]]
 name = "espforge_dialogue"
+publish_no_verify = true
 
 [[package]]
 name = "espforge_esp32metadata"
@@ -46,3 +52,4 @@ publish_no_verify = true
 
 [[package]]
 name = "espforge"
+publish_no_verify = true
