@@ -50,7 +50,7 @@ espforge_platform = { version = "0.1.9", path = "espforge_platform" }
 espforge_components = { version = "0.1.6", path = "espforge_components" }
 espforge_devices = { version = "0.1.8", path = "espforge_devices" }
 espforge_configuration = { version = "0.2.1", path = "espforge_configuration" }
-espforge_codegen = { version = "0.2.1", path = "espforge_codegen" }
+espforge_codegen = { version = "0.2.2", path = "espforge_codegen" }
 espforge_components_builder = { version = "0.1.3", path = "espforge_components_builder" }
 espforge_devices_builder = { version = "0.1.3", path = "espforge_devices_builder" }
 espforge_dialogue = { version = "0.1.2", path = "espforge_dialogue" }
