@@ -8,8 +8,7 @@ pub fn generate_lib_source(additional_modules: &[String]) -> Result<String> {
     let builder = LibraryBuilder::new(additional_modules);
     let tokens = builder.build();
 
-    let syntax_tree = syn::parse2(tokens)
-        .context("Failed to parse generated library structure")?;
+    let syntax_tree = syn::parse2(tokens).context("Failed to parse generated library structure")?;
 
     let content = prettyplease::unparse(&syntax_tree);
 
@@ -33,7 +32,7 @@ impl<'a> LibraryBuilder<'a> {
             #![no_std]
 
             #mod_declarations
-            
+
             pub mod generated;
             pub mod app;
 
@@ -42,7 +41,7 @@ impl<'a> LibraryBuilder<'a> {
             //pub use generated::*;
             pub use espforge_platform::Context;
 
-            // Global static references. 
+            // Global static references.
             // We name them UPPERCASE to follow convention for statics.
             pub static mut REGISTRY: *mut PeripheralRegistry = core::ptr::null_mut();
             pub static mut COMPONENTS: *mut Components = core::ptr::null_mut();

@@ -83,7 +83,7 @@ impl EspforgeConfiguration {
         let db = espforge_esp32metadata::BoardDatabase::load();
         db.max_heap_size(self.get_chip())
     }
-    
+
     pub fn has_psram(&self) -> Option<bool> {
         self.esp32.as_ref().map(|s| s.psram.is_some())
     }

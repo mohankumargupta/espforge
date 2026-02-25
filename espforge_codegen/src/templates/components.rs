@@ -1,5 +1,5 @@
 use super::common::format_generated_source;
-use super::constants::{origins, ALLOW_ATTRS};
+use super::constants::{ALLOW_ATTRS, origins};
 use crate::context::CodegenContext;
 use anyhow::{Context, Result};
 use espforge_configuration::EspforgeConfiguration;
@@ -31,8 +31,7 @@ struct ComponentsBuilder<'a> {
 
 impl<'a> ComponentsBuilder<'a> {
     fn new(model: &'a EspforgeConfiguration) -> Result<Self> {
-        let ctx = CodegenContext::build(model)
-            .context("Failed to build codegen context")?;
+        let ctx = CodegenContext::build(model).context("Failed to build codegen context")?;
 
         Ok(Self { model, ctx })
     }
@@ -84,8 +83,8 @@ impl<'a> ComponentsBuilder<'a> {
             return Err(anyhow::anyhow!("Failed to parse generated tokens: {}", e));
         }
 
-        let syntax_tree = syn::parse2(output)
-            .context("Failed to parse generated component tokens")?;
+        let syntax_tree =
+            syn::parse2(output).context("Failed to parse generated component tokens")?;
 
         Ok(prettyplease::unparse(&syntax_tree))
     }
@@ -145,4 +144,3 @@ impl ImportBuilder {
         self.imports
     }
 }
-

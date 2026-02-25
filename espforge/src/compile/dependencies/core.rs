@@ -8,10 +8,7 @@ const ESPFORGE_REPO: &str = "https://github.com/mohankumargupta/espforge";
 pub struct CoreDependencies;
 
 impl CoreDependencies {
-    pub fn add(
-        doc: &mut DocumentMut,
-        versions: &VersionResolver,
-    ) -> Result<()> {
+    pub fn add(doc: &mut DocumentMut, versions: &VersionResolver) -> Result<()> {
         let target_deps = doc
             .get_mut("dependencies")
             .and_then(|d| d.as_table_mut())
@@ -47,4 +44,3 @@ impl CoreDependencies {
         }
     }
 }
-

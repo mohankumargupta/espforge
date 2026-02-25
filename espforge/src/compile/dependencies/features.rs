@@ -60,10 +60,10 @@ impl FeatureManager {
         let mut component_features = vec![];
 
         for spec in model.components.values() {
-            if let Some(plugin) = espforge_codegen::registry::find_plugin(&spec.driver) {
-                if plugin.kind() == PluginKind::Component {
-                    component_features.extend(plugin.required_features());
-                }
+            if let Some(plugin) = espforge_codegen::registry::find_plugin(&spec.driver)
+                && plugin.kind() == PluginKind::Component
+            {
+                component_features.extend(plugin.required_features());
             }
         }
 
@@ -77,10 +77,7 @@ impl FeatureManager {
         Ok(())
     }
 
-    pub fn add_device_features(
-        doc: &mut DocumentMut,
-        model: &EspforgeConfiguration,
-    ) -> Result<()> {
+    pub fn add_device_features(doc: &mut DocumentMut, model: &EspforgeConfiguration) -> Result<()> {
         let target_deps = doc
             .get_mut("dependencies")
             .and_then(|d| d.as_table_mut())
@@ -93,10 +90,10 @@ impl FeatureManager {
         let mut device_features = vec![];
 
         for spec in model.devices.values() {
-            if let Some(plugin) = espforge_codegen::registry::find_plugin(&spec.driver) {
-                if plugin.kind() == PluginKind::Device {
-                    device_features.extend(plugin.required_features());
-                }
+            if let Some(plugin) = espforge_codegen::registry::find_plugin(&spec.driver)
+                && plugin.kind() == PluginKind::Device
+            {
+                device_features.extend(plugin.required_features());
             }
         }
 
@@ -125,19 +122,22 @@ impl FeatureManager {
 
         let mut features = vec!["embassy".to_string()];
 
-        if let Some(components_dep) = target_deps.get_mut("espforge_components") {
-            if let Some(table) = components_dep.as_inline_table_mut() {
-                if let Some(existing) = table.get("features") {
-                    if let Some(arr) = existing.as_array() {
-                        for v in arr {
-                            if let Some(s) = v.as_str() {
-                                features.push(s.to_string());
-                            }
-                        }
+        if let Some(components_dep) = target_deps.get_mut("espforge_components")
+            && let Some(table) = components_dep.as_inline_table_mut()
+        {
+            if let Some(existing) = table.get("features")
+                && let Some(arr) = existing.as_array()
+            {
+                for v in arr {
+                    if let Some(s) = v.as_str() {
+                        features.push(s.to_string());
                     }
                 }
-                table.insert("features", Value::Array(toml_edit::Array::from_iter(features)));
             }
+            table.insert(
+                "features",
+                Value::Array(toml_edit::Array::from_iter(features)),
+            );
         }
 
         if let Some(platform_dep) = target_deps.get_mut("espforge_platform") {
@@ -147,17 +147,17 @@ impl FeatureManager {
         Ok(())
     }
 
-    pub fn handle_psram(
-        doc: &mut DocumentMut,
-        model: &EspforgeConfiguration,
-    ) -> Result<()> {
-        if model.esp32.as_ref().and_then(|e| e.psram.as_ref()).is_none() {
+    pub fn handle_psram(doc: &mut DocumentMut, model: &EspforgeConfiguration) -> Result<()> {
+        if model
+            .esp32
+            .as_ref()
+            .and_then(|e| e.psram.as_ref())
+            .is_none()
+        {
             return Ok(());
         }
 
-        println!(
-            "   Detected PSRAM configuration - adding 'psram' feature to esp-hal"
-        );
+        println!("   Detected PSRAM configuration - adding 'psram' feature to esp-hal");
 
         let deps_table = doc
             .get_mut("dependencies")
@@ -173,28 +173,24 @@ impl FeatureManager {
 
     fn add_psram_feature(esp_hal_item: &mut Item) {
         if let Some(inline_table) = esp_hal_item.as_inline_table_mut() {
-            if let Some(features_value) = inline_table.get_mut("features") {
-                if let Some(features_array) = features_value.as_array_mut() {
-                    let has_psram = features_array
-                        .iter()
-                        .any(|v| v.as_str() == Some("psram"));
+            if let Some(features_value) = inline_table.get_mut("features")
+                && let Some(features_array) = features_value.as_array_mut()
+            {
+                let has_psram = features_array.iter().any(|v| v.as_str() == Some("psram"));
 
-                    if !has_psram {
-                        features_array.push("psram");
-                    }
+                if !has_psram {
+                    features_array.push("psram");
                 }
             }
-        } else if let Some(table) = esp_hal_item.as_table_mut() {
-            if let Some(features_item) = table.get_mut("features") {
-                if let Some(features_value) = features_item.as_value_mut() {
-                    if let Some(arr) = features_value.as_array_mut() {
-                        let has_psram = arr.iter().any(|v| v.as_str() == Some("psram"));
+        } else if let Some(table) = esp_hal_item.as_table_mut()
+            && let Some(features_item) = table.get_mut("features")
+            && let Some(features_value) = features_item.as_value_mut()
+            && let Some(arr) = features_value.as_array_mut()
+        {
+            let has_psram = arr.iter().any(|v| v.as_str() == Some("psram"));
 
-                        if !has_psram {
-                            arr.push("psram");
-                        }
-                    }
-                }
+            if !has_psram {
+                arr.push("psram");
             }
         }
     }
@@ -215,9 +211,12 @@ impl FeatureManager {
                 }
             }
         } else if let Some(table) = dep_item.as_table_mut() {
-            let existing_features = table
-                .entry("features")
-                .or_insert(toml_edit::Item::Value(Value::Array(toml_edit::Array::new())));
+            let existing_features =
+                table
+                    .entry("features")
+                    .or_insert(toml_edit::Item::Value(
+                        Value::Array(toml_edit::Array::new()),
+                    ));
 
             if let Some(arr) = existing_features.as_array_mut() {
                 for s in features_list {

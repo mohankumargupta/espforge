@@ -35,14 +35,16 @@ impl SectionProcessor for ProjectInfoProvisioner {
             model.espforge.insert("platform".to_string(), chip);
         }
 
-        if let Some(runtime) = config.runtime {
-            if runtime == "embassy" {
-                model.espforge.insert("runtime".to_string(), runtime);
-            }
+        if let Some(runtime) = config.runtime
+            && runtime == "embassy"
+        {
+            model.espforge.insert("runtime".to_string(), runtime);
         }
 
         if config.alloc {
-            model.espforge.insert("alloc".to_string(), "true".to_string());
+            model
+                .espforge
+                .insert("alloc".to_string(), "true".to_string());
         }
 
         println!("✓ Project configuration valid and processed.");

@@ -120,8 +120,6 @@ impl BoardDatabase {
 
     /// Get maximum heap size for a chip
     pub fn max_heap_size(&self, chip_id: &str) -> Option<usize> {
-        self.chips
-            .get(chip_id)
-            .map(|chip| chip.max_heap_size)
-    }    
+        self.chips.get(chip_id).map(|chip| chip.max_heap_size)
+    }
 }

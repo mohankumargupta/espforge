@@ -5,9 +5,9 @@ use thiserror::Error;
 
 pub mod gpio;
 pub mod i2c;
+pub mod psram;
 pub mod spi;
 pub mod uart;
-pub mod psram;
 
 #[derive(Error, Debug)]
 pub enum ResolutionError {
@@ -34,7 +34,7 @@ pub struct Esp32Config {
     #[serde(default)]
     pub uart: HashMap<String, uart::UartConfig>,
     #[serde(default)]
-    pub psram: Option<psram::PsramConfig>, 
+    pub psram: Option<psram::PsramConfig>,
 }
 
 pub trait ResolvePeripheral<'a>: AsRef<str> {

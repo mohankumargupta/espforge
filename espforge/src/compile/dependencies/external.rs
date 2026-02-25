@@ -9,10 +9,7 @@ const DEPENDENCIES_TOML: &str = include_str!("../../../dependencies.toml");
 pub struct ExternalDependencies;
 
 impl ExternalDependencies {
-    pub fn merge_embedded(
-        doc: &mut DocumentMut,
-        model: &EspforgeConfiguration,
-    ) -> Result<()> {
+    pub fn merge_embedded(doc: &mut DocumentMut, model: &EspforgeConfiguration) -> Result<()> {
         let deps_template: DocumentMut = DEPENDENCIES_TOML
             .parse()
             .context("Failed to parse embedded dependencies.toml")?;
@@ -36,10 +33,7 @@ impl ExternalDependencies {
         Ok(())
     }
 
-    pub fn merge_external(
-        doc: &mut DocumentMut,
-        config_dir: &Path,
-    ) -> Result<()> {
+    pub fn merge_external(doc: &mut DocumentMut, config_dir: &Path) -> Result<()> {
         let external_deps_path = config_dir.join("dependencies.toml");
 
         if !external_deps_path.exists() {
@@ -79,8 +73,7 @@ impl ExternalDependencies {
         model: &EspforgeConfiguration,
         deps_template: &DocumentMut,
     ) -> Result<()> {
-        let Some(features_table) = deps_template.get("features").and_then(|f| f.as_table())
-        else {
+        let Some(features_table) = deps_template.get("features").and_then(|f| f.as_table()) else {
             return Ok(());
         };
 
@@ -106,21 +99,16 @@ impl ExternalDependencies {
             .context("Failed to get dependencies table")?;
 
         for used_feature in enabled_features {
-            if let Some(enabled_deps) = features_table
-                .get(used_feature)
-                .and_then(|v| v.as_array())
+            if let Some(enabled_deps) = features_table.get(used_feature).and_then(|v| v.as_array())
             {
                 for dep_val in enabled_deps.iter() {
-                    if let Some(dep_name) = dep_val.as_str() {
-                        if !target_deps.contains_key(dep_name) {
-                            if let Some(template_deps) =
-                                deps_template.get("dependencies").and_then(|d| d.as_table())
-                            {
-                                if let Some(dep_value) = template_deps.get(dep_name) {
-                                    target_deps.insert(dep_name, dep_value.clone());
-                                }
-                            }
-                        }
+                    if let Some(dep_name) = dep_val.as_str()
+                        && !target_deps.contains_key(dep_name)
+                        && let Some(template_deps) =
+                            deps_template.get("dependencies").and_then(|d| d.as_table())
+                        && let Some(dep_value) = template_deps.get(dep_name)
+                    {
+                        target_deps.insert(dep_name, dep_value.clone());
                     }
                 }
             }
@@ -136,7 +124,7 @@ impl ExternalDependencies {
         model: &EspforgeConfiguration,
         deps_template: &DocumentMut,
     ) -> Result<()> {
-        let Some(esp32) = model.esp32.as_ref() else { 
+        let Some(esp32) = model.esp32.as_ref() else {
             return Ok(());
         };
 
@@ -184,7 +172,6 @@ impl ExternalDependencies {
         Ok(())
     }
 
-
     fn remove_optional_flag(dep_item: &mut Item) {
         if let Some(inline_table) = dep_item.as_inline_table_mut() {
             inline_table.remove("optional");
@@ -193,4 +180,3 @@ impl ExternalDependencies {
         }
     }
 }
-

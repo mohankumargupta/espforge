@@ -44,4 +44,3 @@ impl Default for VersionResolver {
         Self::new().expect("Failed to initialize version resolver")
     }
 }
-

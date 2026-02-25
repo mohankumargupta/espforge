@@ -106,7 +106,7 @@ fn update_wokwi_config_for_chip(project_dir: &Path) -> Result<()> {
 
 pub fn inject_app_code(base_dir: &Path, src_dir: &Path) -> Result<Vec<String>> {
     let rust_dir = base_dir.join("app/rust");
-    
+
     if !rust_dir.exists() {
         println!("⚠️  Warning: No app code found. Generating stub.");
         return Ok(Vec::new());
@@ -114,26 +114,26 @@ pub fn inject_app_code(base_dir: &Path, src_dir: &Path) -> Result<Vec<String>> {
 
     // Copy all .rs files from app/rust to src/
     let mut module_names = Vec::new();
-    
+
     for entry in fs::read_dir(&rust_dir).context("Failed to read app/rust directory")? {
         let entry = entry.context("Failed to read directory entry")?;
         let path = entry.path();
-        
+
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rs") {
-            let file_name = path.file_name()
+            let file_name = path
+                .file_name()
                 .ok_or_else(|| anyhow::anyhow!("Invalid file name"))?;
             let file_name_str = file_name.to_string_lossy().to_string();
             let target = src_dir.join(file_name);
-            
-            fs::copy(&path, &target)
-                .with_context(|| format!("Failed to copy {:?}", file_name))?;
-            
+
+            fs::copy(&path, &target).with_context(|| format!("Failed to copy {:?}", file_name))?;
+
             println!("   Included app logic from app/rust/{}", file_name_str);
-            
-            if let Some(module_name) = file_name_str.strip_suffix(".rs") {
-                if module_name != "app" {  
-                    module_names.push(module_name.to_string());
-                }
+
+            if let Some(module_name) = file_name_str.strip_suffix(".rs")
+                && module_name != "app"
+            {
+                module_names.push(module_name.to_string());
             }
         }
     }

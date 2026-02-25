@@ -22,9 +22,7 @@ pub fn add_dependencies(
     let cargo_path = project_dir.join("Cargo.toml");
     let manifest = fs::read_to_string(&cargo_path).context("Failed to read Cargo.toml")?;
 
-    let mut doc: DocumentMut = manifest
-        .parse()
-        .context("Failed to parse Cargo.toml")?;
+    let mut doc: DocumentMut = manifest.parse().context("Failed to parse Cargo.toml")?;
 
     let versions = VersionResolver::new()?;
 
@@ -48,5 +46,3 @@ pub fn add_dependencies(
 
     Ok(())
 }
-
-

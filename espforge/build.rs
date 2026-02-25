@@ -41,10 +41,10 @@ fn update_external_dependencies(manifest_dir: &Path, workspace_root: &Path) -> R
     if let Some(deps_table) = doc.get_mut("dependencies").and_then(|d| d.as_table_mut()) {
         for (dep_name, dep_item) in deps_table.iter_mut() {
             let name = dep_name.get();
-            if let Some(new_version) = workspace_versions.get(name) {
-                if update_item_version(dep_item, new_version) {
-                    modified = true;
-                }
+            if let Some(new_version) = workspace_versions.get(name)
+                && update_item_version(dep_item, new_version)
+            {
+                modified = true;
             }
         }
     }
@@ -73,15 +73,13 @@ fn update_internal_versions(manifest_dir: &Path, workspace_root: &Path) -> Resul
 
     if let Some(table) = doc.get_mut("espforge").and_then(|t| t.as_table_mut()) {
         for crate_name in internal_crates {
-            if let Ok(version) = get_crate_version(workspace_root, crate_name) {
-                if let Some(item) = table.get_mut(crate_name) {
-                    if let Some(val) = item.as_value_mut() {
-                        if val.as_str() != Some(&version) {
-                            *val = Value::from(version);
-                            modified = true;
-                        }
-                    }
-                }
+            if let Ok(version) = get_crate_version(workspace_root, crate_name)
+                && let Some(item) = table.get_mut(crate_name)
+                && let Some(val) = item.as_value_mut()
+                && val.as_str() != Some(&version)
+            {
+                *val = Value::from(version);
+                modified = true;
             }
         }
     }
@@ -136,21 +134,19 @@ fn update_item_version(item: &mut Item, new_version: &str) -> bool {
             return true;
         }
     } else if let Some(table) = item.as_inline_table_mut() {
-        if let Some(val) = table.get_mut("version") {
-            if val.as_str() != Some(new_version) {
-                *val = Value::from(new_version);
-                return true;
-            }
+        if let Some(val) = table.get_mut("version")
+            && val.as_str() != Some(new_version)
+        {
+            *val = Value::from(new_version);
+            return true;
         }
-    } else if let Some(table) = item.as_table_mut() {
-        if let Some(item_ver) = table.get_mut("version") {
-            if let Some(val) = item_ver.as_value_mut() {
-                if val.as_str() != Some(new_version) {
-                    *val = Value::from(new_version);
-                    return true;
-                }
-            }
-        }
+    } else if let Some(table) = item.as_table_mut()
+        && let Some(item_ver) = table.get_mut("version")
+        && let Some(val) = item_ver.as_value_mut()
+        && val.as_str() != Some(new_version)
+    {
+        *val = Value::from(new_version);
+        return true;
     }
     false
 }

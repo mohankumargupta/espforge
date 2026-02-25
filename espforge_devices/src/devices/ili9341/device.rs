@@ -114,5 +114,3 @@ where
         self.display.size()
     }
 }
-
-

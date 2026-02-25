@@ -15,15 +15,16 @@ pub mod templates;
 pub use scaffold::esp_generate;
 
 // Re-export main generation functions
-pub use templates::{
-    generate_components_source, generate_entry_point_source, generate_lib_source,
-};
+pub use templates::{generate_components_source, generate_entry_point_source, generate_lib_source};
 
 // Convenience function that maintains backward compatibility
-pub fn generate_all(model: &EspforgeConfiguration, additional_modules: &[String]) -> Result<(String, String, String)> {
+pub fn generate_all(
+    model: &EspforgeConfiguration,
+    additional_modules: &[String],
+) -> Result<(String, String, String)> {
     let lib_source = generate_lib_source(additional_modules)?;
     let entry_point = generate_entry_point_source(model)?;
     let components = generate_components_source(model)?;
-    
+
     Ok((lib_source, entry_point, components))
 }

@@ -30,7 +30,7 @@ impl EntryPointGenerator for BlockingEntryPoint {
     fn generate(&self, model: &EspforgeConfiguration) -> Result<String> {
         let common = CommonEntryPointCode::new(model);
         let allocators = AllocatorGenerator::generate(model);
-        
+
         // Extract fields from common
         let imports = common.imports;
         let static_cells = common.static_cells;
@@ -74,8 +74,8 @@ impl EntryPointGenerator for BlockingEntryPoint {
             }
         };
 
-        let syntax_tree = syn::parse2(tokens)
-            .context("Failed to parse blocking entry point syntax")?;
+        let syntax_tree =
+            syn::parse2(tokens).context("Failed to parse blocking entry point syntax")?;
 
         Ok(prettyplease::unparse(&syntax_tree))
     }
@@ -87,7 +87,7 @@ impl EntryPointGenerator for EmbassyEntryPoint {
     fn generate(&self, model: &EspforgeConfiguration) -> Result<String> {
         let common = CommonEntryPointCode::new(model);
         let allocators = AllocatorGenerator::generate(model);
-        
+
         // Extract fields from common
         let imports = common.imports;
         let static_cells = common.static_cells;
@@ -136,8 +136,8 @@ impl EntryPointGenerator for EmbassyEntryPoint {
             }
         };
 
-        let syntax_tree = syn::parse2(tokens)
-            .context("Failed to parse embassy entry point syntax")?;
+        let syntax_tree =
+            syn::parse2(tokens).context("Failed to parse embassy entry point syntax")?;
 
         Ok(prettyplease::unparse(&syntax_tree))
     }
