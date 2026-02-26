@@ -151,28 +151,26 @@ impl<I: I2c> FT6206<I> {
             .copied()
     }
 
-pub fn map_range(
-    &self,
-    value: u16,
-    in_min: u16,
-    in_max: u16,
-    out_min: u16,
-    out_max: u16,
-) -> u16 {
-    let value = value.clamp(in_min, in_max);
-    if in_max == in_min {
-        return out_min;
+    pub fn map_range(
+        &self,
+        value: u16,
+        in_min: u16,
+        in_max: u16,
+        out_min: u16,
+        out_max: u16,
+    ) -> u16 {
+        let value = value.clamp(in_min, in_max);
+        if in_max == in_min {
+            return out_min;
+        }
+        // Use i64 to handle mirrored ranges where out_max < out_min
+        let value = value as i64;
+        let in_min = in_min as i64;
+        let in_max = in_max as i64;
+        let out_min = out_min as i64;
+        let out_max = out_max as i64;
+
+        let mapped = (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+        mapped.clamp(0, u16::MAX as i64) as u16
     }
-    // Use i64 to handle mirrored ranges where out_max < out_min
-    let value = value as i64;
-    let in_min = in_min as i64;
-    let in_max = in_max as i64;
-    let out_min = out_min as i64;
-    let out_max = out_max as i64;
-    
-    let mapped = (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-    mapped.clamp(0, u16::MAX as i64) as u16
-}
-
-
 }

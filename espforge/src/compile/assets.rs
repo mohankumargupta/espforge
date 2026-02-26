@@ -5,11 +5,10 @@ use std::fs;
 use std::path::Path;
 
 pub fn generate_wokwi_config(
-    base_dir: &Path,
     project_dir: &Path,
     model: &EspforgeConfiguration,
 ) -> Result<()> {
-    let diagram_json = base_dir.join("diagram.json");
+    let diagram_json = project_dir.join("diagram.json");
     if !diagram_json.exists() {
         return Ok(());
     }
@@ -23,6 +22,15 @@ pub fn generate_wokwi_config(
 
     let content =
         fs::read_to_string(&diagram_json).context("Failed to read diagram.json template")?;
+
+    // Only process placeholders the first time. Leave it alone on subsequent runs.
+    if !content.contains("PLACEHOLDER_WOKWI_BOARD") {
+        let dest_path = project_dir.join("diagram.json");
+        if diagram_json != dest_path {
+            fs::copy(&diagram_json, &dest_path)?;
+        }
+        return Ok(());
+    }
 
     // Replace board type placeholder (both formats for compatibility)
     let mut processed = content.replace("PLACEHOLDER_WOKWI_BOARD", &board_id);
@@ -51,18 +59,16 @@ pub fn generate_wokwi_config(
     Ok(())
 }
 
-pub fn copy_wokwi_files(base_dir: &Path, project_dir: &Path) -> Result<()> {
-    let files_to_copy = ["wokwi.toml", "diagram.json", "chip.json", "chip.wasm"];
-
-    for filename in files_to_copy {
-        let source_path = base_dir.join(filename);
-        if source_path.exists() {
-            let dest_path = project_dir.join(filename);
-            fs::copy(&source_path, &dest_path)
-                .with_context(|| format!("Failed to copy {} to project", filename))?;
-            println!("   Included custom file: {}", filename);
-        }
-    }
+pub fn copy_wokwi_files(project_dir: &Path) -> Result<()> {
+    // for filename in &["wokwi.toml"] {  // diagram.json handled by generate_wokwi_config
+    //     let source_path = project_dir.join(filename);
+    //     if source_path.exists() {
+    //         let dest_path = project_dir.join(filename);
+    //         fs::copy(&source_path, &dest_path)
+    //             .with_context(|| format!("Failed to copy {}", filename))?;
+    //         println!("   Included custom file: {} (overriding generated)", filename);
+    //     }
+    // }
 
     let chip_wasm = project_dir.join("chip.wasm");
     let chip_json = project_dir.join("chip.json");
@@ -104,43 +110,27 @@ fn update_wokwi_config_for_chip(project_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn inject_app_code(base_dir: &Path, src_dir: &Path) -> Result<Vec<String>> {
-    let rust_dir = base_dir.join("app/rust");
-
-    if !rust_dir.exists() {
-        println!("⚠️  Warning: No app code found. Generating stub.");
-        return Ok(Vec::new());
-    }
-
-    // Copy all .rs files from app/rust to src/
-    let mut module_names = Vec::new();
-
-    for entry in fs::read_dir(&rust_dir).context("Failed to read app/rust directory")? {
-        let entry = entry.context("Failed to read directory entry")?;
-        let path = entry.path();
-
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rs") {
-            let file_name = path
-                .file_name()
-                .ok_or_else(|| anyhow::anyhow!("Invalid file name"))?;
-            let file_name_str = file_name.to_string_lossy().to_string();
-            let target = src_dir.join(file_name);
-
-            fs::copy(&path, &target).with_context(|| format!("Failed to copy {:?}", file_name))?;
-
-            println!("   Included app logic from app/rust/{}", file_name_str);
-
-            if let Some(module_name) = file_name_str.strip_suffix(".rs")
-                && module_name != "app"
-            {
-                module_names.push(module_name.to_string());
+pub fn inject_app_code(src_dir: &Path) -> Result<Vec<String>> {
+    let mut module_names = vec![];
+    if src_dir.exists() {
+        for entry in fs::read_dir(src_dir).context("Failed to read src directory")? {
+            let entry = entry.context("Failed to read directory entry")?;
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                let file_name_str = path.file_name().unwrap().to_string_lossy().to_string();
+                if let Some(module_name) = file_name_str.strip_suffix(".rs") {
+                    if module_name != "lib"
+                        && module_name != "generated"
+                        && module_name != "main"
+                        && !module_name.starts_with("bin")
+                    {
+                        module_names.push(module_name.to_string());
+                    }
+                }
             }
         }
     }
-
-    if module_names.is_empty() && !src_dir.join("app.rs").exists() {
-        println!("⚠️  Warning: No .rs files found in app/rust/.");
-    }
-
+    module_names.sort();
+    module_names.dedup();
     Ok(module_names)
 }

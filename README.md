@@ -48,11 +48,20 @@ In that folder, run
 espforge compile blink.yaml
 ```
 
-This will create another generated folder, this time it is the actually rust project.
+This creates a rust project in-place alongside the artifacts created in the previous step.
 
-Change to this directory, then run
+Finally:
 
 ```shell
+cargo build
+```
+
+## Updating yaml file
+
+When the yaml file is updated, simply run:
+
+```shell
+espforge compile blink.yaml
 cargo build
 ```
 

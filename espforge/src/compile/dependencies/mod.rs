@@ -17,7 +17,6 @@ use versioning::VersionResolver;
 pub fn add_dependencies(
     project_dir: &Path,
     model: &EspforgeConfiguration,
-    config_dir: &Path,
 ) -> Result<()> {
     let cargo_path = project_dir.join("Cargo.toml");
     let manifest = fs::read_to_string(&cargo_path).context("Failed to read Cargo.toml")?;
@@ -38,7 +37,7 @@ pub fn add_dependencies(
 
     ExternalDependencies::merge_embedded(&mut doc, model)?;
 
-    ExternalDependencies::merge_external(&mut doc, config_dir)?;
+    ExternalDependencies::merge_external(&mut doc, project_dir)?;
 
     FeatureManager::handle_psram(&mut doc, model)?;
 

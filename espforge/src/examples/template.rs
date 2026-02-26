@@ -23,6 +23,31 @@ impl ExampleExporter {
         let template = ExampleTemplate::find(&config.template_name)?;
         template.extract_to(output.path())?;
 
+        let app_rust_dir = output.path().join("app").join("rust");
+        let src_dir = output.path().join("src");
+
+        if app_rust_dir.exists() {
+            if !src_dir.exists() {
+                fs::create_dir_all(&src_dir).context("Failed to create src directory")?;
+            }
+
+            for entry in fs::read_dir(&app_rust_dir).context("Failed to read app/rust directory")? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(file_name) = path.file_name() {
+                        let dest = src_dir.join(file_name);
+                        fs::rename(&path, &dest).context("Failed to move file to src")?;
+                    }
+                }
+            }
+
+            let app_dir = output.path().join("app");
+            if app_dir.exists() {
+                let _ = fs::remove_dir_all(&app_dir);
+            }
+        }
+
         let config_file = ConfigFile::locate(output.path())?;
         config_file.update(config)?;
 

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use espforge_configuration::EspforgeConfiguration;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::parse::ConfigParser;
 
@@ -15,7 +15,6 @@ pub fn compile_project(config_path: &Path) -> Result<()> {
 }
 
 struct ProjectCompiler {
-    base_dir: PathBuf,
     model: EspforgeConfiguration,
 }
 
@@ -30,12 +29,7 @@ impl ProjectCompiler {
         let parser = ConfigParser::new();
         let model = parser.parse(&content)?;
 
-        let base_dir = config_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-
-        Ok(Self { base_dir, model })
+        Ok(Self { model })
     }
 
     fn run(&self) -> Result<()> {
@@ -44,36 +38,28 @@ impl ProjectCompiler {
         println!("   Runtime: {}", self.model.runtime_name());
         println!("🔨 Generating artifacts...");
 
-        // Step 1: Scaffold
-        generators::generate_scaffold(&self.model)?;
-
-        let project_dir = self.resolve_project_dir()?;
+        let project_dir = std::env::current_dir().context("Failed to get current directory")?;
         let src_dir = project_dir.join("src");
-
-        // Step 2: Dependencies
-        dependencies::add_dependencies(&project_dir, &self.model, &self.base_dir)?;
-
-        // Step 3: Assets (Wokwi, Platform, User App)
-        assets::copy_wokwi_files(&self.base_dir, &project_dir)?;
-        assets::generate_wokwi_config(&self.base_dir, &project_dir, &self.model)?;
-        //assets::provision_platform_assets(&project_dir, &src_dir)?;
-        let additional_modules = assets::inject_app_code(&self.base_dir, &src_dir)?;
-
-        // Step 4: Code Generation
-        generators::generate_component_code(&src_dir, &self.model)?;
+        
+        generators::generate_scaffold(&self.model, &project_dir)?;
+        
+        let additional_modules = assets::inject_app_code(&src_dir)?;
         generators::setup_library_structure(&src_dir, &additional_modules)?;
+        generators::generate_component_code(&src_dir, &self.model)?;
         generators::generate_entry_point(&src_dir, &self.model)?;
+        
+        dependencies::add_dependencies(&project_dir, &self.model)?;
+        assets::generate_wokwi_config(&project_dir, &self.model)?;
+        assets::copy_wokwi_files(&project_dir)?;
 
         println!("✨ Rust project generated successfully!");
         println!();
-        println!("To compile the rust project:");
-        println!("  cd {}", self.model.get_name());
-        println!("  cargo build");
+        println!("To build run: cargo build");
+
         Ok(())
     }
 
-    fn resolve_project_dir(&self) -> Result<PathBuf> {
-        let current_dir = std::env::current_dir().context("Failed to get current directory")?;
-        Ok(current_dir.join(self.model.get_name()))
-    }
+    // fn resolve_project_dir(&self) -> Result<PathBuf> {
+    //     Ok(self.base_dir.clone())
+    // }
 }

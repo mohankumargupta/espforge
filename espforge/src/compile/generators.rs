@@ -6,9 +6,13 @@ use espforge_configuration::EspforgeConfiguration;
 use std::fs;
 use std::path::Path;
 
-/// Invokes the esp-generate CLI tool to create the initial project structure
-pub fn generate_scaffold(model: &EspforgeConfiguration) -> Result<()> {
-    esp_generate(model.get_name(), model.get_chip(), model.is_embassy())
+pub fn generate_scaffold(model: &EspforgeConfiguration, target_dir: &Path) -> Result<()> {
+    esp_generate(
+        model.get_name(),
+        model.get_chip(),
+        model.is_embassy(),
+        target_dir,
+    )
 }
 
 /// Generates the generated.rs file containing component definitions

@@ -34,15 +34,10 @@ impl<'a> LibraryBuilder<'a> {
             #mod_declarations
 
             pub mod generated;
-            pub mod app;
-
-            // Re-export the struct Types so macros can find them
+            
             pub use generated::{Components, Devices, PeripheralRegistry};
-            //pub use generated::*;
             pub use espforge_platform::Context;
 
-            // Global static references.
-            // We name them UPPERCASE to follow convention for statics.
             pub static mut REGISTRY: *mut PeripheralRegistry = core::ptr::null_mut();
             pub static mut COMPONENTS: *mut Components = core::ptr::null_mut();
             pub static mut DEVICES: *mut Devices = core::ptr::null_mut();
