@@ -27,20 +27,11 @@ impl PeripheralRegistry {
     }
 }
 pub struct Components {
-    pub red_led: espforge_components::components::led::component::LED,
     pub button: espforge_components::components::button::Button,
+    pub red_led: espforge_components::components::led::component::LED,
 }
 impl Components {
     pub fn new(registry: &'static mut PeripheralRegistry) -> Self {
-        let red_led = espforge_components::components::led::component::LED::new(
-            espforge_platform::gpio::GPIOOutput::from_pin(
-                registry.gpio7.borrow_mut().take().unwrap(),
-            ),
-            espforge_components::components::led::component::LedConfig {
-                active_low: false,
-                ..Default::default()
-            },
-        );
         let button = espforge_components::components::button::Button::new(
             espforge_platform::gpio::GPIOInput::from_pin(
                 registry.gpio9.borrow_mut().take().unwrap(),
@@ -52,7 +43,16 @@ impl Components {
                 ..Default::default()
             },
         );
-        Self { red_led, button }
+        let red_led = espforge_components::components::led::component::LED::new(
+            espforge_platform::gpio::GPIOOutput::from_pin(
+                registry.gpio7.borrow_mut().take().unwrap(),
+            ),
+            espforge_components::components::led::component::LedConfig {
+                active_low: false,
+                ..Default::default()
+            },
+        );
+        Self { button, red_led }
     }
 }
 pub struct Devices {}

@@ -2,8 +2,8 @@
 // Source: espforge_codegen/templates/library.rs
 
 #![no_std]
-pub mod generated;
 pub mod app;
+pub mod generated;
 pub use generated::{Components, Devices, PeripheralRegistry};
 pub use espforge_platform::Context;
 pub static mut REGISTRY: *mut PeripheralRegistry = core::ptr::null_mut();

@@ -26,9 +26,9 @@ esp-backtrace = { version = "0.18.1", features = [
   "println",
 ] }
 esp-println = { version = "0.16.1", features = ["esp32c3", "log-04"] }
-espforge_platform = { version = "0.1.9", features = ["spi"] }
-espforge_components = { version = "0.1.6", features = ["spi"] }
-espforge_devices = { version = "0.1.8", features = ["ili9341"] }
+espforge_platform = { version = "0.1.10", features = ["spi"] }
+espforge_components = { version = "0.1.7", features = ["spi"] }
+espforge_devices = { version = "0.1.9", features = ["ili9341"] }
 static_cell = "2.1"
 embedded-hal = "1.0.0"
 
