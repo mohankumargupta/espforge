@@ -11,11 +11,13 @@ A scaffolding++ tool for esp32 no_std rust projects.
 
 ## Prerequisites
 **Rust**: [Install Rust](https://rustup.rs/)
-**ESP machinery(It might be possible to use cargo-binstall for these.)**:
+
+**ESP machinery(can always use cargo install if needed)**:
    ```shell
-   cargo install espup
+   cargo install cargo-binstall
+   cargo binstall espup
    espup install
-   cargo install esp-generate
+   cargo binstall esp-generate
   ```
   
 
@@ -31,6 +33,8 @@ cargo install espforge
 ```
 
 ## Geting started
+
+![](https://cdn.jsdelivr.net/gh/mohankumargupta/assets@refs/heads/main/espforge.webp)
 
 Run
 
