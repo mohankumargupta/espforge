@@ -1,5 +1,6 @@
 use super::common::format_generated_source;
 use super::constants::origins;
+use super::wifi::{generate_wifi_init, generate_wifi_tasks};
 use crate::allocators::AllocatorGenerator;
 use anyhow::{Context, Result};
 use espforge_configuration::{EspforgeConfiguration, RuntimeMode};
@@ -98,6 +99,14 @@ impl EntryPointGenerator for EmbassyEntryPoint {
         let init_devices = common.init_devices;
         let init_context = common.init_context;
 
+        let wifi_tasks = generate_wifi_tasks(model);
+        let wifi_init = generate_wifi_init(model);
+        // let has_wifi = model
+        //     .esp32
+        //     .as_ref()
+        //     .and_then(|e| e.wifi.as_ref())
+        //     .is_some();
+
         let tokens = quote! {
             #![no_std]
             #![no_main]
@@ -110,6 +119,8 @@ impl EntryPointGenerator for EmbassyEntryPoint {
             use esp_hal::timer::timg::TimerGroup;
 
             #static_cells
+
+            #wifi_tasks
 
             #[esp_rtos::main]
             async fn main(spawner: Spawner) {
@@ -124,6 +135,7 @@ impl EntryPointGenerator for EmbassyEntryPoint {
                 #init_embassy_runtime
                 #init_components
                 #init_devices
+                #wifi_init
                 #init_context
 
                 // Run user setup
@@ -158,6 +170,8 @@ impl CommonEntryPointCode {
     fn new(model: &EspforgeConfiguration) -> Self {
         let crate_name = model.get_name().replace('-', "_");
         let crate_ident = format_ident!("{}", crate_name);
+
+        let has_wifi = model.esp32.as_ref().and_then(|e| e.wifi.as_ref()).is_some();
 
         let imports = quote! {
             use #crate_ident::*;
@@ -204,13 +218,25 @@ impl CommonEntryPointCode {
             unsafe { DEVICES = devices as *mut _; }
         };
 
-        let init_context = quote! {
-            // Create context (only contains utilities)
-            let logger = espforge_platform::logger::Logger::new();
-            let mut ctx = Context {
-                logger,
-                delay,
-            };
+        let init_context = if has_wifi {
+            quote! {
+                // Create context (only contains utilities)
+                let logger = espforge_platform::logger::Logger::new();
+                let mut ctx = Context {
+                    logger,
+                    delay,
+                    wifi,
+                };
+            }
+        } else {
+            quote! {
+                // Create context (only contains utilities)
+                let logger = espforge_platform::logger::Logger::new();
+                let mut ctx = Context {
+                    logger,
+                    delay,
+                };
+            }
         };
 
         let init_embassy_runtime = quote! {

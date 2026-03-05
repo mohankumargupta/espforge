@@ -34,7 +34,7 @@ impl<'a> LibraryBuilder<'a> {
             #mod_declarations
 
             pub mod generated;
-            
+
             pub use generated::{Components, Devices, PeripheralRegistry};
             pub use espforge_platform::Context;
 

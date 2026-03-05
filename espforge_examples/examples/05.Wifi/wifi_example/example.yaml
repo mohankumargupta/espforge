@@ -1,0 +1,10 @@
+espforge:
+  name: wifi_example
+  platform: esp32c3
+  runtime: embassy
+  alloc: true
+
+esp32:
+  wifi:
+    ssid: Wokwi-GUEST
+    auth: open

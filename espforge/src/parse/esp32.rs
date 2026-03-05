@@ -91,6 +91,13 @@ impl PlatformProvisioner {
             bail!("Pin conflicts detected:\n{}", error_msg);
         }
 
+        //check wifi
+        // if let Some(wifi) = &config.wifi {
+        //     if wifi.auth == AuthMode::Wpa2 && wifi.password {
+        //         bail!("WPA2 requires a password/auth_key");
+        //     }
+        // }
+
         Ok(())
     }
 }

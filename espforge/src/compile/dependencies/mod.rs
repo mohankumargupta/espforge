@@ -14,10 +14,7 @@ use external::ExternalDependencies;
 use features::FeatureManager;
 use versioning::VersionResolver;
 
-pub fn add_dependencies(
-    project_dir: &Path,
-    model: &EspforgeConfiguration,
-) -> Result<()> {
+pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
     let cargo_path = project_dir.join("Cargo.toml");
     let manifest = fs::read_to_string(&cargo_path).context("Failed to read Cargo.toml")?;
 

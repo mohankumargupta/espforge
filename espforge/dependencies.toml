@@ -17,4 +17,4 @@ default = []
 i2c = ["embedded-hal-bus"]
 spi = ["embedded-hal-bus"]
 uart = ["embedded-io"]
-
+wifi = []

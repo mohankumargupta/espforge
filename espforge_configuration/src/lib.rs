@@ -87,4 +87,8 @@ impl EspforgeConfiguration {
     pub fn has_psram(&self) -> Option<bool> {
         self.esp32.as_ref().map(|s| s.psram.is_some())
     }
+
+    pub fn has_wifi(&self) -> bool {
+        self.esp32.as_ref().and_then(|e| e.wifi.as_ref()).is_some()
+    }
 }

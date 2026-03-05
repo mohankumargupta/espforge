@@ -40,6 +40,19 @@ pub fn generate_peripheral_registry(model: &EspforgeConfiguration) -> Result<Tok
         )?;
     }
 
+    if model.is_embassy() {
+        if let Some(esp32) = &model.esp32 {
+            if esp32.wifi.is_some() {
+                fields.push(quote! {
+                    pub wifi: core::cell::RefCell<Option<esp_hal::peripherals::WIFI<'static>>>
+                });
+                struct_init.push(quote! {
+                    wifi: core::cell::RefCell::new(Some(p.WIFI))
+                });
+            }
+        }
+    }
+
     Ok(quote! {
         pub struct PeripheralRegistry {
             #(#fields),*

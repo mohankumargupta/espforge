@@ -40,14 +40,16 @@ impl ProjectCompiler {
 
         let project_dir = std::env::current_dir().context("Failed to get current directory")?;
         let src_dir = project_dir.join("src");
-        
+
         generators::generate_scaffold(&self.model, &project_dir)?;
-        
+
+        assets::setup_wifi_env_config(&project_dir, &self.model)?;
+
         let additional_modules = assets::inject_app_code(&src_dir)?;
         generators::setup_library_structure(&src_dir, &additional_modules)?;
         generators::generate_component_code(&src_dir, &self.model)?;
         generators::generate_entry_point(&src_dir, &self.model)?;
-        
+
         dependencies::add_dependencies(&project_dir, &self.model)?;
         assets::generate_wokwi_config(&project_dir, &self.model)?;
         assets::copy_wokwi_files(&project_dir)?;

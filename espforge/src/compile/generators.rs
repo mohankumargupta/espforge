@@ -11,6 +11,7 @@ pub fn generate_scaffold(model: &EspforgeConfiguration, target_dir: &Path) -> Re
         model.get_name(),
         model.get_chip(),
         model.is_embassy(),
+        model.has_wifi(),
         target_dir,
     )
 }

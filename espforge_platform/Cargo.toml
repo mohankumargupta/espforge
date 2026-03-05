@@ -4,10 +4,10 @@ version = "0.1.10"
 description = "Platform abstractions for espforge projects"
 edition.workspace = true
 license.workspace = true
-readme.workspace = true 
+readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
-repository.workspace = true 
+repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
 
@@ -19,6 +19,9 @@ esp-hal = "1.0"
 log.workspace = true
 embassy-sync = { workspace = true, optional = true }
 embassy-time = { workspace = true, optional = true }
+embassy-net = { workspace = true,  optional = true, features = ["proto-ipv4", "medium-ethernet", "tcp", "dns", "dhcpv4"] }
+reqwless = { workspace = true, optional = true, default-features = false, features = ["alloc"] }
+heapless = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -26,6 +29,7 @@ spi = ["dep:embedded-hal-bus"]
 i2c = ["dep:embedded-hal-bus"]
 uart = ["dep:embedded-io"]
 psram = []
+wifi = ["dep:embassy-net", "dep:reqwless", "dep:heapless"]
 embassy = ["dep:embassy-sync", "dep:embassy-time"]
 esp32 = ["esp-hal/esp32"]
 esp32c3 = ["esp-hal/esp32c3"]
@@ -34,7 +38,6 @@ esp32h2 = ["esp-hal/esp32h2"]
 esp32s2 = ["esp-hal/esp32s2"]
 esp32s3 = ["esp-hal/esp32s3"]
 
+
 [package.metadata.dist]
 dist = false
-
-

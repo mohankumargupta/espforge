@@ -8,6 +8,7 @@ pub fn esp_generate(
     project_name: &str,
     chip: &str,
     enable_async: bool,
+    enable_wifi: bool,
     project_dir: &Path,
 ) -> Result<()> {
     println!("Running esp-generate for chip: {}", chip);
@@ -38,6 +39,10 @@ pub fn esp_generate(
         cmd.arg("-o").arg("embassy");
     }
 
+    if enable_wifi {
+        cmd.arg("-o").arg("wifi");
+    }
+
     cmd.arg(project_name);
 
     let output = cmd
@@ -58,7 +63,6 @@ pub fn esp_generate(
 
     Ok(())
 }
-
 
 fn merge_directories(src: &Path, dst: &Path) -> Result<()> {
     if !dst.exists() {

@@ -41,6 +41,10 @@ impl FeatureManager {
             platform_features.push("embassy".to_string());
         }
 
+        if esp32.wifi.is_some() {
+            platform_features.push("wifi".to_string());
+        }
+
         if let Some(platform_dep) = target_deps.get_mut("espforge_platform") {
             Self::add_features(platform_dep, platform_features);
         }
@@ -194,6 +198,28 @@ impl FeatureManager {
             }
         }
     }
+
+    // pub fn add_wifi_features(doc: &mut DocumentMut, model: &EspforgeConfiguration) -> Result<()> {
+    //     if model.esp32.as_ref().and_then(|e| e.wifi.as_ref()).is_none() {
+    //         return Ok(());
+    //     }
+    //     let target_deps = doc
+    //         .get_mut("dependencies")
+    //         .and_then(|d| d.as_table_mut())
+    //         .context("Failed to get dependencies")?;
+
+    //     // Make wifi deps non-optional
+    //     for dep in &["embassy-net", "esp-radio"] {
+    //         if let Some(item) = target_deps.get_mut(*dep) {
+    //                 if let Some(inline_table) = item.as_inline_table_mut() {
+    //     inline_table.remove("optional");
+    // } else if let Some(table) = item.as_table_like_mut() {
+    //     table.remove("optional");
+    // }
+    //         }
+    //     }
+    //     Ok(())
+    // }
 
     fn add_features(dep_item: &mut Item, features_list: Vec<String>) {
         if features_list.is_empty() {

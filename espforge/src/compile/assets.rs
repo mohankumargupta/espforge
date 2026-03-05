@@ -4,10 +4,7 @@ use espforge_esp32metadata::BoardDatabase;
 use std::fs;
 use std::path::Path;
 
-pub fn generate_wokwi_config(
-    project_dir: &Path,
-    model: &EspforgeConfiguration,
-) -> Result<()> {
+pub fn generate_wokwi_config(project_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
     let diagram_json = project_dir.join("diagram.json");
     if !diagram_json.exists() {
         return Ok(());
@@ -133,4 +130,43 @@ pub fn inject_app_code(src_dir: &Path) -> Result<Vec<String>> {
     module_names.sort();
     module_names.dedup();
     Ok(module_names)
+}
+
+pub fn setup_wifi_env_config(project_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
+    let Some(wifi) = model.esp32.as_ref().and_then(|e| e.wifi.as_ref()) else {
+        return Ok(());
+    };
+
+    let config_path = project_dir.join(".cargo/config.toml");
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).context("Failed to create .cargo directory")?;
+    }
+
+    let content = if config_path.exists() {
+        fs::read_to_string(&config_path).context("Failed to read .cargo/config.toml")?
+    } else {
+        String::new()
+    };
+
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .context("Failed to parse .cargo/config.toml")?;
+
+    if !doc.contains_key("env") {
+        doc.insert("env", toml_edit::Item::Table(toml_edit::Table::new()));
+    }
+
+    let env_table = doc
+        .get_mut("env")
+        .and_then(|t| t.as_table_mut())
+        .context("Failed to get [env] table")?;
+
+    env_table.insert("WIFI_SSID", toml_edit::value(&*wifi.ssid));
+    env_table.insert("WIFI_PASSWORD", toml_edit::value(&*wifi.password));
+
+    fs::write(&config_path, doc.to_string()).context("Failed to write .cargo/config.toml")?;
+
+    println!("   ✓ Injected WIFI_SSID / WIFI_PASSWORD into .cargo/config.toml (build-time env vars)");
+    Ok(())
 }
