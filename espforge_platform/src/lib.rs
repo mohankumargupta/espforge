@@ -23,8 +23,6 @@ pub use esp_hal;
 pub struct Context {
     pub logger: logger::Logger,
     pub delay: delay::Delay,
-    #[cfg(feature = "wifi")]
-    pub wifi: wifi::WifiClient,
 }
 
 impl Context {

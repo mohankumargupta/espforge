@@ -16,6 +16,8 @@ espforge_common = { version = "0.1.4", path = "../espforge_common", default-feat
 espforge_platform = { version = "0.1.10", path = "../espforge_platform" }
 embedded-hal = "1.0.0"
 embedded-io = { version = "0.7.1", optional = true }
+reqwless = { workspace = true, optional = true, default-features = false}
+heapless = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -24,8 +26,10 @@ spi = [ "espforge_platform/spi" ]
 uart = ["dep:embedded-io", "espforge_platform/uart"]
 button = []
 led = []
+http = ["dep:reqwless", "dep:heapless", "espforge_platform/wifi"]
 std = ["espforge_common/std"]
 embassy = ["espforge_platform/embassy"]
+
 
 [package.metadata.dist]
 dist = false

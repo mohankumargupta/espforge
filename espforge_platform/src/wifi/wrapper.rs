@@ -3,10 +3,10 @@ use embassy_net::{
     dns::DnsSocket,
     tcp::client::{TcpClient, TcpClientState},
 };
-use reqwless::{
-    client::HttpClient,
-    request::{Method, RequestBuilder},
-};
+// use reqwless::{
+//     client::HttpClient,
+//     request::{Method, RequestBuilder},
+// };
 
 // Fixed buffer sizes
 const RX_BUF: usize = 4096;
@@ -49,98 +49,98 @@ impl core::fmt::Display for WifiError {
     }
 }
 
-pub struct WifiClient {
-    stack: Stack<'static>,
-    resources: &'static mut WifiResources,
-}
+// pub struct WifiClient {
+//     stack: Stack<'static>,
+//     resources: &'static mut WifiResources,
+// }
 
-impl WifiClient {
-    pub fn new(stack: Stack<'static>, resources: &'static mut WifiResources) -> Self {
-        Self { stack, resources }
-    }
+// impl WifiClient {
+//     pub fn new(stack: Stack<'static>, resources: &'static mut WifiResources) -> Self {
+//         Self { stack, resources }
+//     }
 
-    pub async fn get(&mut self, url: &str) -> Result<HttpResponse, WifiError> {
-        self.request(Method::GET, url, None).await
-    }
+//     pub async fn get(&mut self, url: &str) -> Result<HttpResponse, WifiError> {
+//         self.request(Method::GET, url, None).await
+//     }
 
-    pub async fn post(&mut self, url: &str, body: &[u8]) -> Result<HttpResponse, WifiError> {
-        self.request(Method::POST, url, Some(body)).await
-    }
+//     pub async fn post(&mut self, url: &str, body: &[u8]) -> Result<HttpResponse, WifiError> {
+//         self.request(Method::POST, url, Some(body)).await
+//     }
 
-    pub fn is_connected(&self) -> bool {
-        self.stack.is_link_up() && self.stack.config_v4().is_some()
-    }
+//     pub fn is_connected(&self) -> bool {
+//         self.stack.is_link_up() && self.stack.config_v4().is_some()
+//     }
 
-    async fn request(
-        &mut self,
-        method: Method,
-        url: &str,
-        body: Option<&[u8]>,
-    ) -> Result<HttpResponse, WifiError> {
-        let tcp_client = TcpClient::new(self.stack, &self.resources.tcp_state);
-        let dns_client = DnsSocket::new(self.stack);
-        let mut http = HttpClient::new(&tcp_client, &dns_client);
+//     async fn request(
+//         &mut self,
+//         method: Method,
+//         url: &str,
+//         body: Option<&[u8]>,
+//     ) -> Result<HttpResponse, WifiError> {
+//         let tcp_client = TcpClient::new(self.stack, &self.resources.tcp_state);
+//         let dns_client = DnsSocket::new(self.stack);
+//         let mut http = HttpClient::new(&tcp_client, &dns_client);
 
-        let mut req = http
-            .request(method, url)
-            .await
-            .map_err(|_| WifiError::ConnectionFailed)?;
+//         let mut req = http
+//             .request(method, url)
+//             .await
+//             .map_err(|_| WifiError::ConnectionFailed)?;
 
-        let status;
-        let mut body_buf = heapless::Vec::<u8, 2048>::new();
-        let truncated;
+//         let status;
+//         let mut body_buf = heapless::Vec::<u8, 2048>::new();
+//         let truncated;
 
-        if let Some(b) = body {
-            let mut req_with_body = req.body(b);
-            let response = req_with_body
-                .send(&mut self.resources.rx_buf)
-                .await
-                .map_err(|_| WifiError::HttpError)?;
-            status = response.status.0;
-            truncated = match response.body().read_to_end().await {
-                Ok(data) => {
-                    let copy_len: usize = data.len().min(2048);
-                    let _ = body_buf.extend_from_slice(&data[..copy_len]);
-                    data.len() > 2048
-                }
-                Err(_) => false,
-            };
-        } else {
-            let response = req
-                .send(&mut self.resources.rx_buf)
-                .await
-                .map_err(|_| WifiError::HttpError)?;
-            status = response.status.0;
-            truncated = match response.body().read_to_end().await {
-                Ok(data) => {
-                    let copy_len: usize = data.len().min(2048);
-                    let _ = body_buf.extend_from_slice(&data[..copy_len]);
-                    data.len() > 2048
-                }
-                Err(_) => false,
-            };
-        }
+//         if let Some(b) = body {
+//             let mut req_with_body = req.body(b);
+//             let response = req_with_body
+//                 .send(&mut self.resources.rx_buf)
+//                 .await
+//                 .map_err(|_| WifiError::HttpError)?;
+//             status = response.status.0;
+//             truncated = match response.body().read_to_end().await {
+//                 Ok(data) => {
+//                     let copy_len: usize = data.len().min(2048);
+//                     let _ = body_buf.extend_from_slice(&data[..copy_len]);
+//                     data.len() > 2048
+//                 }
+//                 Err(_) => false,
+//             };
+//         } else {
+//             let response = req
+//                 .send(&mut self.resources.rx_buf)
+//                 .await
+//                 .map_err(|_| WifiError::HttpError)?;
+//             status = response.status.0;
+//             truncated = match response.body().read_to_end().await {
+//                 Ok(data) => {
+//                     let copy_len: usize = data.len().min(2048);
+//                     let _ = body_buf.extend_from_slice(&data[..copy_len]);
+//                     data.len() > 2048
+//                 }
+//                 Err(_) => false,
+//             };
+//         }
 
-        Ok(HttpResponse {
-            status,
-            body: body_buf,
-            truncated,
-        })
-    }
-}
+//         Ok(HttpResponse {
+//             status,
+//             body: body_buf,
+//             truncated,
+//         })
+//     }
+// }
 
-pub struct HttpResponse {
-    pub status: u16,
-    pub body: heapless::Vec<u8, 2048>,
-    pub truncated: bool,
-}
+// pub struct HttpResponse {
+//     pub status: u16,
+//     pub body: heapless::Vec<u8, 2048>,
+//     pub truncated: bool,
+// }
 
-impl HttpResponse {
-    pub fn is_ok(&self) -> bool {
-        self.status >= 200 && self.status < 300
-    }
+// impl HttpResponse {
+//     pub fn is_ok(&self) -> bool {
+//         self.status >= 200 && self.status < 300
+//     }
 
-    pub fn text(&self) -> Option<&str> {
-        core::str::from_utf8(&self.body).ok()
-    }
-}
+//     pub fn text(&self) -> Option<&str> {
+//         core::str::from_utf8(&self.body).ok()
+//     }
+// }

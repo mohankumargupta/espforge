@@ -167,6 +167,8 @@ pub fn setup_wifi_env_config(project_dir: &Path, model: &EspforgeConfiguration) 
 
     fs::write(&config_path, doc.to_string()).context("Failed to write .cargo/config.toml")?;
 
-    println!("   ✓ Injected WIFI_SSID / WIFI_PASSWORD into .cargo/config.toml (build-time env vars)");
+    println!(
+        "   ✓ Injected WIFI_SSID / WIFI_PASSWORD into .cargo/config.toml (build-time env vars)"
+    );
     Ok(())
 }

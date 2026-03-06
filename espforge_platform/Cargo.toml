@@ -20,8 +20,8 @@ log.workspace = true
 embassy-sync = { workspace = true, optional = true }
 embassy-time = { workspace = true, optional = true }
 embassy-net = { workspace = true,  optional = true, features = ["proto-ipv4", "medium-ethernet", "tcp", "dns", "dhcpv4"] }
-reqwless = { workspace = true, optional = true, default-features = false, features = ["alloc"] }
-heapless = { workspace = true, optional = true }
+#reqwless = { workspace = true, optional = true, default-features = false, features = ["alloc"] }
+#heapless = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -29,7 +29,7 @@ spi = ["dep:embedded-hal-bus"]
 i2c = ["dep:embedded-hal-bus"]
 uart = ["dep:embedded-io"]
 psram = []
-wifi = ["dep:embassy-net", "dep:reqwless", "dep:heapless"]
+wifi = ["dep:embassy-net"]
 embassy = ["dep:embassy-sync", "dep:embassy-time"]
 esp32 = ["esp-hal/esp32"]
 esp32c3 = ["esp-hal/esp32c3"]

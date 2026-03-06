@@ -31,8 +31,6 @@ impl EntryPointGenerator for BlockingEntryPoint {
     fn generate(&self, model: &EspforgeConfiguration) -> Result<String> {
         let common = CommonEntryPointCode::new(model);
         let allocators = AllocatorGenerator::generate(model);
-
-        // Extract fields from common
         let imports = common.imports;
         let static_cells = common.static_cells;
         let init_logger = common.init_logger;
@@ -101,11 +99,6 @@ impl EntryPointGenerator for EmbassyEntryPoint {
 
         let wifi_tasks = generate_wifi_tasks(model);
         let wifi_init = generate_wifi_init(model);
-        // let has_wifi = model
-        //     .esp32
-        //     .as_ref()
-        //     .and_then(|e| e.wifi.as_ref())
-        //     .is_some();
 
         let tokens = quote! {
             #![no_std]
@@ -133,9 +126,9 @@ impl EntryPointGenerator for EmbassyEntryPoint {
 
                 #init_registry
                 #init_embassy_runtime
+                #wifi_init
                 #init_components
                 #init_devices
-                #wifi_init
                 #init_context
 
                 // Run user setup
@@ -195,11 +188,23 @@ impl CommonEntryPointCode {
             unsafe { REGISTRY = registry as *mut _; }
         };
 
+        let needs_stack = model.components.values().any(|spec| {
+            crate::registry::find_plugin(&spec.driver)
+                .map(|p| p.required_features().iter().any(|f| f == "http"))
+                .unwrap_or(false)
+        });
+
+        let stack_arg = if needs_stack {
+            quote! { unsafe { &mut *REGISTRY }, stack }
+        } else {
+            quote! { unsafe { &mut *REGISTRY } }
+        };
+
         let init_components = quote! {
             // Initialize components with static lifetime
             // Components take ownership from registry
             let components = COMPONENTS_CELL.init(
-                Components::new(unsafe { &mut *REGISTRY })
+                Components::new(#stack_arg)
             );
             unsafe { COMPONENTS = components as *mut _; }
         };
@@ -224,8 +229,7 @@ impl CommonEntryPointCode {
                 let logger = espforge_platform::logger::Logger::new();
                 let mut ctx = Context {
                     logger,
-                    delay,
-                    wifi,
+                    delay
                 };
             }
         } else {

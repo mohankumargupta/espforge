@@ -1,5 +1,7 @@
 #[cfg(feature = "button")]
 pub mod button;
+#[cfg(feature = "http")]
+pub mod http;
 #[cfg(feature = "i2c")]
 pub mod i2c;
 #[cfg(feature = "led")]

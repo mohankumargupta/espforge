@@ -2,4 +2,4 @@
 mod wrapper;
 
 #[cfg(feature = "wifi")]
-pub use wrapper::{HttpResponse, WifiClient, WifiError, WifiResources};
+pub use wrapper::{WifiError, WifiResources};

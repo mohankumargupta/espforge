@@ -7,4 +7,10 @@ espforge:
 esp32:
   wifi:
     ssid: Wokwi-GUEST
+    password: ""
     auth: open
+
+components:
+  http:
+    using: HttpClient
+    with: {}

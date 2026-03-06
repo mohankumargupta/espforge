@@ -16,6 +16,15 @@
             }
         },
         {
+            "name": "wifi compile",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/espforge.exe",
+            "cwd": "${workspaceFolder}/wifi_example",
+            "args": ["compile", "wifi_example.yaml"]
+        },
+
+        {
             "name": "blink example",
             "type": "lldb",
             "request": "launch",

@@ -82,13 +82,29 @@ impl CodegenContext {
             }
         }
 
+
+            let needs_stack = self.model.components.values().any(|spec| {
+        crate::registry::find_plugin(&spec.driver)
+            .map(|p| p.required_features().iter().any(|f| f == "http"))
+            .unwrap_or(false)
+    });
+
+    let stack_param = if needs_stack {
+        quote! { stack: espforge_platform::embassy_net::Stack<'static>, }
+    } else {
+        quote! {}
+    };
+
         Ok(quote! {
             pub struct Components {
                 #(#fields),*
             }
 
             impl Components {
-                pub fn new(registry: &'static mut PeripheralRegistry) -> Self {
+                pub fn new(
+                    registry: &'static mut PeripheralRegistry,
+                    #stack_param
+                ) -> Self {
                     #(#inits)*
 
                     Self {

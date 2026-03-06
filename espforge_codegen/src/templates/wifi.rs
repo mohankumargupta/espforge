@@ -55,7 +55,6 @@ pub fn generate_wifi_tasks(model: &EspforgeConfiguration) -> TokenStream {
 /// `async fn main()` before the `Context` is constructed.
 ///
 /// Returns a `TokenStream` containing:
-///   - `WIFI_RESOURCES` static cell declaration
 ///   - peripheral setup (controller, interfaces, stack)
 ///   - task spawning
 ///   - `stack.wait_config_up()`
@@ -70,29 +69,29 @@ pub fn generate_wifi_init(model: &EspforgeConfiguration) -> TokenStream {
     //let password = &wifi_cfg.password;
 
     let auth_code = match wifi_cfg.auth {
-        espforge_configuration::hardware::wifi::AuthMode::Open => quote! { esp_radio::wifi::AuthMethod::None },
-        espforge_configuration::hardware::wifi::AuthMode::Wpa2 => quote! { esp_radio::wifi::AuthMethod::Wpa2Personal },
+        espforge_configuration::hardware::wifi::AuthMode::Open => {
+            quote! { esp_radio::wifi::AuthMethod::None }
+        }
+        espforge_configuration::hardware::wifi::AuthMode::Wpa2 => {
+            quote! { esp_radio::wifi::AuthMethod::Wpa2Personal }
+        }
     };
 
     let password_auth_code = match wifi_cfg.auth {
-        espforge_configuration::hardware::wifi::AuthMode::Open => quote! { },
-        espforge_configuration::hardware::wifi::AuthMode::Wpa2 => quote! { 
+        espforge_configuration::hardware::wifi::AuthMode::Open => quote! {},
+        espforge_configuration::hardware::wifi::AuthMode::Wpa2 => quote! {
           mode.with_password(password);
         },
     };
 
     let password_code = match wifi_cfg.auth {
-        espforge_configuration::hardware::wifi::AuthMode::Open => quote! { },
-        espforge_configuration::hardware::wifi::AuthMode::Wpa2 => quote! { 
+        espforge_configuration::hardware::wifi::AuthMode::Open => quote! {},
+        espforge_configuration::hardware::wifi::AuthMode::Wpa2 => quote! {
           let password = env!("WIFI_PASSWORD");
         },
     };
 
-
     quote! {
-        static WIFI_RESOURCES: static_cell::StaticCell<espforge_platform::wifi::WifiResources> =
-            static_cell::StaticCell::new();
-
         static STACK_RESOURCES: static_cell::StaticCell<espforge_platform::embassy_net::StackResources<3>> =
             static_cell::StaticCell::new();
 
@@ -121,9 +120,6 @@ pub fn generate_wifi_init(model: &EspforgeConfiguration) -> TokenStream {
         ).unwrap();
         controller.set_config(&mode).unwrap();
 
-        let wifi_resources: &'static mut espforge_platform::wifi::WifiResources =
-            WIFI_RESOURCES.init(espforge_platform::wifi::WifiResources::new());
-
         let stack_resources: &'static mut _ =
             STACK_RESOURCES.init(espforge_platform::embassy_net::StackResources::new());
 
@@ -138,7 +134,5 @@ pub fn generate_wifi_init(model: &EspforgeConfiguration) -> TokenStream {
         spawner.spawn(net_task(net_runner)).ok();
 
         stack.wait_config_up().await;
-
-        let wifi = espforge_platform::wifi::WifiClient::new(stack, wifi_resources);
     }
 }
