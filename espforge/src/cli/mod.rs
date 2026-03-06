@@ -12,7 +12,7 @@ use commands::examples;
 use crate::examples::ExamplesArgs;
 
 #[derive(Parser)]
-#[command(about = "Example tool with a compile subcommand")]
+#[command(version, about = "Example tool with a compile subcommand")]
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
