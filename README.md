@@ -59,6 +59,7 @@ It will generate a esp32 esphal-based rust project that you can then
 cargo build
 ```
 
+If you want to see the examples in this repo in action, click [here](https://github.com/mohankumargupta/espforge_wokwi)
 
 ## Prerequisites
 **Rust**: [Install Rust](https://rustup.rs/)

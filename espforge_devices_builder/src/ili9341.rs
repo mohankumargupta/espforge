@@ -1,5 +1,7 @@
 use anyhow::{Context, Result, anyhow};
-use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext};
+use espforge_configuration::plugin::{
+    ComponentRef, Dependency, DeviceRef, GeneratedCode, GenerationContext, PinRef
+};
 use espforge_macros::DevicePlugin;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -9,10 +11,10 @@ use std::str::FromStr;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ILI9341Config {
-    pub spi: String,
-    pub dc: String,
-    pub rst: String,
-    pub cs: String,
+    pub spi: DeviceRef<ComponentRef>,
+    pub dc: DeviceRef<PinRef>,
+    pub rst: DeviceRef<PinRef>,
+    pub cs: DeviceRef<PinRef>,
 }
 
 #[derive(DevicePlugin)]
@@ -28,17 +30,14 @@ impl ILI9341Plugin {
 
     fn resolve_dependencies(&self, properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
         let config: ILI9341Config = serde_yaml_ng::from_value(properties.clone())?;
-        let spi_name = config.spi.strip_prefix('$').unwrap_or(&config.spi);
-        let dc_name = config.dc.strip_prefix('$').unwrap_or(&config.dc);
-        let rst_name = config.rst.strip_prefix('$').unwrap_or(&config.rst);
-        let cs_name = config.cs.strip_prefix('$').unwrap_or(&config.cs);
 
-        Ok(vec![
-            Dependency::component(spi_name),
-            Dependency::pin(dc_name),
-            Dependency::pin(rst_name),
-            Dependency::pin(cs_name),
-        ])
+         Ok(vec![
+            Dependency::component_ref(&config.spi),
+            Dependency::pin_ref(&config.dc),
+            Dependency::pin_ref(&config.rst),
+            Dependency::pin_ref(&config.cs),            
+         ])
+
     }
 
     fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
@@ -48,10 +47,10 @@ impl ILI9341Plugin {
         let field_ident = format_ident!("{}", ctx.instance_name);
 
         // Helper to get raw names
-        let spi_name = config.spi.strip_prefix('$').unwrap_or(&config.spi);
-        let dc_name = config.dc.strip_prefix('$').unwrap_or(&config.dc);
-        let rst_name = config.rst.strip_prefix('$').unwrap_or(&config.rst);
-        let cs_name = config.cs.strip_prefix('$').unwrap_or(&config.cs);
+        let spi_name = config.spi.as_ref();
+        let dc_name = config.dc.as_ref();
+        let rst_name = config.rst.as_ref();
+        let cs_name = config.cs.as_ref();
 
         // Retrieve resolved dependencies
         let spi_dep = ctx

@@ -49,6 +49,8 @@ impl EntryPointGenerator for BlockingEntryPoint {
 
             #static_cells
 
+            esp_bootloader_esp_idf::esp_app_desc!();
+
             #[esp_hal::main]
             fn main() -> ! {
                 #init_logger
@@ -114,6 +116,8 @@ impl EntryPointGenerator for EmbassyEntryPoint {
             #static_cells
 
             #wifi_tasks
+
+            esp_bootloader_esp_idf::esp_app_desc!();
 
             #[esp_rtos::main]
             async fn main(spawner: Spawner) {

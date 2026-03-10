@@ -8,6 +8,9 @@ pub mod plugin;
 
 pub use config::ConfigParser;
 
+pub mod refs;
+pub use refs::{ComponentRef, DeviceRef, PinRef};
+
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct EspforgeConfiguration {
     pub espforge: HashMap<String, String>,

@@ -1,19 +1,9 @@
 use crate::EspforgeConfiguration;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use proc_macro2::TokenStream;
 use serde_yaml_ng::Value;
 use std::collections::HashMap;
-
-// Note: dependency module was not moved, but Plugin relies on it.
-// We need to decide where Dependency lives.
-// If Dependency is used for graph resolution, it belongs in codegen or configuration.
-// Let's assume it's part of the Plugin trait interface.
-// For now, we will define a simple struct here or import if it exists.
-// Looking at the original file list, `espforge_codegen` had `dependency.rs`.
-// It seems `espforge_common` used to import it from `crate::dependency` but that file was missing in common's file list?
-// Ah, `espforge_codegen/src/dependency.rs` exists. `espforge_common` did NOT have `dependency.rs` in the dump.
-// The error log `unresolved import crate::dependency` confirms it was missing.
-// We must add the Dependency struct here.
+pub use crate::refs::{ComponentRef, DeviceRef, PinRef};
 
 pub struct Dependency {
     pub name: String,
@@ -53,8 +43,26 @@ impl Dependency {
             kind: DependencyKind::Pin,
         }
     }
+
+    pub fn component_ref(r: &DeviceRef<ComponentRef>) -> Self {
+        Self::component(r.as_str())
+    }
+
+    pub fn pin_ref(r: &DeviceRef<PinRef>) -> Self {
+        Self::pin(r.as_str())
+    }
 }
 
+impl std::fmt::Display for DependencyKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DependencyKind::Component => write!(f, "Component"),
+            DependencyKind::Device => write!(f, "Device"),
+            DependencyKind::Peripheral => write!(f, "Peripheral"),
+            DependencyKind::Pin => write!(f, "Pin"),
+        }
+    }
+}
 pub struct ResolvedDependency {
     pub kind: DependencyKind,
     pub name: String,
@@ -79,6 +87,55 @@ pub struct GenerationContext<'a> {
     pub properties: &'a Value,
     pub resolved_deps: &'a HashMap<String, ResolvedDependency>,
 }
+
+impl<'a> GenerationContext<'a> {
+    /// Normalizes references that may be written as `$name` in YAML.
+    pub fn normalize_ref_name<'s>(&self, name: &'s str) -> &'s str {
+        name.strip_prefix('$').unwrap_or(name)
+    }
+
+    /// Returns a resolved dependency by name and validates its expected kind.
+    pub fn dependency(
+        &self,
+        name: &str,
+        expected: DependencyKind,
+    ) -> Result<&ResolvedDependency> {
+        let normalized = self.normalize_ref_name(name);
+        let dep = self.resolved_deps.get(normalized).ok_or_else(|| {
+            anyhow!(
+                "Dependency '{}' not found for instance '{}'",
+                normalized,
+                self.instance_name
+            )
+        })?;
+
+        if dep.kind != expected {
+            return Err(anyhow!(
+                "Dependency '{}' has kind '{}', expected '{}' for instance '{}'",
+                normalized,
+                dep.kind,
+                expected,
+                self.instance_name
+            ));
+        }
+
+        Ok(dep)
+    }
+
+    /// Resolves and parses a dependency access path as a TokenStream.
+    pub fn dependency_access(&self, name: &str, expected: DependencyKind) -> Result<TokenStream> {
+        let dep = self.dependency(name, expected)?;
+        dep.access_path.parse::<TokenStream>().map_err(|e| {
+            anyhow!(
+                "Failed to parse access path '{}' for dependency '{}': {}",
+                dep.access_path, dep.name, e
+            )
+        })
+    }
+}
+
+
+
 
 pub trait Plugin: Sync + Send {
     fn name(&self) -> &'static str;

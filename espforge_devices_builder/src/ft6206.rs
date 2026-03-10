@@ -1,13 +1,15 @@
-use anyhow::{Context, Result, anyhow};
-use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext};
+use anyhow::{Context, Result};
+use espforge_configuration::plugin::{
+    ComponentRef, Dependency, DependencyKind, DeviceRef,  GeneratedCode, GenerationContext,
+};
 use espforge_macros::DevicePlugin;
-use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use serde::Deserialize;
 
+
 #[derive(Debug, Deserialize)]
 pub struct FT6206Config {
-    pub component: String, // The I2C component to use
+    pub component: DeviceRef<ComponentRef>,
     #[serde(default)]
     pub address: Option<u8>,
     #[serde(default)]
@@ -39,25 +41,12 @@ impl FT6206Plugin {
 
     fn resolve_dependencies(&self, properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
         let config: FT6206Config = serde_yaml_ng::from_value(properties.clone())?;
-        // Clean up the reference name (remove $)
-        let component_name = config
-            .component
-            .strip_prefix('$')
-            .unwrap_or(&config.component);
-        Ok(vec![Dependency::component(component_name)])
+        Ok(vec![Dependency::component(config.component.as_str())])
     }
 
     fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
         let config: FT6206Config = serde_yaml_ng::from_value(ctx.properties.clone())?;
         let field_name = format_ident!("{}", ctx.instance_name);
-        let component_name = config
-            .component
-            .strip_prefix('$')
-            .unwrap_or(&config.component);
-        let dep = ctx
-            .resolved_deps
-            .get(component_name)
-            .ok_or_else(|| anyhow!("Dependency '{}' not found", component_name))?;
 
         let address = config.address.unwrap_or(0x38);
         let mirror_x = config.mirror_x;
@@ -70,7 +59,10 @@ impl FT6206Plugin {
         let y_min = config.y_min.unwrap_or(0);
         let y_max = config.y_max.unwrap_or(screen_height);
 
-        let i2c_access = syn::parse_str::<TokenStream>(&dep.access_path)?;
+        let i2c_access = ctx.dependency_access(config.component.as_str(), DependencyKind::Component)?;        
+        // let dep_ident =
+        //     ctx.dependency_access(config.component.as_str(), DependencyKind::Component)?;
+
 
         Ok(GeneratedCode {
             // Field definition in struct Context
