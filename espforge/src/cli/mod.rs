@@ -6,9 +6,7 @@ pub mod commands;
 pub mod interactive;
 pub mod model;
 
-use commands::compile;
-use commands::examples;
-
+use commands::{compile, doctor, examples};
 use crate::examples::ExamplesArgs;
 
 #[derive(Parser)]
@@ -31,6 +29,7 @@ enum Commands {
         #[arg(long, short = 'c')]
         chip: Option<String>,
     },
+    Doctor,
 }
 
 impl Cli {
@@ -46,6 +45,7 @@ impl Cli {
                 project_name,
                 chip,
             }),
+            Commands::Doctor => doctor::execute(),
         }
     }
 }

@@ -6,8 +6,59 @@ A scaffolding++ tool for esp32 no_std rust projects.
 - Uses esphome-like YAML configuration
 - Pre-built components and devices that sit on top of esphal https://github.com/esp-rs/esp-hal
 - Wire "app" code in rust. 
+- Supports both bare-metal blocking execution and async execution using the embassy framework.
 - Wokwi integration and working examples
 - Project samples
+
+## Essence of espforge - blink example
+
+Given this yaml file
+
+```yaml
+espforge:
+  name: blink
+  platform: esp32c3
+
+esp32:
+  gpio:
+    gpio2: { pin: 18, direction: output }
+
+components:
+  red_led:
+    using: LED
+    with:
+      gpio: $gpio2
+      active_low: false
+```
+
+and this app.rs
+
+```rust
+#[allow(unused_variables)]
+
+use crate::{component, Context};
+
+pub fn setup(ctx: &mut Context) {
+    let logger = ctx.logger;
+
+    logger.info("Starting Blink Example");
+}
+
+pub fn forever(ctx: &mut Context) {
+    let delay = ctx.delay;
+    let led = component!(red_led);
+
+    led.toggle();
+    delay.delay_ms(1000);
+}
+```
+
+It will generate a esp32 esphal-based rust project that you can then
+
+```sh
+cargo build
+```
+
 
 ## Prerequisites
 **Rust**: [Install Rust](https://rustup.rs/)
@@ -26,10 +77,16 @@ A scaffolding++ tool for esp32 no_std rust projects.
 cargo binstall espforge
 ```
 
-ALternatively
+Alternatively
 
 ```shell
 cargo install espforge
+```
+
+## Verify install
+
+```shell
+espforge doctor
 ```
 
 ## Geting started
@@ -59,6 +116,8 @@ Finally:
 ```shell
 cargo build
 ```
+
+
 
 ## Updating yaml file
 
