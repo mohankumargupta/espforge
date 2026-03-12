@@ -1121,6 +1121,7 @@ dependencies = [
  "espforge_esp32metadata",
  "inventory",
  "proc-macro2",
+ "quote",
  "serde",
  "serde_yaml_ng",
  "thiserror 2.0.18",

@@ -81,6 +81,32 @@ pub struct GeneratedCode {
     pub struct_init: TokenStream,
 }
 
+impl GeneratedCode {
+    /// Helper to generate the field, initialization, and struct instantiation automatically.
+    /// It wraps the `init_expr` in a block `{ ... }` to isolate local variables, preventing 
+    /// variable name collisions between different devices.
+    pub fn property(
+        name: &str,
+        ty: TokenStream,
+        init_expr: TokenStream,
+    ) -> Self {
+        let ident = quote::format_ident!("{}", name);
+        Self {
+            field: quote::quote! { pub #ident: #ty },
+            init: quote::quote! { let #ident = { #init_expr }; },
+            struct_init: quote::quote! { #ident },
+        }
+    }
+}
+
+pub fn codegen(
+    name: &str,
+    ty: TokenStream,
+    init_expr: TokenStream,
+) -> GeneratedCode {
+    GeneratedCode::property(name, ty, init_expr)
+}
+
 pub struct GenerationContext<'a> {
     pub model: &'a EspforgeConfiguration,
     pub instance_name: &'a str,

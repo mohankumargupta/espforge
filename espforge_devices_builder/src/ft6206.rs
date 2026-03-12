@@ -1,9 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use espforge_configuration::plugin::{
-    ComponentRef, Dependency, DependencyKind, DeviceRef,  GeneratedCode, GenerationContext,
+    ComponentRef, Dependency, DependencyKind, DeviceRef,  GeneratedCode, GenerationContext, codegen,
 };
 use espforge_macros::DevicePlugin;
-use quote::{format_ident, quote};
+use quote::quote;
 use serde::Deserialize;
 
 
@@ -29,25 +29,19 @@ pub struct FT6206Config {
 }
 
 #[derive(DevicePlugin)]
-#[plugin(name = "ft6206", features = "ft6206")]
+#[plugin(name = "ft6206", features = "ft6206", config = "FT6206Config")]
 pub struct FT6206Plugin;
 
 impl FT6206Plugin {
-    fn validate_properties(&self, properties: &serde_yaml_ng::Value) -> Result<()> {
-        let _config: FT6206Config = serde_yaml_ng::from_value(properties.clone())
-            .context("Invalid FT6206 configuration")?;
+    fn validate_config(&self, _config: &FT6206Config) -> Result<()> {
         Ok(())
     }
 
-    fn resolve_dependencies(&self, properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
-        let config: FT6206Config = serde_yaml_ng::from_value(properties.clone())?;
+    fn resolve_dependencies(&self, config: &FT6206Config) -> Result<Vec<Dependency>> {
         Ok(vec![Dependency::component(config.component.as_str())])
     }
 
-    fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
-        let config: FT6206Config = serde_yaml_ng::from_value(ctx.properties.clone())?;
-        let field_name = format_ident!("{}", ctx.instance_name);
-
+    fn generate_code(&self, config: &FT6206Config, ctx: &GenerationContext) -> Result<GeneratedCode> {
         let address = config.address.unwrap_or(0x38);
         let mirror_x = config.mirror_x;
         let mirror_y = config.mirror_y;
@@ -60,34 +54,61 @@ impl FT6206Plugin {
         let y_max = config.y_max.unwrap_or(screen_height);
 
         let i2c_access = ctx.dependency_access(config.component.as_str(), DependencyKind::Component)?;        
-        // let dep_ident =
-        //     ctx.dependency_access(config.component.as_str(), DependencyKind::Component)?;
 
+        let field = quote! {
+            espforge_devices::FT6206<
+                espforge_platform::bus::I2cDevice<'static>
+            >
+        };
 
-        Ok(GeneratedCode {
-            // Field definition in struct Context
-            field: quote! {
-                pub #field_name: espforge_devices::devices::ft6206::device::FT6206<espforge_components::components::i2c::I2C>
-            },
-            // Initialization logic in main
-            init: quote! {
-                let mut #field_name = espforge_devices::devices::ft6206::device::FT6206::new(
+        let init = quote! {
+                let mut dev = espforge_devices::FT6206::new(
                     #i2c_access,
                     #address,
-                    #mirror_x,
-                    #mirror_y,
-                    #swap_xy,
                     #screen_width,
                     #screen_height,
                     #x_min,
                     #x_max,
                     #y_min,
                     #y_max,
+                    #swap_xy,
+                    #mirror_x,
+                    #mirror_y,
                 );
-                #field_name.init().ok();
-            },
-            // Placing it into Context
-            struct_init: quote! { #field_name },
-        })
+                dev.init().expect("FT6206 init failed");
+                dev
+        };
+
+        Ok(codegen(&ctx.instance_name, field, init))
+
+        // let dep_ident =
+        //     ctx.dependency_access(config.component.as_str(), DependencyKind::Component)?;
+
+
+        // Ok(GeneratedCode {
+        //     // Field definition in struct Context
+        //     field: quote! {
+        //         pub #field_name: espforge_devices::devices::ft6206::device::FT6206<espforge_components::components::i2c::I2C>
+        //     },
+        //     // Initialization logic in main
+        //     init: quote! {
+        //         let mut #field_name = espforge_devices::devices::ft6206::device::FT6206::new(
+        //             #i2c_access,
+        //             #address,
+        //             #mirror_x,
+        //             #mirror_y,
+        //             #swap_xy,
+        //             #screen_width,
+        //             #screen_height,
+        //             #x_min,
+        //             #x_max,
+        //             #y_min,
+        //             #y_max,
+        //         );
+        //         #field_name.init().ok();
+        //     },
+        //     // Placing it into Context
+        //     struct_init: quote! { #field_name },
+        // })
     }
 }

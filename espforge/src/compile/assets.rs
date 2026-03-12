@@ -4,6 +4,32 @@ use espforge_esp32metadata::BoardDatabase;
 use std::fs;
 use std::path::Path;
 
+pub fn copy_app_rust_to_src(project_dir: &Path, src_dir: &Path) -> Result<()> {
+    let app_rust_dir = project_dir.join("app").join("rust");
+    if !app_rust_dir.exists() {
+        return Ok(());
+    }
+    if !src_dir.exists() {
+        fs::create_dir_all(src_dir).context("Failed to create src directory")?;
+    }
+    for entry in fs::read_dir(&app_rust_dir).context("Failed to read app/rust directory")? {
+        let path = entry.context("Failed to read directory entry")?.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+            let dest = src_dir.join(path.file_name().unwrap());
+            if !dest.exists() {
+                fs::copy(&path, &dest).with_context(|| {
+                    format!("Failed to copy {} to src/", path.display())
+                })?;
+                println!(
+                    "   ✓ Copied {} → src/",
+                    path.file_name().unwrap().to_string_lossy()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn generate_wokwi_config(project_dir: &Path, model: &EspforgeConfiguration) -> Result<()> {
     let diagram_json = project_dir.join("diagram.json");
     if !diagram_json.exists() {

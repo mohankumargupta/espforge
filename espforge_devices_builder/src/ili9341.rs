@@ -1,6 +1,6 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use espforge_configuration::plugin::{
-    ComponentRef, Dependency, DeviceRef, GeneratedCode, GenerationContext, PinRef
+    ComponentRef, Dependency, DeviceRef, GeneratedCode, GenerationContext, PinRef, codegen
 };
 use espforge_macros::DevicePlugin;
 use proc_macro2::TokenStream;
@@ -18,19 +18,15 @@ pub struct ILI9341Config {
 }
 
 #[derive(DevicePlugin)]
-#[plugin(name = "ili9341", features = "ili9341")]
+#[plugin(name = "ili9341", features = "ili9341", config="ILI9341Config")]
 pub struct ILI9341Plugin;
 
 impl ILI9341Plugin {
-    fn validate_properties(&self, properties: &serde_yaml_ng::Value) -> Result<()> {
-        let _config: ILI9341Config = serde_yaml_ng::from_value(properties.clone())
-            .context("Invalid ILI9341 configuration")?;
+    fn validate_config(&self, _config: &ILI9341Config) -> Result<()> {
         Ok(())
     }
 
-    fn resolve_dependencies(&self, properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
-        let config: ILI9341Config = serde_yaml_ng::from_value(properties.clone())?;
-
+    fn resolve_dependencies(&self, config: &ILI9341Config) -> Result<Vec<Dependency>> {
          Ok(vec![
             Dependency::component_ref(&config.spi),
             Dependency::pin_ref(&config.dc),
@@ -40,13 +36,7 @@ impl ILI9341Plugin {
 
     }
 
-    fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
-        let config: ILI9341Config = serde_yaml_ng::from_value(ctx.properties.clone())
-            .context("Failed to parse ILI9341 properties")?;
-
-        let field_ident = format_ident!("{}", ctx.instance_name);
-
-        // Helper to get raw names
+    fn generate_code(&self, config: &ILI9341Config, ctx: &GenerationContext) -> Result<GeneratedCode> {
         let spi_name = config.spi.as_ref();
         let dc_name = config.dc.as_ref();
         let rst_name = config.rst.as_ref();
@@ -85,46 +75,79 @@ impl ILI9341Plugin {
         let rst_pin_ident = format_ident!("{}_rst_pin", ctx.instance_name);
         let spi_device_ident = format_ident!("{}_spi_dev", ctx.instance_name);
 
-        Ok(GeneratedCode {
-            field: quote! {
-                pub #field_ident: espforge_devices::devices::ili9341::device::ILI9341Device<
-                    espforge_platform::bus::SpiDevice<'static>,
-                    espforge_platform::gpio::GPIOOutput,
-                    espforge_platform::gpio::GPIOOutput
-                >
-            },
-            init: quote! {
-                // 1. Acquire Pins from Registry
-                let #dc_pin_ident = #dc_access.borrow_mut().take().expect("DC pin already in use");
-                let #rst_pin_ident = #rst_access.borrow_mut().take().expect("RST pin already in use");
-                let #cs_pin_ident = #cs_access.borrow_mut().take().expect("CS pin already in use");
+        let field = quote! {
+            espforge_devices::ILI9341Device<
+                espforge_platform::bus::SpiDevice<'static>,
+                espforge_platform::gpio::GPIOOutput,
+                espforge_platform::gpio::GPIOOutput,
+            >
+        };
 
-                // 2. Wrap pins in GPIOOutput
-                let #dc_pin_ident = espforge_platform::gpio::GPIOOutput::from_pin(#dc_pin_ident);
-                let #rst_pin_ident = espforge_platform::gpio::GPIOOutput::from_pin(#rst_pin_ident);
-                let mut #cs_pin_ident = espforge_platform::gpio::GPIOOutput::from_pin(#cs_pin_ident);
+        let init = quote! {
+            let mut #cs_pin_ident = espforge_platform::gpio::GPIOOutput::from_pin(
+                #cs_access.borrow_mut().take().expect("CS pin already in use")
+            );
+            let mut #dc_pin_ident = espforge_platform::gpio::GPIOOutput::from_pin(
+                #dc_access.borrow_mut().take().expect("DC pin already in use")
+            );
+            let mut #rst_pin_ident = espforge_platform::gpio::GPIOOutput::from_pin(
+                #rst_access.borrow_mut().take().expect("RST pin already in use")
+            );
+            let #spi_device_ident = espforge_platform::bus::SpiDevice::new(
+                #spi_access.bus(),
+                #cs_pin_ident,
+            );
 
-                // 3. Ensure CS is High (Inactive) before passing to SpiDevice
-                {
-                    use embedded_hal::digital::OutputPin;
-                    #cs_pin_ident.set_high().ok();
-                }
+            espforge_devices::ILI9341Device::new(
+                #spi_device_ident,
+                #dc_pin_ident,
+                #rst_pin_ident,
+                delay,
+            )  
+        };
 
-                // 4. Create SPI Device with CS (now accepts GPIOOutput)
-                let #spi_device_ident = espforge_platform::bus::SpiDevice::new(
-                    #spi_access.bus(),
-                    #cs_pin_ident
-                );
+        Ok(codegen(&ctx.instance_name, field, init))
 
-                // 5. Initialize Display Driver
-                let #field_ident = espforge_devices::devices::ili9341::device::ILI9341Device::new(
-                    #spi_device_ident,
-                    #dc_pin_ident,
-                    #rst_pin_ident,
-                    delay
-                );
-            },
-            struct_init: quote! { #field_ident },
-        })
+        // Ok(GeneratedCode {
+        //     field: quote! {
+        //         pub #field_ident: espforge_devices::devices::ili9341::device::ILI9341Device<
+        //             espforge_platform::bus::SpiDevice<'static>,
+        //             espforge_platform::gpio::GPIOOutput,
+        //             espforge_platform::gpio::GPIOOutput
+        //         >
+        //     },
+        //     init: quote! {
+        //         // 1. Acquire Pins from Registry
+        //         let #dc_pin_ident = #dc_access.borrow_mut().take().expect("DC pin already in use");
+        //         let #rst_pin_ident = #rst_access.borrow_mut().take().expect("RST pin already in use");
+        //         let #cs_pin_ident = #cs_access.borrow_mut().take().expect("CS pin already in use");
+
+        //         // 2. Wrap pins in GPIOOutput
+        //         let #dc_pin_ident = espforge_platform::gpio::GPIOOutput::from_pin(#dc_pin_ident);
+        //         let #rst_pin_ident = espforge_platform::gpio::GPIOOutput::from_pin(#rst_pin_ident);
+        //         let mut #cs_pin_ident = espforge_platform::gpio::GPIOOutput::from_pin(#cs_pin_ident);
+
+        //         // 3. Ensure CS is High (Inactive) before passing to SpiDevice
+        //         {
+        //             use embedded_hal::digital::OutputPin;
+        //             #cs_pin_ident.set_high().ok();
+        //         }
+
+        //         // 4. Create SPI Device with CS (now accepts GPIOOutput)
+        //         let #spi_device_ident = espforge_platform::bus::SpiDevice::new(
+        //             #spi_access.bus(),
+        //             #cs_pin_ident
+        //         );
+
+        //         // 5. Initialize Display Driver
+        //         let #field_ident = espforge_devices::devices::ili9341::device::ILI9341Device::new(
+        //             #spi_device_ident,
+        //             #dc_pin_ident,
+        //             #rst_pin_ident,
+        //             delay
+        //         );
+        //     },
+        //     struct_init: quote! { #field_ident },
+        // })
     }
 }

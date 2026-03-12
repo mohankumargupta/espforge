@@ -41,6 +41,8 @@ impl ProjectCompiler {
         let project_dir = std::env::current_dir().context("Failed to get current directory")?;
         let src_dir = project_dir.join("src");
 
+        assets::copy_app_rust_to_src(&project_dir, &src_dir)?;
+
         generators::generate_scaffold(&self.model, &project_dir)?;
 
         assets::setup_wifi_env_config(&project_dir, &self.model)?;
