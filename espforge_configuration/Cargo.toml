@@ -1,6 +1,6 @@
 [package]
 name = "espforge_configuration"
-version = "0.3.1"
+version = "0.3.2"
 description = "Used by espforge project"
 edition.workspace = true
 license.workspace = true

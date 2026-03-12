@@ -2,5 +2,5 @@
 
 [espforge]
 espforge_platform= "0.1.12"
-espforge_components= "0.1.9"
-espforge_devices= "0.1.11"
+espforge_components= "0.1.10"
+espforge_devices= "0.1.12"
