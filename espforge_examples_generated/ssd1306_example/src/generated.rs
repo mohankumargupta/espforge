@@ -37,9 +37,7 @@ impl Components {
     }
 }
 pub struct Devices {
-    pub oled: espforge_devices::devices::ssd1306::device::SSD1306Device<
-        espforge_components::components::i2c::I2C,
-    >,
+    pub oled: espforge_devices::SSD1306Device<espforge_components::I2C>,
 }
 impl Devices {
     pub fn new(
@@ -47,10 +45,11 @@ impl Devices {
         registry: &'static mut PeripheralRegistry,
         delay: &mut espforge_platform::delay::Delay,
     ) -> Self {
-        let mut oled = espforge_devices::devices::ssd1306::device::SSD1306Device::new(
-            components.i2c_master,
-        );
-        oled.init();
+        let oled = {
+            let mut oled = espforge_devices::SSD1306Device::new(components.i2c_master);
+            oled.init();
+            oled
+        };
         Self { oled }
     }
 }

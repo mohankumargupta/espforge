@@ -48,7 +48,7 @@ impl Components {
     }
 }
 pub struct Devices {
-    pub display: espforge_devices::devices::ili9341::device::ILI9341Device<
+    pub display: espforge_devices::ILI9341Device<
         espforge_platform::bus::SpiDevice<'static>,
         espforge_platform::gpio::GPIOOutput,
         espforge_platform::gpio::GPIOOutput,
@@ -60,44 +60,27 @@ impl Devices {
         registry: &'static mut PeripheralRegistry,
         delay: &mut espforge_platform::delay::Delay,
     ) -> Self {
-        let display_dc_pin = registry
-            .pin_dc
-            .borrow_mut()
-            .take()
-            .expect("DC pin already in use");
-        let display_rst_pin = registry
-            .pin_rst
-            .borrow_mut()
-            .take()
-            .expect("RST pin already in use");
-        let display_cs_pin = registry
-            .pin_cs
-            .borrow_mut()
-            .take()
-            .expect("CS pin already in use");
-        let display_dc_pin = espforge_platform::gpio::GPIOOutput::from_pin(
-            display_dc_pin,
-        );
-        let display_rst_pin = espforge_platform::gpio::GPIOOutput::from_pin(
-            display_rst_pin,
-        );
-        let mut display_cs_pin = espforge_platform::gpio::GPIOOutput::from_pin(
-            display_cs_pin,
-        );
-        {
-            use embedded_hal::digital::OutputPin;
-            display_cs_pin.set_high().ok();
-        }
-        let display_spi_dev = espforge_platform::bus::SpiDevice::new(
-            components.main_spi.bus(),
-            display_cs_pin,
-        );
-        let display = espforge_devices::devices::ili9341::device::ILI9341Device::new(
-            display_spi_dev,
-            display_dc_pin,
-            display_rst_pin,
-            delay,
-        );
+        let display = {
+            let mut display_cs_pin = espforge_platform::gpio::GPIOOutput::from_pin(
+                registry.pin_cs.borrow_mut().take().expect("CS pin already in use"),
+            );
+            let mut display_dc_pin = espforge_platform::gpio::GPIOOutput::from_pin(
+                registry.pin_dc.borrow_mut().take().expect("DC pin already in use"),
+            );
+            let mut display_rst_pin = espforge_platform::gpio::GPIOOutput::from_pin(
+                registry.pin_rst.borrow_mut().take().expect("RST pin already in use"),
+            );
+            let display_spi_dev = espforge_platform::bus::SpiDevice::new(
+                components.main_spi.bus(),
+                display_cs_pin,
+            );
+            espforge_devices::ILI9341Device::new(
+                display_spi_dev,
+                display_dc_pin,
+                display_rst_pin,
+                delay,
+            )
+        };
         Self { display }
     }
 }

@@ -9,6 +9,7 @@ use static_cell::StaticCell;
 static REGISTRY_CELL: StaticCell<PeripheralRegistry> = StaticCell::new();
 static COMPONENTS_CELL: StaticCell<Components> = StaticCell::new();
 static DEVICES_CELL: StaticCell<Devices> = StaticCell::new();
+esp_bootloader_esp_idf::esp_app_desc!();
 #[esp_hal::main]
 fn main() -> ! {
     esp_println::logger::init_logger_from_env();

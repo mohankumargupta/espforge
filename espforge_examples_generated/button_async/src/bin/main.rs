@@ -12,6 +12,7 @@ use esp_hal::timer::timg::TimerGroup;
 static REGISTRY_CELL: StaticCell<PeripheralRegistry> = StaticCell::new();
 static COMPONENTS_CELL: StaticCell<Components> = StaticCell::new();
 static DEVICES_CELL: StaticCell<Devices> = StaticCell::new();
+esp_bootloader_esp_idf::esp_app_desc!();
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
     esp_println::logger::init_logger_from_env();

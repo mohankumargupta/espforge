@@ -37,9 +37,9 @@ esp-println = { version = "0.16.1", features = ["esp32c3", "log-04"] }
 
 critical-section = "1.2.0"
 static_cell      = "2.1.1"
-espforge_platform = { version = "0.1.10", features = ["embassy", "embassy"] }
-espforge_components = { version = "0.1.7", features = ["embassy", "button", "led"] }
-espforge_devices = { version = "0.1.9" }
+espforge_platform = { version = "0.1.12", features = ["embassy", "embassy"] }
+espforge_components = { version = "0.1.10", features = ["embassy", "button", "led"] }
+espforge_devices = { version = "0.1.12" }
 embedded-hal = "1.0.0"
 
 [dependencies.embedded-io]

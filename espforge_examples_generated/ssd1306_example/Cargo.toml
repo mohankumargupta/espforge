@@ -26,9 +26,9 @@ esp-backtrace = { version = "0.18.1", features = [
   "println",
 ] }
 esp-println = { version = "0.16.1", features = ["esp32c3", "log-04"] }
-espforge_platform = { version = "0.1.10", features = ["i2c"] }
-espforge_components = { version = "0.1.7", features = ["i2c"] }
-espforge_devices = { version = "0.1.9", features = ["ssd1306"] }
+espforge_platform = { version = "0.1.12", features = ["i2c"] }
+espforge_components = { version = "0.1.10", features = ["i2c"] }
+espforge_devices = { version = "0.1.12", features = ["ssd1306"] }
 static_cell = "2.1"
 embedded-hal = "1.0.0"
 
