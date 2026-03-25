@@ -129,6 +129,17 @@ espforge compile blink.yaml
 cargo build
 ```
 
+## Custom dependencies
+
+If your project requires additional Rust crates, you can create a **dependencies.toml** file in the same directory as your project's YAML configuration. When you run espforge compile, the dependencies specified in this file will be automatically merged into the generated Cargo.toml.
+
+Example dependencies.toml:
+```toml 
+[dependencies] 
+my-custom-crate = "1.0.0" 
+another-crate = { version = "0.2, default-features = false } 
+```
+
 ## Building from source
 
 ```shell
@@ -143,6 +154,11 @@ If using VSCode, enable wokwi extension, then double-click on diagram.json
 in the **espforge_projects** folder
 
 1. using mousefood/ratatui with ili9341 to create a menu
+
+
+## add more devices
+
+environment variable `ESPFORGE_LOCAL_PATH` can be set to a local copy of espforge repo, there you can add platforms, components and devices.
 
 ## License
 

@@ -1,7 +1,12 @@
 set shell := ["sh", "-c"]
 set windows-shell := ["powershell", "-c"]
 
+
+# I use this during debugging
 export ESPFORGE_USE_GIT := "1"
+
+# To test with local crates instead of Git, uncomment and set the path below:
+# export ESPFORGE_LOCAL_PATH := "/path/to/your/local/espforge"
 
 compile:
   cargo build
