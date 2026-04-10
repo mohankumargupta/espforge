@@ -21,6 +21,21 @@ impl OutputDirectory {
         Ok(Self { path })
     }
 
+        pub fn prepare_noninteractive(config: &ExampleConfig) -> Result<Self> {
+        let path = Self::resolve_path(&config.project_name)?;
+
+        if path.exists() {
+            anyhow::bail!(
+                "Directory '{}' already exists. Aborting.",
+                config.project_name
+            );
+        } else {
+            Self::create_directory(&path)?;
+        }
+
+        Ok(Self { path })
+    }
+
     fn resolve_path(project_name: &str) -> Result<PathBuf> {
         let current_dir = std::env::current_dir().context("Failed to get current directory")?;
         Ok(current_dir.join(project_name))

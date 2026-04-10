@@ -60,12 +60,12 @@ impl ExampleExporter {
     }
 }
 
-struct ExampleTemplate {
+pub(crate) struct ExampleTemplate {
     dir: &'static include_dir::Dir<'static>,
 }
 
 impl ExampleTemplate {
-    fn find(name: &str) -> Result<Self> {
+    pub(crate) fn find(name: &str) -> Result<Self> {
         let dir = Self::search_in_catalog(name)
             .ok_or_else(|| anyhow!("Example template '{}' not found", name))?;
 
