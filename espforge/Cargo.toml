@@ -1,6 +1,6 @@
 [package]
 name = "espforge"
-version = "0.1.20"
+version = "0.1.21"
 description = "A scaffolding++ project generator for ESP32 projects"
 include = [
     "LICENSE.md",
@@ -28,17 +28,17 @@ required-features = ["cli"]
 
 [dependencies]
 espforge_common = { version = "0.1.7", path = "../espforge_common"}
-espforge_components_builder = { version = "0.1.8", path = "../espforge_components_builder" }
-espforge_configuration = { path = "../espforge_configuration", version = "0.3.3" }
-espforge_devices_builder = { version = "0.1.8", path = "../espforge_devices_builder" }
-espforge_codegen = { version = "0.4.4", path = "../espforge_codegen" }
+espforge_components_builder = { version = "0.1.9", path = "../espforge_components_builder" }
+espforge_configuration = { path = "../espforge_configuration", version = "0.3.4" }
+espforge_devices_builder = { version = "0.1.9", path = "../espforge_devices_builder" }
+espforge_codegen = { version = "0.4.5", path = "../espforge_codegen" }
 espforge_dialogue = { version = "0.1.6", path = "../espforge_dialogue" }
 espforge_esp32metadata = { path = "../espforge_esp32metadata", version = "0.2.5" }
 espforge_examples = { version = "0.1.7", path = "../espforge_examples" }
 
-espforge_platform = { version = "0.1.13", path = "../espforge_platform", optional = true }
-espforge_components = { version = "0.1.11", path = "../espforge_components", optional = true }
-espforge_devices = { version = "0.1.13", path = "../espforge_devices", optional = true }
+espforge_platform = { version = "0.1.14", path = "../espforge_platform", optional = true }
+espforge_components = { version = "0.1.12", path = "../espforge_components", optional = true }
+espforge_devices = { version = "0.1.14", path = "../espforge_devices", optional = true }
 
 anyhow.workspace = true
 serde = { workspace = true, features = ["derive"] }

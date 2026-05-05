@@ -1,6 +1,6 @@
 [package]
 name = "espforge_macros"
-version = "0.1.7"
+version = "0.1.8"
 description = "Procedural macros for espforge"
 edition.workspace = true
 license.workspace = true
