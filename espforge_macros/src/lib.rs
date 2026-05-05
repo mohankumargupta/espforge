@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, LitStr};
+use syn::{DeriveInput, LitStr, parse_macro_input};
 
 #[proc_macro_derive(ComponentPlugin, attributes(plugin))]
 pub fn derive_component_plugin(input: TokenStream) -> TokenStream {
@@ -58,8 +58,8 @@ fn impl_plugin(
                     let value = meta.value()?;
                     let lit: LitStr = value.parse()?;
                     let ty_str = lit.value();
-                    let ty: syn::Type = syn::parse_str(&ty_str)
-                        .map_err(|e| meta.error(e.to_string()))?;
+                    let ty: syn::Type =
+                        syn::parse_str(&ty_str).map_err(|e| meta.error(e.to_string()))?;
                     config_type = Some(ty);
                 }
                 Ok(())
@@ -67,11 +67,8 @@ fn impl_plugin(
         }
     }
 
-    let plugin_name = plugin_name_val.unwrap_or_else(|| {
-        name.to_string()
-            .trim_end_matches("Plugin")
-            .to_string()
-    });
+    let plugin_name =
+        plugin_name_val.unwrap_or_else(|| name.to_string().trim_end_matches("Plugin").to_string());
 
     // Generate the three trait method bodies depending on whether a typed config is used.
     let (validate_body, dependencies_body, generate_body) = if let Some(ref cfg_ty) = config_type {

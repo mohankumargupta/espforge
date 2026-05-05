@@ -20,8 +20,8 @@ pub use components::uart::Uart;
 #[cfg(feature = "http")]
 pub use components::http::HttpClient;
 #[cfg(feature = "http")]
+pub use components::http::HttpError;
+#[cfg(feature = "http")]
 pub use components::http::HttpResources;
 #[cfg(feature = "http")]
 pub use components::http::HttpResponse;
-#[cfg(feature = "http")]
-pub use components::http::HttpError;

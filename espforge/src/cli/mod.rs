@@ -6,9 +6,9 @@ pub mod commands;
 pub mod interactive;
 pub mod model;
 
-use commands::{compile, doctor, examples};
 use crate::examples::ExamplesArgs;
 use crate::examples::execute_noninteractive;
+use commands::{compile, doctor, examples};
 
 #[derive(Parser)]
 #[command(version, about = "Example tool with a compile subcommand")]
@@ -61,7 +61,7 @@ impl Cli {
                 name,
                 project_name,
                 chip,
-            }),    
+            }),
             Commands::Doctor => doctor::execute(),
         }
     }

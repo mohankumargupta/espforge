@@ -1,18 +1,45 @@
 use anyhow::Result;
 use std::process::Command;
 
-// Assumes latest esp-generate version works in espforge 
-
+// Assumes latest esp-generate version works in espforge
 
 /// All supported chips with their architecture and RISC-V target (if applicable).
 const CHIPS: &[ChipInfo] = &[
-    ChipInfo { name: "ESP32",    arch: Arch::Xtensa, riscv_target: None },
-    ChipInfo { name: "ESP32-S2", arch: Arch::Xtensa, riscv_target: None },
-    ChipInfo { name: "ESP32-S3", arch: Arch::Xtensa, riscv_target: None },
-    ChipInfo { name: "ESP32-C2", arch: Arch::RiscV,  riscv_target: Some("riscv32imc-unknown-none-elf") },
-    ChipInfo { name: "ESP32-C3", arch: Arch::RiscV,  riscv_target: Some("riscv32imc-unknown-none-elf") },
-    ChipInfo { name: "ESP32-C6", arch: Arch::RiscV,  riscv_target: Some("riscv32imac-unknown-none-elf") },
-    ChipInfo { name: "ESP32-H2", arch: Arch::RiscV,  riscv_target: Some("riscv32imac-unknown-none-elf") },
+    ChipInfo {
+        name: "ESP32",
+        arch: Arch::Xtensa,
+        riscv_target: None,
+    },
+    ChipInfo {
+        name: "ESP32-S2",
+        arch: Arch::Xtensa,
+        riscv_target: None,
+    },
+    ChipInfo {
+        name: "ESP32-S3",
+        arch: Arch::Xtensa,
+        riscv_target: None,
+    },
+    ChipInfo {
+        name: "ESP32-C2",
+        arch: Arch::RiscV,
+        riscv_target: Some("riscv32imc-unknown-none-elf"),
+    },
+    ChipInfo {
+        name: "ESP32-C3",
+        arch: Arch::RiscV,
+        riscv_target: Some("riscv32imc-unknown-none-elf"),
+    },
+    ChipInfo {
+        name: "ESP32-C6",
+        arch: Arch::RiscV,
+        riscv_target: Some("riscv32imac-unknown-none-elf"),
+    },
+    ChipInfo {
+        name: "ESP32-H2",
+        arch: Arch::RiscV,
+        riscv_target: Some("riscv32imac-unknown-none-elf"),
+    },
 ];
 
 struct ChipInfo {
@@ -43,9 +70,9 @@ enum Status {
 /// Snapshot of environment facts, used both for individual checks and the chip summary.
 struct EnvState {
     has_cargo: bool,
-    has_esp_toolchain: bool,  // 'esp' rustup channel — required for Xtensa
+    has_esp_toolchain: bool, // 'esp' rustup channel — required for Xtensa
     has_stable_toolchain: bool,
-    has_gcc_toolchain: bool,  // xtensa-esp-elf-gcc — required for Xtensa linking
+    has_gcc_toolchain: bool, // xtensa-esp-elf-gcc — required for Xtensa linking
     has_esp_generate: bool,
     installed_riscv_targets: Vec<String>,
 }
@@ -167,8 +194,9 @@ fn print_chip_summary(env: &EnvState) {
     let arch_w = 9;
 
     println!(
-        "  {:<name_w$}  {:<arch_w$}  {}",
-        "Chip", "Arch", "Status",
+        "  {:<name_w$}  {:<arch_w$}  Status",
+        "Chip",
+        "Arch",
         name_w = name_w,
         arch_w = arch_w,
     );
@@ -178,7 +206,7 @@ fn print_chip_summary(env: &EnvState) {
         let (icon, reason) = chip_status(chip, env);
         let arch_label = match chip.arch {
             Arch::Xtensa => "Xtensa",
-            Arch::RiscV  => "RISC-V",
+            Arch::RiscV => "RISC-V",
         };
         println!(
             "  {:<name_w$}  {:<arch_w$}  {} {}",
@@ -201,9 +229,15 @@ fn chip_status(chip: &ChipInfo, env: &EnvState) -> (&'static str, String) {
     match chip.arch {
         Arch::Xtensa => {
             let mut missing: Vec<&str> = Vec::new();
-            if !base_ok                { missing.push("cargo / esp-generate") }
-            if !env.has_esp_toolchain  { missing.push("esp toolchain (espup install)") }
-            if !env.has_gcc_toolchain  { missing.push("xtensa-esp-elf-gcc (espup install)") }
+            if !base_ok {
+                missing.push("cargo / esp-generate")
+            }
+            if !env.has_esp_toolchain {
+                missing.push("esp toolchain (espup install)")
+            }
+            if !env.has_gcc_toolchain {
+                missing.push("xtensa-esp-elf-gcc (espup install)")
+            }
 
             if missing.is_empty() {
                 ("✅", "Ready".to_string())
@@ -218,9 +252,15 @@ fn chip_status(chip: &ChipInfo, env: &EnvState) -> (&'static str, String) {
             let has_toolchain = env.has_stable_toolchain || env.has_esp_toolchain;
 
             let mut missing: Vec<String> = Vec::new();
-            if !base_ok       { missing.push("cargo / esp-generate".to_string()) }
-            if !has_toolchain { missing.push("stable toolchain (rustup toolchain install stable)".to_string()) }
-            if !has_target    { missing.push(format!("{} (rustup target add {})", target, target)) }
+            if !base_ok {
+                missing.push("cargo / esp-generate".to_string())
+            }
+            if !has_toolchain {
+                missing.push("stable toolchain (rustup toolchain install stable)".to_string())
+            }
+            if !has_target {
+                missing.push(format!("{} (rustup target add {})", target, target))
+            }
 
             if missing.is_empty() {
                 ("✅", "Ready".to_string())
@@ -322,9 +362,7 @@ fn check_esp_generate(env: &EnvState) -> CheckResult {
                 name: "esp-generate",
                 status,
                 version: Some(semver),
-                note: Some(
-                    "",
-                ),
+                note: Some(""),
             }
         }
     }
@@ -355,7 +393,7 @@ fn check_gcc_toolchain(env: &EnvState) -> CheckResult {
 
 fn check_riscv_targets(env: &EnvState) -> CheckResult {
     let targets = [
-        ("riscv32imc-unknown-none-elf",  "ESP32-C2, ESP32-C3"),
+        ("riscv32imc-unknown-none-elf", "ESP32-C2, ESP32-C3"),
         ("riscv32imac-unknown-none-elf", "ESP32-C6, ESP32-H2"),
     ];
 
@@ -367,7 +405,11 @@ fn check_riscv_targets(env: &EnvState) -> CheckResult {
     }
 
     if missing.is_empty() {
-        let names = targets.iter().map(|(t, _)| *t).collect::<Vec<_>>().join(", ");
+        let names = targets
+            .iter()
+            .map(|(t, _)| *t)
+            .collect::<Vec<_>>()
+            .join(", ");
         CheckResult {
             name: "RISC-V targets",
             status: Status::Ok,

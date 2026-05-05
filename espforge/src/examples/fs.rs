@@ -21,7 +21,7 @@ impl OutputDirectory {
         Ok(Self { path })
     }
 
-        pub fn prepare_noninteractive(config: &ExampleConfig) -> Result<Self> {
+    pub fn prepare_noninteractive(config: &ExampleConfig) -> Result<Self> {
         let path = Self::resolve_path(&config.project_name)?;
 
         if path.exists() {

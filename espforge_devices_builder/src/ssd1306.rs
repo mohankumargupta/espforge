@@ -1,13 +1,12 @@
 use anyhow::{Result, anyhow};
 use espforge_configuration::plugin::{
-    ComponentRef, Dependency, DependencyKind, DeviceRef, GeneratedCode, GenerationContext, codegen
+    ComponentRef, Dependency, DependencyKind, DeviceRef, GeneratedCode, GenerationContext, codegen,
 };
 use espforge_macros::DevicePlugin;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use serde::Deserialize;
 //use serde_yaml_ng;
-
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct SSD1306Config {
@@ -37,10 +36,14 @@ impl SSD1306Plugin {
     }
 
     fn resolve_dependencies(&self, config: &SSD1306Config) -> Result<Vec<Dependency>> {
-         Ok(vec![Dependency::component(config.component.as_str())])
+        Ok(vec![Dependency::component(config.component.as_str())])
     }
 
-    fn generate_code(&self, config: &SSD1306Config,ctx: &GenerationContext) -> Result<GeneratedCode> {
+    fn generate_code(
+        &self,
+        config: &SSD1306Config,
+        ctx: &GenerationContext,
+    ) -> Result<GeneratedCode> {
         let field_ident = format_ident!("{}", ctx.instance_name);
         let dep_ident: TokenStream = ctx
             .dependency_access(config.component.as_str(), DependencyKind::Component)

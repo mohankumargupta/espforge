@@ -12,7 +12,6 @@ fn main() -> Result<()> {
     espforge_components_builder::init();
     espforge_devices_builder::init();
 
-
     let cli = cli::Cli::parse();
     cli.execute()
 }

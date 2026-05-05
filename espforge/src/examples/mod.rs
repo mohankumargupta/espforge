@@ -5,13 +5,12 @@ pub mod template;
 pub mod ui;
 
 use crate::cli::interactive::{self, Prompter};
+use crate::cli::model::ExampleConfig;
 use anyhow::Result;
 use builder::ConfigBuilder;
 use fs::OutputDirectory;
 use template::{ExampleExporter, ExampleTemplate};
 use ui::ResultPrinter;
-use crate::cli::model::ExampleConfig;
-
 
 pub struct ExamplesArgs {
     pub name: String,
@@ -69,4 +68,3 @@ fn execute_with_prompter(args: ExamplesArgs, prompter: &dyn Prompter) -> Result<
 
     Ok(())
 }
-

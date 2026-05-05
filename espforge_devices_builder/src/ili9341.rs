@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use espforge_configuration::plugin::{
-    ComponentRef, Dependency, DeviceRef, GeneratedCode, GenerationContext, PinRef, codegen
+    ComponentRef, Dependency, DeviceRef, GeneratedCode, GenerationContext, PinRef, codegen,
 };
 use espforge_macros::DevicePlugin;
 use proc_macro2::TokenStream;
@@ -18,7 +18,7 @@ pub struct ILI9341Config {
 }
 
 #[derive(DevicePlugin)]
-#[plugin(name = "ili9341", features = "ili9341", config="ILI9341Config")]
+#[plugin(name = "ili9341", features = "ili9341", config = "ILI9341Config")]
 pub struct ILI9341Plugin;
 
 impl ILI9341Plugin {
@@ -27,16 +27,19 @@ impl ILI9341Plugin {
     }
 
     fn resolve_dependencies(&self, config: &ILI9341Config) -> Result<Vec<Dependency>> {
-         Ok(vec![
+        Ok(vec![
             Dependency::component_ref(&config.spi),
             Dependency::pin_ref(&config.dc),
             Dependency::pin_ref(&config.rst),
-            Dependency::pin_ref(&config.cs),            
-         ])
-
+            Dependency::pin_ref(&config.cs),
+        ])
     }
 
-    fn generate_code(&self, config: &ILI9341Config, ctx: &GenerationContext) -> Result<GeneratedCode> {
+    fn generate_code(
+        &self,
+        config: &ILI9341Config,
+        ctx: &GenerationContext,
+    ) -> Result<GeneratedCode> {
         let spi_name = config.spi.as_ref();
         let dc_name = config.dc.as_ref();
         let rst_name = config.rst.as_ref();
@@ -103,7 +106,7 @@ impl ILI9341Plugin {
                 #dc_pin_ident,
                 #rst_pin_ident,
                 delay,
-            )  
+            )
         };
 
         Ok(codegen(&ctx.instance_name, field, init))

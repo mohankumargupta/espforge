@@ -17,9 +17,8 @@ pub fn copy_app_rust_to_src(project_dir: &Path, src_dir: &Path) -> Result<()> {
         if path.extension().and_then(|s| s.to_str()) == Some("rs") {
             let dest = src_dir.join(path.file_name().unwrap());
             if !dest.exists() {
-                fs::copy(&path, &dest).with_context(|| {
-                    format!("Failed to copy {} to src/", path.display())
-                })?;
+                fs::copy(&path, &dest)
+                    .with_context(|| format!("Failed to copy {} to src/", path.display()))?;
                 println!(
                     "   ✓ Copied {} → src/",
                     path.file_name().unwrap().to_string_lossy()
@@ -141,15 +140,14 @@ pub fn inject_app_code(src_dir: &Path) -> Result<Vec<String>> {
             let path = entry.path();
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rs") {
                 let file_name_str = path.file_name().unwrap().to_string_lossy().to_string();
-                if let Some(module_name) = file_name_str.strip_suffix(".rs") {
-                    if module_name != "lib"
+                if let Some(module_name) = file_name_str.strip_suffix(".rs")
+                    && module_name != "lib"
                         && module_name != "generated"
                         && module_name != "main"
                         && !module_name.starts_with("bin")
                     {
                         module_names.push(module_name.to_string());
                     }
-                }
             }
         }
     }

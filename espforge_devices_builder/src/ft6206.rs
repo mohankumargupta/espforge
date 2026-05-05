@@ -1,11 +1,10 @@
 use anyhow::Result;
 use espforge_configuration::plugin::{
-    ComponentRef, Dependency, DependencyKind, DeviceRef,  GeneratedCode, GenerationContext, codegen,
+    ComponentRef, Dependency, DependencyKind, DeviceRef, GeneratedCode, GenerationContext, codegen,
 };
 use espforge_macros::DevicePlugin;
 use quote::quote;
 use serde::Deserialize;
-
 
 #[derive(Debug, Deserialize)]
 pub struct FT6206Config {
@@ -41,7 +40,11 @@ impl FT6206Plugin {
         Ok(vec![Dependency::component(config.component.as_str())])
     }
 
-    fn generate_code(&self, config: &FT6206Config, ctx: &GenerationContext) -> Result<GeneratedCode> {
+    fn generate_code(
+        &self,
+        config: &FT6206Config,
+        ctx: &GenerationContext,
+    ) -> Result<GeneratedCode> {
         let address = config.address.unwrap_or(0x38);
         let mirror_x = config.mirror_x;
         let mirror_y = config.mirror_y;
@@ -53,7 +56,8 @@ impl FT6206Plugin {
         let y_min = config.y_min.unwrap_or(0);
         let y_max = config.y_max.unwrap_or(screen_height);
 
-        let i2c_access = ctx.dependency_access(config.component.as_str(), DependencyKind::Component)?;        
+        let i2c_access =
+            ctx.dependency_access(config.component.as_str(), DependencyKind::Component)?;
 
         let field = quote! {
             espforge_devices::FT6206<
@@ -83,7 +87,6 @@ impl FT6206Plugin {
 
         // let dep_ident =
         //     ctx.dependency_access(config.component.as_str(), DependencyKind::Component)?;
-
 
         // Ok(GeneratedCode {
         //     // Field definition in struct Context

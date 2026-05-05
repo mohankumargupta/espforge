@@ -1,9 +1,9 @@
 use crate::EspforgeConfiguration;
-use anyhow::{anyhow, Result};
+pub use crate::refs::{ComponentRef, DeviceRef, PinRef};
+use anyhow::{Result, anyhow};
 use proc_macro2::TokenStream;
 use serde_yaml_ng::Value;
 use std::collections::HashMap;
-pub use crate::refs::{ComponentRef, DeviceRef, PinRef};
 
 pub struct Dependency {
     pub name: String,
@@ -83,13 +83,9 @@ pub struct GeneratedCode {
 
 impl GeneratedCode {
     /// Helper to generate the field, initialization, and struct instantiation automatically.
-    /// It wraps the `init_expr` in a block `{ ... }` to isolate local variables, preventing 
+    /// It wraps the `init_expr` in a block `{ ... }` to isolate local variables, preventing
     /// variable name collisions between different devices.
-    pub fn property(
-        name: &str,
-        ty: TokenStream,
-        init_expr: TokenStream,
-    ) -> Self {
+    pub fn property(name: &str, ty: TokenStream, init_expr: TokenStream) -> Self {
         let ident = quote::format_ident!("{}", name);
         Self {
             field: quote::quote! { pub #ident: #ty },
@@ -99,11 +95,7 @@ impl GeneratedCode {
     }
 }
 
-pub fn codegen(
-    name: &str,
-    ty: TokenStream,
-    init_expr: TokenStream,
-) -> GeneratedCode {
+pub fn codegen(name: &str, ty: TokenStream, init_expr: TokenStream) -> GeneratedCode {
     GeneratedCode::property(name, ty, init_expr)
 }
 
@@ -121,11 +113,7 @@ impl<'a> GenerationContext<'a> {
     }
 
     /// Returns a resolved dependency by name and validates its expected kind.
-    pub fn dependency(
-        &self,
-        name: &str,
-        expected: DependencyKind,
-    ) -> Result<&ResolvedDependency> {
+    pub fn dependency(&self, name: &str, expected: DependencyKind) -> Result<&ResolvedDependency> {
         let normalized = self.normalize_ref_name(name);
         let dep = self.resolved_deps.get(normalized).ok_or_else(|| {
             anyhow!(
@@ -154,14 +142,13 @@ impl<'a> GenerationContext<'a> {
         dep.access_path.parse::<TokenStream>().map_err(|e| {
             anyhow!(
                 "Failed to parse access path '{}' for dependency '{}': {}",
-                dep.access_path, dep.name, e
+                dep.access_path,
+                dep.name,
+                e
             )
         })
     }
 }
-
-
-
 
 pub trait Plugin: Sync + Send {
     fn name(&self) -> &'static str;

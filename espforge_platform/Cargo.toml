@@ -15,7 +15,7 @@ documentation.workspace = true
 embedded-hal.workspace = true
 embedded-hal-bus = { workspace = true, optional = true }
 embedded-io = { workspace = true, optional = true }
-esp-hal = "1.0"
+esp-hal = "1.1"
 log.workspace = true
 embassy-sync = { workspace = true, optional = true }
 embassy-time = { workspace = true, optional = true }

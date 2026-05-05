@@ -1,28 +1,30 @@
-use embassy_net::{
-    Stack, StackResources,
-    dns::DnsSocket,
-    tcp::client::{TcpClient, TcpClientState},
-};
+use embassy_net::StackResources;
+
+// use embassy_net::{
+//     Stack, StackResources,
+//     dns::DnsSocket,
+//     tcp::client::{TcpClient, TcpClientState},
+// };
 // use reqwless::{
 //     client::HttpClient,
 //     request::{Method, RequestBuilder},
 // };
 
 // Fixed buffer sizes
-const RX_BUF: usize = 4096;
-const TX_BUF: usize = 1024;
+// const RX_BUF: usize = 4096;
+// const TX_BUF: usize = 1024;
 
 pub struct WifiResources {
-    tcp_state: TcpClientState<1, RX_BUF, TX_BUF>,
-    rx_buf: [u8; RX_BUF],
+    // tcp_state: TcpClientState<1, RX_BUF, TX_BUF>,
+    // rx_buf: [u8; RX_BUF],
     pub stack_resources: StackResources<3>,
 }
 
 impl WifiResources {
     pub const fn new() -> Self {
         Self {
-            tcp_state: TcpClientState::new(),
-            rx_buf: [0u8; RX_BUF],
+            // tcp_state: TcpClientState::new(),
+            // rx_buf: [0u8; RX_BUF],
             stack_resources: StackResources::new(),
         }
     }

@@ -90,7 +90,7 @@ impl HttpClient {
         let dns_socket = DnsSocket::new(self.stack);
         let mut client = ReqwlessClient::new(&tcp_client, &dns_socket);
 
-        let mut req = client
+        let req = client
             .request(method, url)
             .await
             .map_err(|_| HttpError::ConnectionFailed)?;
