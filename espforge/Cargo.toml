@@ -1,6 +1,6 @@
 [package]
 name = "espforge"
-version = "0.1.21"
+version = "0.1.22"
 description = "A scaffolding++ project generator for ESP32 projects"
 include = [
     "LICENSE.md",
@@ -34,7 +34,7 @@ espforge_devices_builder = { version = "0.1.9", path = "../espforge_devices_buil
 espforge_codegen = { version = "0.4.5", path = "../espforge_codegen" }
 espforge_dialogue = { version = "0.1.6", path = "../espforge_dialogue" }
 espforge_esp32metadata = { path = "../espforge_esp32metadata", version = "0.2.5" }
-espforge_examples = { version = "0.1.7", path = "../espforge_examples" }
+espforge_examples = { version = "0.1.8", path = "../espforge_examples" }
 
 espforge_platform = { version = "0.1.14", path = "../espforge_platform", optional = true }
 espforge_components = { version = "0.1.12", path = "../espforge_components", optional = true }

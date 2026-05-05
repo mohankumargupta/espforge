@@ -55,7 +55,7 @@ espforge_components_builder = { version = "0.1.9", path = "espforge_components_b
 espforge_devices_builder = { version = "0.1.9", path = "espforge_devices_builder" }
 espforge_dialogue = { version = "0.1.6", path = "espforge_dialogue" }
 espforge_esp32metadata = { version = "0.2.5", path = "espforge_esp32metadata" }
-espforge_examples = { version = "0.1.7", path = "espforge_examples" }
+espforge_examples = { version = "0.1.8", path = "espforge_examples" }
 espforge_macros = { version = "0.1.8", path = "espforge_macros" }
 
 anyhow = "1.0.101"
