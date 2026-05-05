@@ -1,24 +1,32 @@
 [package]
 edition      = "2024"
-name         = "ili9341_example"
+name         = "blink_async"
 rust-version = "1.88"
 version      = "0.1.0"
 
 [[bin]]
-name = "ili9341_example"
+name = "blink_async"
 path = "./src/bin/main.rs"
 
 [dependencies.embedded-hal-bus]
 version = "0.3.0"
+optional = true
 
 [dependencies]
 esp-hal = { version = "~1.1.0", features = ["esp32c3", "log-04", "unstable"] }
 
+esp-rtos = { version = "0.3.0", features = [
+  "embassy",
+  "esp-alloc",
+  "esp32c3",
+  "log-04",
+] }
 
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32c3", "log-04"] }
 log                    = "0.4.27"
 
-critical-section = "1.2.0"
+embassy-executor = { version = "0.10.0", features = ["log"] }
+embassy-time = { version = "0.5.0", features = ["log"] }
 esp-alloc = "0.10.0"
 esp-backtrace = { version = "0.19.0", features = [
   "esp32c3",
@@ -26,10 +34,12 @@ esp-backtrace = { version = "0.19.0", features = [
   "println",
 ] }
 esp-println = { version = "0.17.0", features = ["esp32c3", "log-04"] }
-espforge_platform = { version = "0.1.14", features = ["spi"] }
-espforge_components = { version = "0.1.12", features = ["spi"] }
-espforge_devices = { version = "0.1.14", features = ["ili9341"] }
-static_cell = "2.1"
+
+critical-section = "1.2.0"
+static_cell      = "2.1.1"
+espforge_platform = { version = "0.1.14", features = ["embassy", "embassy"] }
+espforge_components = { version = "0.1.12", features = ["embassy", "led"] }
+espforge_devices = { version = "0.1.14" }
 embedded-hal = "1.0.0"
 
 [dependencies.embedded-io]

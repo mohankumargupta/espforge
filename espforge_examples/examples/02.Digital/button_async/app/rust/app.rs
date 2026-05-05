@@ -7,7 +7,7 @@ use espforge_platform::signal;
 signal!(BUTTON_PRESSED);
 
 pub async fn setup(_ctx: &mut Context, spawner: Spawner) {
-  spawner.spawn(button_task()).ok();
+  spawner.spawn(button_task().unwrap());
 }
 
 pub async fn forever(ctx: &mut Context) {

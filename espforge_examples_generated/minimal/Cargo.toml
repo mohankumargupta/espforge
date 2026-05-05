@@ -1,15 +1,16 @@
 [package]
 edition      = "2024"
-name         = "ili9341_example"
+name         = "minimal"
 rust-version = "1.88"
 version      = "0.1.0"
 
 [[bin]]
-name = "ili9341_example"
+name = "minimal"
 path = "./src/bin/main.rs"
 
 [dependencies.embedded-hal-bus]
 version = "0.3.0"
+optional = true
 
 [dependencies]
 esp-hal = { version = "~1.1.0", features = ["esp32c3", "log-04", "unstable"] }
@@ -26,9 +27,9 @@ esp-backtrace = { version = "0.19.0", features = [
   "println",
 ] }
 esp-println = { version = "0.17.0", features = ["esp32c3", "log-04"] }
-espforge_platform = { version = "0.1.14", features = ["spi"] }
-espforge_components = { version = "0.1.12", features = ["spi"] }
-espforge_devices = { version = "0.1.14", features = ["ili9341"] }
+espforge_platform = { path = "C:/Users/mohan/Developer/mohankumargupta/espforge/espforge_platform" }
+espforge_components = { path = "C:/Users/mohan/Developer/mohankumargupta/espforge/espforge_components" }
+espforge_devices = { path = "C:/Users/mohan/Developer/mohankumargupta/espforge/espforge_devices" }
 static_cell = "2.1"
 embedded-hal = "1.0.0"
 

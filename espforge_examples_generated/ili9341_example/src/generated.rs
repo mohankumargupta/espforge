@@ -13,8 +13,8 @@ use espforge_platform::bus::SpiDevice;
 use embedded_hal_bus::spi::RefCellDevice as SpiRefCellDevice;
 pub struct PeripheralRegistry {
     pub pin_rst: RefCell<Option<AnyPin<'static>>>,
-    pub pin_cs: RefCell<Option<AnyPin<'static>>>,
     pub pin_dc: RefCell<Option<AnyPin<'static>>>,
+    pub pin_cs: RefCell<Option<AnyPin<'static>>>,
     pub spi2: RefCell<Spi<'static, Blocking>>,
 }
 impl PeripheralRegistry {
@@ -32,8 +32,8 @@ impl PeripheralRegistry {
             .with_mosi(p.GPIO4);
         Self {
             pin_rst: RefCell::new(Some(p.GPIO7.degrade())),
-            pin_cs: RefCell::new(Some(p.GPIO5.degrade())),
             pin_dc: RefCell::new(Some(p.GPIO6.degrade())),
+            pin_cs: RefCell::new(Some(p.GPIO5.degrade())),
             spi2: RefCell::new(spi2),
         }
     }
