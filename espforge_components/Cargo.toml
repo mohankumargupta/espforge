@@ -29,6 +29,8 @@ led = []
 http = ["dep:reqwless", "dep:heapless", "espforge_platform/wifi"]
 std = ["espforge_common/std"]
 embassy = ["espforge_platform/embassy"]
+websocket = ["dep:heapless", "espforge_platform/wifi", "espforge_platform/tls"]
+
 
 
 [package.metadata.dist]
