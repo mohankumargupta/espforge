@@ -24,10 +24,7 @@ impl WebSocketClientPlugin {
 
     fn resolve_dependencies(&self, _properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
         // WebSocket requires wifi feature
-        Ok(vec![Dependency {
-            feature: "wifi".to_string(),
-            reason: "WebSocket requires network connectivity".to_string(),
-        }])
+        Ok(vec![])
     }
 
     fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
