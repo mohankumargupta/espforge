@@ -1,4 +1,6 @@
-use embassy_net::Stack;
+use embedded_io_async::{Read, Write};
+use espforge_platform::embassy_net;
+use espforge_platform::embassy_net::Stack;
 use heapless::Vec;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -183,8 +185,7 @@ impl<'a> WebSocketClient<'a> {
 
         let mut tcp_rx = [0u8; 4096];
         let mut tcp_tx = [0u8; 4096];
-        let mut socket =
-            embassy_net::tcp::TcpSocket::new(self.stack, &mut tcp_rx, &mut tcp_tx);
+        let mut socket = embassy_net::tcp::TcpSocket::new(self.stack, &mut tcp_rx, &mut tcp_tx);
 
         socket
             .connect(endpoint)
@@ -320,8 +321,7 @@ impl<'a> WebSocketClient<'a> {
         }
 
         let first_byte = data[0];
-        let opcode =
-            OpCode::from_u8(first_byte & 0x0F).ok_or(WebSocketError::InvalidFrame)?;
+        let opcode = OpCode::from_u8(first_byte & 0x0F).ok_or(WebSocketError::InvalidFrame)?;
 
         match opcode {
             OpCode::Text => {
@@ -343,4 +343,3 @@ impl<'a> WebSocketClient<'a> {
         }
     }
 }
-

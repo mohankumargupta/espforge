@@ -84,7 +84,7 @@ impl CodegenContext {
 
         let needs_stack = self.model.components.values().any(|spec| {
             crate::registry::find_plugin(&spec.driver)
-                .map(|p| p.required_features().iter().any(|f| f == "http"))
+                .map(|p| p.required_features().iter().any(|f| f == "http" || f == "websockets"))
                 .unwrap_or(false)
         });
 

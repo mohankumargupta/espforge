@@ -7,7 +7,7 @@ pub fn setup(ctx: &mut Context) {
 }
 
 pub async fn forever(ctx: &mut Context) {
-    let ws = ctx.component!(ws_client);
+    let ws = component!(ws_client);
     
     // Connect
     ws.connect().await.unwrap();

@@ -26,4 +26,6 @@ pub use components::http::HttpResources;
 #[cfg(feature = "http")]
 pub use components::http::HttpResponse;
 #[cfg(feature = "websockets")]
-pub use components::websockets::{WebSocketClient, WebSocketResources, WebSocketError, OpCode, CloseCode, Message};
+pub use components::websockets::{
+    CloseCode, Message, OpCode, WebSocketClient, WebSocketError, WebSocketResources,
+};

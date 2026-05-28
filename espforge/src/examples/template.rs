@@ -35,10 +35,11 @@ impl ExampleExporter {
                 let entry = entry?;
                 let path = entry.path();
                 if path.is_file()
-                    && let Some(file_name) = path.file_name() {
-                        let dest = src_dir.join(file_name);
-                        fs::rename(&path, &dest).context("Failed to move file to src")?;
-                    }
+                    && let Some(file_name) = path.file_name()
+                {
+                    let dest = src_dir.join(file_name);
+                    fs::rename(&path, &dest).context("Failed to move file to src")?;
+                }
             }
 
             let app_dir = output.path().join("app");

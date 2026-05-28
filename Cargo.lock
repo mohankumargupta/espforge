@@ -1106,6 +1106,7 @@ version = "0.1.12"
 dependencies = [
  "embedded-hal 1.0.0",
  "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "espforge_common",
  "espforge_platform",
  "heapless 0.9.3",
@@ -1125,6 +1126,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_yaml_ng",
+ "syn 2.0.117",
 ]
 
 [[package]]

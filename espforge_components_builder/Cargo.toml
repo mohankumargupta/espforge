@@ -21,4 +21,4 @@ proc-macro2 = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml_ng = "0.10"
 inventory = "0.3"
-
+syn = { workspace = true }
