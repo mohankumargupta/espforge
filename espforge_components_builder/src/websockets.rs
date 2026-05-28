@@ -4,7 +4,7 @@ use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContex
 use quote::{format_ident, quote};
 
 #[derive(ComponentPlugin)]
-#[plugin(name = "WebSocketClient", features = "websocket,embassy")]
+#[plugin(name = "WebSocketClient", features = "websockets")]
 pub struct WebSocketClientPlugin;
 
 impl WebSocketClientPlugin {
