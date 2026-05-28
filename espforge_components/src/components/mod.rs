@@ -10,5 +10,5 @@ pub mod led;
 pub mod spi;
 #[cfg(feature = "uart")]
 pub mod uart;
-#[cfg(feature = "websocket")]
-pub mod websocket;
+#[cfg(feature = "websockets")]
+pub mod websockets;
