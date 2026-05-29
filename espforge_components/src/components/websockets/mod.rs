@@ -13,7 +13,9 @@ pub enum OpCode {
     Pong,
 }
 
+
 impl OpCode {
+    #[allow(dead_code)]
     fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x0 => Some(OpCode::Continuation),

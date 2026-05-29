@@ -4,7 +4,7 @@ use espforge_macros::ComponentPlugin;
 use quote::{format_ident, quote};
 
 #[derive(ComponentPlugin)]
-#[plugin(name = "WebSocketClient", features = "websockets")]
+#[plugin(name = "WebSocketClient", features = "websockets", pub_use = "espforge_components::components::websockets::Message")]
 pub struct WebSocketClientPlugin;
 
 impl WebSocketClientPlugin {
