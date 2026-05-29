@@ -164,3 +164,11 @@ environment variable `ESPFORGE_LOCAL_PATH` can be set to a local copy of espforg
 
 MIT
 
+## Similar projects for inspiration
+
+-  espresif iot solution https://github.com/espressif/esp-iot-solution
+-  esphome
+-  zephyr
+-  circuitpython
+
+
