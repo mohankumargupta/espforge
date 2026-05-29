@@ -1,0 +1,491 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index dfef417..953db27 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -87,6 +87,10 @@ embassy-time = "0.5.0"
+ embassy-sync = "0.7"
+
+ embassy-net = "0.8.0"
++edge-ws = { version = "0.7", default-features = false }
++edge-http = { version = "0.7", default-features = false, features = ["io"] }
++edge-nal = { version = "0.6", default-features = false }
++edge-nal-embassy = { version = "0.8", default-features = false, features = ["tcp", "dns"] }
+ reqwless = { version = "0.14", default-features = false }
+ heapless = "0.9.2"
+
+diff --git a/espforge_components/Cargo.toml b/espforge_components/Cargo.toml
+index 456f779..e5f5ab7 100644
+--- a/espforge_components/Cargo.toml
++++ b/espforge_components/Cargo.toml
+@@ -19,6 +19,10 @@ embedded-io = { version = "0.7.1", optional = true }
+ embedded-io-async = { version = "0.7", optional = true }
+ reqwless = { workspace = true, optional = true, default-features = false}
+ heapless = { workspace = true, optional = true }
++edge-ws = { workspace = true, optional = true }
++edge-http = { workspace = true, optional = true }
++edge-nal = { workspace = true, optional = true }
++edge-nal-embassy = { workspace = true, optional = true }
+
+ [features]
+ default = []
+@@ -30,7 +34,16 @@ led = []
+ http = ["dep:reqwless", "dep:heapless", "espforge_platform/wifi"]
+ std = ["espforge_common/std"]
+ embassy = ["espforge_platform/embassy"]
+-websockets = ["dep:heapless", "espforge_platform/wifi", "espforge_platform/tls", "dep:embedded-io-async"]
++websockets = [
++    "dep:heapless",
++    "espforge_platform/wifi",
++    "espforge_platform/tls",
++    "dep:embedded-io-async",
++    "dep:edge-ws",
++    "dep:edge-http",
++    "dep:edge-nal",
++    "dep:edge-nal-embassy"
++]
+
+
+
+diff --git a/espforge_components/src/components/websockets/mod.rs b/espforge_components/src/components/websockets/mod.rs
+index f7f086b..a7d2b63 100644
+--- a/espforge_components/src/components/websockets/mod.rs
++++ b/espforge_components/src/components/websockets/mod.rs
+@@ -1,106 +1,43 @@
+-use embedded_io_async::{Read, Write};
++use core::fmt::Debug;
++use edge_http::io::client::Connection;
++use edge_http::ws::{MAX_BASE64_KEY_LEN, NONCE_LEN};
++use edge_nal::{AddrType, Dns, TcpConnect};
++use edge_ws::{FrameHeader, FrameType};
++use embassy_net::Stack;
+ use espforge_platform::embassy_net;
+-use espforge_platform::embassy_net::Stack;
+-use heapless::Vec;
++use heapless::String;
+
+-#[derive(Debug, Clone, Copy, PartialEq)]
+-pub enum OpCode {
+-    Continuation,
+-    Text,
+-    Binary,
+-    Close,
+-    Ping,
+-    Pong,
+-}
+-
+-
+-impl OpCode {
+-    #[allow(dead_code)]
+-    fn from_u8(v: u8) -> Option<Self> {
+-        match v {
+-            0x0 => Some(OpCode::Continuation),
+-            0x1 => Some(OpCode::Text),
+-            0x2 => Some(OpCode::Binary),
+-            0x8 => Some(OpCode::Close),
+-            0x9 => Some(OpCode::Ping),
+-            0xA => Some(OpCode::Pong),
+-            _ => None,
+-        }
+-    }
+-}
+-
+-#[derive(Debug, Clone, Copy, PartialEq)]
+-pub enum CloseCode {
+-    NormalClosure,
+-    GoingAway,
+-    ProtocolError,
+-    UnsupportedData,
+-    NoStatus,
+-    AbnormalClosure,
+-    InvalidData,
+-    PolicyViolation,
+-    TooLarge,
+-    MandatoryExt,
+-    InternalError,
+-    ServiceRestart,
+-    TryAgainLater,
+-    BadGateway,
+-    TlsError,
++#[derive(Debug)]
++pub enum WebSocketError {
++    ConnectionFailed,
++    HandshakeFailed,
++    SendFailed,
++    ReceiveFailed,
++    InvalidFrame,
++    DnsError,
+ }
+
+-impl CloseCode {
+-    pub fn to_u16(&self) -> u16 {
++impl core::fmt::Display for WebSocketError {
++    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+         match self {
+-            CloseCode::NormalClosure => 1000,
+-            CloseCode::GoingAway => 1001,
+-            CloseCode::ProtocolError => 1002,
+-            CloseCode::UnsupportedData => 1003,
+-            CloseCode::NoStatus => 1005,
+-            CloseCode::AbnormalClosure => 1006,
+-            CloseCode::InvalidData => 1007,
+-            CloseCode::PolicyViolation => 1008,
+-            CloseCode::TooLarge => 1009,
+-            CloseCode::MandatoryExt => 1010,
+-            CloseCode::InternalError => 1011,
+-            CloseCode::ServiceRestart => 1012,
+-            CloseCode::TryAgainLater => 1013,
+-            CloseCode::BadGateway => 1014,
+-            CloseCode::TlsError => 1015,
+-        }
+-    }
+-
+-    pub fn from_u16(v: u16) -> Option<Self> {
+-        match v {
+-            1000 => Some(CloseCode::NormalClosure),
+-            1001 => Some(CloseCode::GoingAway),
+-            1002 => Some(CloseCode::ProtocolError),
+-            1003 => Some(CloseCode::UnsupportedData),
+-            1005 => Some(CloseCode::NoStatus),
+-            1006 => Some(CloseCode::AbnormalClosure),
+-            1007 => Some(CloseCode::InvalidData),
+-            1008 => Some(CloseCode::PolicyViolation),
+-            1009 => Some(CloseCode::TooLarge),
+-            1010 => Some(CloseCode::MandatoryExt),
+-            1011 => Some(CloseCode::InternalError),
+-            1012 => Some(CloseCode::ServiceRestart),
+-            1013 => Some(CloseCode::TryAgainLater),
+-            1014 => Some(CloseCode::BadGateway),
+-            1015 => Some(CloseCode::TlsError),
+-            _ => None,
++            WebSocketError::ConnectionFailed => write!(f, "WebSocket connection failed"),
++            WebSocketError::HandshakeFailed => write!(f, "WebSocket handshake failed"),
++            WebSocketError::SendFailed => write!(f, "WebSocket send failed"),
++            WebSocketError::ReceiveFailed => write!(f, "WebSocket receive failed"),
++            WebSocketError::InvalidFrame => write!(f, "Invalid WebSocket frame"),
++            WebSocketError::DnsError => write!(f, "DNS resolution failed"),
+         }
+     }
+ }
+
+ pub struct WebSocketResources {
+     pub rx_buf: [u8; 4096],
+-    pub tx_buf: [u8; 4096],
+ }
+
+ impl WebSocketResources {
+     pub const fn new() -> Self {
+         Self {
+             rx_buf: [0u8; 4096],
+-            tx_buf: [0u8; 4096],
+         }
+     }
+ }
+@@ -111,49 +48,23 @@ impl Default for WebSocketResources {
+     }
+ }
+
+-#[derive(Debug)]
+-pub enum WebSocketError {
+-    ConnectionFailed,
+-    HandshakeFailed,
+-    SendFailed,
+-    ReceiveFailed,
+-    InvalidFrame,
+-    ClosedByServer(u16),
+-}
+-
+-impl core::fmt::Display for WebSocketError {
+-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+-        match self {
+-            WebSocketError::ConnectionFailed => write!(f, "WebSocket connection failed"),
+-            WebSocketError::HandshakeFailed => write!(f, "WebSocket handshake failed"),
+-            WebSocketError::SendFailed => write!(f, "WebSocket send failed"),
+-            WebSocketError::ReceiveFailed => write!(f, "WebSocket receive failed"),
+-            WebSocketError::InvalidFrame => write!(f, "Invalid WebSocket frame"),
+-            WebSocketError::ClosedByServer(code) => {
+-                write!(f, "WebSocket closed by server: {}", code)
+-            }
+-        }
+-    }
+-}
+-
+-#[derive(Debug)]
+ pub enum Message<'a> {
+     Text(&'a str),
+     Binary(&'a [u8]),
+-    Close(Option<u16>),
+     Ping,
+     Pong,
++    Close,
+ }
+
+ pub struct WebSocketClient<'a> {
+     stack: Stack<'static>,
+     resources: &'a mut WebSocketResources,
+-    uri: heapless::String<256>,
++    uri: String<256>,
+ }
+
+ impl<'a> WebSocketClient<'a> {
+     pub fn new(stack: Stack<'static>, resources: &'a mut WebSocketResources, uri: &str) -> Self {
+-        let mut s: heapless::String<256> = heapless::String::new();
++        let mut s: String<256> = String::new();
+         let _ = s.push_str(uri);
+         Self {
+             stack,
+@@ -162,89 +73,99 @@ impl<'a> WebSocketClient<'a> {
+         }
+     }
+
+-    pub fn is_connected(&self) -> bool {
+-        self.stack.is_link_up() && self.stack.config_v4().is_some()
+-    }
+-
+-    pub async fn connect(&mut self) -> Result<(), WebSocketError> {
++    pub async fn run<F, Fut>(&mut self, mut handler: F) -> Result<(), WebSocketError>
++    where
++        F: FnMut(Message<'_>) -> Fut,
++        Fut: core::future::Future<Output = ()>,
++    {
+         let (host, port, path) = self.parse_uri()?;
++        let stack = edge_nal_embassy::Stack::new(self.stack);
+
+-        let mut request: heapless::String<512> = heapless::String::new();
+-        let _ = request.push_str("GET ");
+-        let _ = request.push_str(path.as_str());
+-        let _ = request.push_str(" HTTP/1.1\r\n");
+-        let _ = request.push_str("Host: ");
+-        let _ = request.push_str(host.as_str());
+-        let _ = request.push_str("\r\n");
+-        let _ = request.push_str("Upgrade: websocket\r\n");
+-        let _ = request.push_str("Connection: Upgrade\r\n");
+-        let _ = request.push_str("Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n");
+-        let _ = request.push_str("Sec-WebSocket-Version: 13\r\n\r\n");
+-
+-        // Placeholder address — real implementation would resolve via DNS
+-        let addr = embassy_net::IpAddress::v4(0, 0, 0, 0);
+-        let endpoint = embassy_net::IpEndpoint::new(addr, port);
+-
+-        let mut tcp_rx = [0u8; 4096];
+-        let mut tcp_tx = [0u8; 4096];
+-        let mut socket = embassy_net::tcp::TcpSocket::new(self.stack, &mut tcp_rx, &mut tcp_tx);
+-
+-        socket
+-            .connect(endpoint)
++        let ip = stack
++            .get_host_by_name(host.as_str(), AddrType::IPv4)
+             .await
+-            .map_err(|_| WebSocketError::ConnectionFailed)?;
++            .map_err(|_| WebSocketError::DnsError)?;
+
+-        socket
+-            .write_all(request.as_bytes())
+-            .await
+-            .map_err(|_| WebSocketError::HandshakeFailed)?;
++        let socket_addr = core::net::SocketAddr::new(ip, port);
+
+-        let mut rx_buf = [0u8; 512];
+-        let n = socket
+-            .read(&mut rx_buf)
+-            .await
+-            .map_err(|_| WebSocketError::HandshakeFailed)?;
++        let mut conn: Connection<'_, _, 512> =
++            Connection::new(&mut self.resources.rx_buf, &stack, socket_addr);
+
+-        let response = core::str::from_utf8(&rx_buf[..n]).unwrap_or("");
+-        if !response.contains("101") || !response.contains("websocket") {
+-            return Err(WebSocketError::HandshakeFailed);
++        let mut nonce = [0u8; NONCE_LEN];
++        // In a real app, you should use a proper RNG
++        for (i, b) in nonce.iter_mut().enumerate() {
++            *b = i as u8;
+         }
+
+-        Ok(())
+-    }
+-
+-    pub async fn send_text(&mut self, data: &str) -> Result<(), WebSocketError> {
+-        self.send_frame(OpCode::Text, data.as_bytes()).await
+-    }
++        let mut key_base64 = [0u8; MAX_BASE64_KEY_LEN];
++        let key_len = edge_http::ws::encode_key(&nonce, &mut key_base64);
++        let key_str = core::str::from_utf8(&key_base64[..key_len]).map_err(|_| WebSocketError::HandshakeFailed)?;
++
++        conn.initiate_request(
++            edge_http::Method::Get,
++            path.as_str(),
++            &[
++                ("Host", host.as_str()),
++                ("Upgrade", "websocket"),
++                ("Connection", "Upgrade"),
++                ("Sec-WebSocket-Key", key_str),
++                ("Sec-WebSocket-Version", "13"),
++            ],
++        )
++        .await
++        .map_err(|_| WebSocketError::HandshakeFailed)?;
++
++        let response = conn.initiate_response().await.map_err(|_| WebSocketError::HandshakeFailed)?;
++
++        if response.status != 101 {
++            return Err(WebSocketError::HandshakeFailed);
++        }
+
+-    pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WebSocketError> {
+-        self.send_frame(OpCode::Binary, data).await
+-    }
++        let mut socket = conn.unbind();
+
+-    pub async fn send_ping(&mut self) -> Result<(), WebSocketError> {
+-        self.send_frame(OpCode::Ping, &[]).await
+-    }
++        let mut frame_buf = [0u8; 4096];
++
++        loop {
++            let mut header = FrameHeader::recv(&mut socket).await.map_err(|_| WebSocketError::ReceiveFailed)?;
++            let payload_len = header.payload_len as usize;
++
++            if payload_len > frame_buf.len() {
++                return Err(WebSocketError::InvalidFrame);
++            }
+
+-    pub async fn receive<'b>(
+-        &mut self,
+-        buffer: &'b mut [u8],
+-    ) -> Result<Option<Message<'b>>, WebSocketError> {
+-        // Stub: persistent socket storage is needed for a full implementation.
+-        let _ = buffer;
+-        Ok(None)
+-    }
++            socket.read_exact(&mut frame_buf[..payload_len]).await.map_err(|_| WebSocketError::ReceiveFailed)?;
++            header.mask(&mut frame_buf[..payload_len]);
++
++            match header.frame_type {
++                FrameType::Text => {
++                    if let Ok(text) = core::str::from_utf8(&frame_buf[..payload_len]) {
++                        handler(Message::Text(text)).await;
++                    }
++                }
++                FrameType::Binary => {
++                    handler(Message::Binary(&frame_buf[..payload_len])).await;
++                }
++                FrameType::Ping => {
++                    handler(Message::Ping).await;
++                    let pong = FrameHeader::new(FrameType::Pong, payload_len);
++                    pong.send(&mut socket).await.map_err(|_| WebSocketError::SendFailed)?;
++                    socket.write_all(&frame_buf[..payload_len]).await.map_err(|_| WebSocketError::SendFailed)?;
++                }
++                FrameType::Pong => {
++                    handler(Message::Pong).await;
++                }
++                FrameType::Close => {
++                    handler(Message::Close).await;
++                    break;
++                }
++                _ => {}
++            }
++        }
+
+-    pub async fn close(&mut self, code: CloseCode) -> Result<(), WebSocketError> {
+-        let bytes = code.to_u16().to_be_bytes();
+-        let mut payload: Vec<u8, 8> = Vec::new();
+-        let _ = payload.push(bytes[0]);
+-        let _ = payload.push(bytes[1]);
+-        self.send_frame(OpCode::Close, &payload).await
++        Ok(())
+     }
+
+-    fn parse_uri(
+-        &self,
+-    ) -> Result<(heapless::String<64>, u16, heapless::String<128>), WebSocketError> {
++    fn parse_uri(&self) -> Result<(String<64>, u16, String<128>), WebSocketError> {
+         let uri_str = self.uri.as_str();
+         let uri = uri_str
+             .trim_start_matches("ws://")
+@@ -264,84 +185,12 @@ impl<'a> WebSocketClient<'a> {
+             (host_port, 80u16)
+         };
+
+-        let mut host_s: heapless::String<64> = heapless::String::new();
++        let mut host_s: String<64> = String::new();
+         let _ = host_s.push_str(host);
+
+-        let mut path_s: heapless::String<128> = heapless::String::new();
++        let mut path_s: String<128> = String::new();
+         let _ = path_s.push_str(path);
+
+         Ok((host_s, port, path_s))
+     }
+-
+-    async fn send_frame(&mut self, opcode: OpCode, data: &[u8]) -> Result<(), WebSocketError> {
+-        let mut frame: Vec<u8, 2048> = Vec::new();
+-
+-        let opcode_byte = match opcode {
+-            OpCode::Continuation => 0x0u8,
+-            OpCode::Text => 0x1,
+-            OpCode::Binary => 0x2,
+-            OpCode::Close => 0x8,
+-            OpCode::Ping => 0x9,
+-            OpCode::Pong => 0xA,
+-        };
+-        let _ = frame.push(0x80 | opcode_byte);
+-
+-        let len = data.len();
+-        let mask_key: [u8; 4] = [0x12, 0x34, 0x56, 0x78];
+-
+-        if len < 126 {
+-            let _ = frame.push(0x80 | (len as u8));
+-        } else if len < 65536 {
+-            let _ = frame.push(0x80 | 126u8);
+-            let _ = frame.push((len >> 8) as u8);
+-            let _ = frame.push((len & 0xFF) as u8);
+-        } else {
+-            let _ = frame.push(0x80 | 127u8);
+-            for i in (0..8usize).rev() {
+-                let _ = frame.push((len >> (i * 8)) as u8);
+-            }
+-        }
+-
+-        let _ = frame.extend_from_slice(&mask_key);
+-
+-        for (i, &byte) in data.iter().enumerate() {
+-            let _ = frame.push(byte ^ mask_key[i % 4]);
+-        }
+-
+-        // Stub: write `frame` to the stored socket in a full implementation.
+-        let _ = frame;
+-        Ok(())
+-    }
+-
+-    fn parse_frame<'b>(
+-        &self,
+-        data: &'b [u8],
+-        _buffer: &mut [u8],
+-    ) -> Result<Option<Message<'b>>, WebSocketError> {
+-        if data.len() < 2 {
+-            return Ok(None);
+-        }
+-
+-        let first_byte = data[0];
+-        let opcode = OpCode::from_u8(first_byte & 0x0F).ok_or(WebSocketError::InvalidFrame)?;
+-
+-        match opcode {
+-            OpCode::Text => {
+-                let text = core::str::from_utf8(&data[2..]).unwrap_or("");
+-                Ok(Some(Message::Text(text)))
+-            }
+-            OpCode::Binary => Ok(Some(Message::Binary(&data[2..]))),
+-            OpCode::Close => {
+-                let close_code = if data.len() >= 4 {
+-                    Some(u16::from_be_bytes([data[2], data[3]]))
+-                } else {
+-                    None
+-                };
+-                Ok(Some(Message::Close(close_code)))
+-            }
+-            OpCode::Ping => Ok(Some(Message::Ping)),
+-            OpCode::Pong => Ok(Some(Message::Pong)),
+-            _ => Ok(None),
+-        }
+-    }
+ }
