@@ -19,6 +19,10 @@ embedded-io = { version = "0.7.1", optional = true }
 embedded-io-async = { version = "0.7", optional = true }
 reqwless = { workspace = true, optional = true, default-features = false}
 heapless = { workspace = true, optional = true }
+edge-ws = { workspace = true, optional = true }
+edge-http = { workspace = true, optional = true }
+edge-nal = { workspace = true, optional = true }
+edge-nal-embassy = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -30,7 +34,16 @@ led = []
 http = ["dep:reqwless", "dep:heapless", "espforge_platform/wifi"]
 std = ["espforge_common/std"]
 embassy = ["espforge_platform/embassy"]
-websockets = ["dep:heapless", "espforge_platform/wifi", "espforge_platform/tls", "dep:embedded-io-async"]
+websockets = [
+    "dep:heapless",
+    "espforge_platform/wifi",
+    "espforge_platform/tls",
+    "dep:embedded-io-async",
+    "dep:edge-ws",
+    "dep:edge-http",
+    "dep:edge-nal",
+    "dep:edge-nal-embassy"
+]
 
 
 
