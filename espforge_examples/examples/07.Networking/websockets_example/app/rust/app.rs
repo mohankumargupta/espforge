@@ -1,4 +1,4 @@
-use crate::{ Context, component };
+use crate::{ Context, component, Message };
 use embassy_executor::Spawner;
 
 pub fn setup(ctx: &mut Context) {

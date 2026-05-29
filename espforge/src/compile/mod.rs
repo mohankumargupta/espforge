@@ -48,7 +48,7 @@ impl ProjectCompiler {
         assets::setup_wifi_env_config(&project_dir, &self.model)?;
 
         let additional_modules = assets::inject_app_code(&src_dir)?;
-        generators::setup_library_structure(&src_dir, &additional_modules)?;
+        generators::setup_library_structure(&src_dir, &additional_modules, &self.model)?;
         generators::generate_component_code(&src_dir, &self.model)?;
         generators::generate_entry_point(&src_dir, &self.model)?;
 

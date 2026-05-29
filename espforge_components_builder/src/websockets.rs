@@ -27,6 +27,10 @@ impl WebSocketClientPlugin {
         Ok(vec![])
     }
 
+    fn pub_use(&self) -> Vec<&'static str> {
+        vec!["espforge_components::components::websockets::Message"]
+    }
+
 fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
     let field_ident = format_ident!("{}", ctx.instance_name);
 
