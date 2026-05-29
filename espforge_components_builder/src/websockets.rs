@@ -27,36 +27,32 @@ impl WebSocketClientPlugin {
         Ok(vec![])
     }
 
-    fn pub_use(&self) -> Vec<&'static str> {
-        vec!["espforge_components::components::websockets::Message"]
+    fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
+        let field_ident = format_ident!("{}", ctx.instance_name);
+
+        let uri = ctx
+            .properties
+            .get("uri")
+            .and_then(|v| v.as_str())
+            .unwrap_or("ws://localhost:8080");
+
+        let uri_lit = syn::LitStr::new(uri, proc_macro2::Span::call_site());
+
+        let resources_ident = format_ident!("{}_WS_RESOURCES", ctx.instance_name.to_uppercase());
+
+        Ok(GeneratedCode {
+            field: quote! {
+                pub #field_ident: espforge_components::components::websockets::WebSocketClient<'static>
+            },
+            init: quote! {
+                static #resources_ident: static_cell::StaticCell<espforge_components::components::websockets::WebSocketResources> = static_cell::StaticCell::new();
+                let #field_ident = espforge_components::components::websockets::WebSocketClient::new(
+                    stack,
+                    #resources_ident.init(espforge_components::components::websockets::WebSocketResources::new()),
+                    #uri_lit,
+                );
+            },
+            struct_init: quote! { #field_ident },
+        })
     }
-
-fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
-    let field_ident = format_ident!("{}", ctx.instance_name);
-
-    let uri = ctx
-        .properties
-        .get("uri")
-        .and_then(|v| v.as_str())
-        .unwrap_or("ws://localhost:8080");
-
-    let uri_lit = syn::LitStr::new(uri, proc_macro2::Span::call_site());
-
-    let resources_ident = format_ident!("{}_WS_RESOURCES", ctx.instance_name.to_uppercase());
-
-    Ok(GeneratedCode {
-        field: quote! {
-            pub #field_ident: espforge_components::components::websockets::WebSocketClient<'static>
-        },
-        init: quote! {
-            static #resources_ident: static_cell::StaticCell<espforge_components::components::websockets::WebSocketResources> = static_cell::StaticCell::new();
-            let #field_ident = espforge_components::components::websockets::WebSocketClient::new(
-                stack,
-                #resources_ident.init(espforge_components::components::websockets::WebSocketResources::new()),
-                #uri_lit,
-            );
-        },
-        struct_init: quote! { #field_ident },
-    })
-}
 }

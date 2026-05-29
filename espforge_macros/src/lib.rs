@@ -33,6 +33,7 @@ fn impl_plugin(
 
     let mut plugin_name_val: Option<String> = None;
     let mut required_features = quote!(vec![]);
+    let mut pub_use_paths: Vec<String> = vec![];
     let mut config_type: Option<syn::Type> = None;
 
     for attr in &st.attrs {
@@ -54,6 +55,16 @@ fn impl_plugin(
                         .collect();
                     required_features = quote!(vec![#(#feats.to_string()),*]);
                 }
+            if meta.path.is_ident("pub_use") {
+                let value = meta.value()?;
+                let lit: LitStr = value.parse()?;
+                pub_use_paths = lit
+                    .value()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }                
                 if meta.path.is_ident("config") {
                     let value = meta.value()?;
                     let lit: LitStr = value.parse()?;
@@ -97,6 +108,12 @@ fn impl_plugin(
         )
     };
 
+    let pub_use_gen = if pub_use_paths.is_empty() {
+        quote! { vec![] }
+    } else {
+        quote! { vec![#(#pub_use_paths),*] }
+    };    
+
     let expanded = quote! {
         impl ::espforge_configuration::plugin::Plugin for #name {
             fn name(&self) -> &'static str {
@@ -109,6 +126,10 @@ fn impl_plugin(
 
             fn required_features(&self) -> Vec<String> {
                 #required_features
+            }
+
+            fn pub_use(&self) -> Vec<&'static str> { 
+                #pub_use_gen 
             }
 
             fn validate(
