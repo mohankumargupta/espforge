@@ -1,7 +1,7 @@
 use crate::{ Context, component, Message };
 use embassy_executor::Spawner;
 
-pub fn setup(ctx: &mut Context,  _spawner: Spawner) {
+pub async fn setup(ctx: &mut Context,  _spawner: Spawner) {
     let logger = ctx.logger;
     logger.info("Starting WebSocket example");
 }
