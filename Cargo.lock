@@ -1402,6 +1402,7 @@ name = "espforge_components"
 version = "0.1.12"
 dependencies = [
  "edge-http",
+ "edge-nal",
  "edge-net",
  "edge-ws",
  "embedded-hal 1.0.0",
