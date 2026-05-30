@@ -39,6 +39,7 @@ websockets = [
     "dep:heapless", 
     "espforge_platform/wifi", 
     "espforge_platform/tls", 
+    "espforge_platform/embassy",
     "dep:embedded-io-async",
         "dep:edge-ws",
     "dep:edge-http",
