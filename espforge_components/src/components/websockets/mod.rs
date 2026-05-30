@@ -300,7 +300,7 @@ impl<'a> WebSocketClient<'a> {
         }
 
         // Configure network adapter
-        let adapter = NetworkAdapter {
+        let adapter: NetworkAdapter<'a> = NetworkAdapter {
             stack: self.stack,
             rx_buf: core::cell::RefCell::new(self.rx_buf.take()),
             tx_buf: core::cell::RefCell::new(self.tx_buf.take()),
