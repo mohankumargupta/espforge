@@ -215,7 +215,7 @@ impl TcpConnect for NetworkAdapter {
     type Error = NetError;
     type Socket<'m> = MyTcpSocket; // no lifetime on return type
 
-    async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
+    async fn connect(&mut self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = espforge_platform::embassy_net::tcp::TcpSocket::new(
             self.stack,
             &mut self.rx_buf.take().unwrap(),
