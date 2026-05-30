@@ -57,27 +57,27 @@ impl fmt::Display for WebSocketError {
 // ── Resources ────────────────────────────────────────────────────────────────
 
 pub struct WebSocketResources {
-    pub rx_buf: [u8; 1536],
-    pub tx_buf: [u8; 1536],
-    pub payload_buf: [u8; 1536],
+    pub rx_buf: Option<[u8; 1536]>,
+    pub tx_buf: Option<[u8; 1536]>,
+    pub payload_buf: Option<[u8; 1536]>,
     pub has_tls: bool,
 }
 
 impl WebSocketResources {
     pub const fn new() -> Self {
         Self {
-            rx_buf: [8; 1536],
-            tx_buf: [8; 1536],
-            payload_buf: [8; 1536],
+            rx_buf: Some(8; 1536]),
+            tx_buf: Some(8; 1536]),
+            payload_buf: Some(8; 1536]),
             has_tls: false,
         }
     }
 
     pub const fn new_with_tls() -> Self {
         Self {
-            rx_buf: [8; 1536],
-            tx_buf: [8; 1536],
-            payload_buf: [8; 1536],
+            rx_buf: Some(8; 1536]),
+            tx_buf: Some(8; 1536]),
+            payload_buf: Some(8; 1536]),
             has_tls: true,
         }
     }
@@ -111,40 +111,44 @@ impl embedded_io_async::Error for NetError {
     fn kind(&self) -> embedded_io_async::ErrorKind { embedded_io_async::ErrorKind::Other }
 }
 
-pub struct MyTcpSocket<'a>(pub espforge_platform::embassy_net::tcp::TcpSocket<'a>);
+/// Owns the TCP socket instead of borrowing it through a tied lifetime.
+pub struct MyTcpSocket {
+    stack: Stack<'static>,
+    socket: espforge_platform::embassy_net::tcp::TcpSocket<'static>,
+}
 
-impl<'a> embedded_io_async::ErrorType for MyTcpSocket<'a> {
+impl embedded_io_async::ErrorType for MyTcpSocket {
     type Error = NetError;
 }
 
-impl<'a> embedded_io_async::Read for MyTcpSocket<'a> {
+impl embedded_io_async::Read for MyTcpSocket {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        self.0.read(buf).await.map_err(|_| NetError)
+        self.socket.read(buf).await.map_err(|_| NetError)
     }
 }
 
-impl<'a> embedded_io_async::Write for MyTcpSocket<'a> {
+impl embedded_io_async::Write for MyTcpSocket {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.0.write(buf).await.map_err(|_| NetError)
+        self.socket.write(buf).await.map_err(|_| NetError)
     }
     async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.0.flush().await.map_err(|_| NetError)
+        self.socket.flush().await.map_err(|_| NetError)
     }
 }
 
-impl<'a> edge_nal::Readable for MyTcpSocket<'a> {
+impl edge_nal::Readable for MyTcpSocket {
     async fn readable(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
 }
 
-impl<'a> edge_nal::TcpShutdown for MyTcpSocket<'a> {
+impl edge_nal::TcpShutdown for MyTcpSocket {
     async fn close(&mut self, _what: edge_nal::Close) -> Result<(), Self::Error> {
-        self.0.close();
+        self.socket.close();
         Ok(())
     }
     async fn abort(&mut self) -> Result<(), Self::Error> {
-        self.0.abort();
+        self.socket.abort();
         Ok(())
     }
 }
@@ -166,7 +170,7 @@ impl edge_nal::TcpShutdown for DummyHalf {
     async fn abort(&mut self) -> Result<(), Self::Error> { Ok(()) }
 }
 
-impl<'a> edge_nal::TcpSplit for MyTcpSocket<'a> {
+impl edge_nal::TcpSplit for MyTcpSocket {
     type Read<'h> = DummyHalf where Self: 'h;
     type Write<'h> = DummyHalf where Self: 'h;
 
@@ -177,21 +181,24 @@ impl<'a> edge_nal::TcpSplit for MyTcpSocket<'a> {
 
 // ── Network Adapter ──────────────────────────────────────────────────────────
 
-pub struct NetworkAdapter<'a> {
+/// No lifetime parameter — owns its buffers, no borrow tied to WebSocketClient.
+pub struct NetworkAdapter {
     stack: Stack<'static>,
-    rx_buf: core::cell::RefCell<Option<&'a mut [u8]>>,
-    tx_buf: core::cell::RefCell<Option<&'a mut [u8]>>,
+    rx_buf: Option<[u8; 1536]>,
+    tx_buf: Option<[u8; 1536]>,
 }
 
-impl<'a> Dns for NetworkAdapter<'a> {
+impl Dns for NetworkAdapter {
     type Error = DnsError;
 
     async fn get_host_by_name(&self, host: &str, _addr_type: AddrType) -> Result<IpAddr, Self::Error> {
-        let addrs = self.stack.dns_query(host, espforge_platform::embassy_net::dns::DnsQueryType::A)
+        let addrs = self
+            .stack
+            .dns_query(host, espforge_platform::embassy_net::dns::DnsQueryType::A)
             .await
             .map_err(|_| DnsError)?;
         if let Some(espforge_platform::embassy_net::IpAddress::Ipv4(v4)) = addrs.first() {
-            let mut octets = [8; 4];
+            let mut octets = 8; 4];
             octets.copy_from_slice(&v4.octets());
             Ok(IpAddr::V4(Ipv4Addr::from(octets)))
         } else {
@@ -204,15 +211,15 @@ impl<'a> Dns for NetworkAdapter<'a> {
     }
 }
 
-impl<'a> TcpConnect for NetworkAdapter<'a> {
+impl TcpConnect for NetworkAdapter {
     type Error = NetError;
-    type Socket<'m> = MyTcpSocket<'a> where Self: 'm;
+    type Socket<'m> = MyTcpSocket; // no lifetime on return type
 
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = espforge_platform::embassy_net::tcp::TcpSocket::new(
             self.stack,
-            self.rx_buf.borrow_mut().take().unwrap(),
-            self.tx_buf.borrow_mut().take().unwrap(),
+            self.rx_buf.take().unwrap(),
+            self.tx_buf.take().unwrap(),
         );
         let addr = espforge_platform::embassy_net::IpEndpoint::new(
             match remote.ip() {
@@ -224,26 +231,31 @@ impl<'a> TcpConnect for NetworkAdapter<'a> {
             remote.port(),
         );
         socket.connect(addr).await.map_err(|_| NetError)?;
-        Ok(MyTcpSocket(socket))
+
+        Ok(MyTcpSocket {
+            stack: self.stack,
+            socket,
+        })
     }
 }
 
 // ── Client ───────────────────────────────────────────────────────────────────
 
-pub struct WebSocketClient<'a> {
+/// No lifetime parameter — uses &'static mut WebSocketResources from StaticCell.
+pub struct WebSocketClient {
     stack: Stack<'static>,
     uri: String<128>,
-    socket: Option<MyTcpSocket<'a>>,
-    payload_buf: Option<&'a mut [u8]>,
-    rx_buf: Option<&'a mut [u8]>,
-    tx_buf: Option<&'a mut [u8]>,
+    socket: Option<MyTcpSocket>,
+    payload_buf: Option<[u8; 1536]>,
+    rx_buf: Option<[u8; 1536]>,
+    tx_buf: Option<[u8; 1536]>,
     has_tls: bool,
 }
 
-impl<'a> WebSocketClient<'a> {
+impl WebSocketClient {
     pub fn new(
         stack: Stack<'static>,
-        resources: &'a mut WebSocketResources,
+        resources: &'static mut WebSocketResources,
         uri: &str,
     ) -> Self {
         let mut s = String::new();
@@ -253,9 +265,9 @@ impl<'a> WebSocketClient<'a> {
             stack,
             uri: s,
             socket: None,
-            payload_buf: Some(&mut resources.payload_buf),
-            rx_buf: Some(&mut resources.rx_buf),
-            tx_buf: Some(&mut resources.tx_buf),
+            payload_buf: resources.payload_buf.take(),
+            rx_buf: resources.rx_buf.take(),
+            tx_buf: resources.tx_buf.take(),
             has_tls: resources.has_tls,
         }
     }
@@ -277,7 +289,7 @@ impl<'a> WebSocketClient<'a> {
 
         let (host_port, path_raw) = match rest.find('/') {
             Some(i) => (&rest[..i], &rest[i..]),
-            None    => (rest, "/"),
+            None => (rest, "/"),
         };
 
         let (host_raw, port) = match host_port.find(':') {
@@ -291,10 +303,12 @@ impl<'a> WebSocketClient<'a> {
         };
 
         let mut host = String::<64>::new();
-        host.push_str(host_raw).map_err(|_| WebSocketError::InvalidUri)?;
+        host.push_str(host_raw)
+            .map_err(|_| WebSocketError::InvalidUri)?;
 
         let mut path = String::<64>::new();
-        path.push_str(path_raw).map_err(|_| WebSocketError::InvalidUri)?;
+        path.push_str(path_raw)
+            .map_err(|_| WebSocketError::InvalidUri)?;
 
         Ok((host, port, path, is_wss))
     }
@@ -309,24 +323,19 @@ impl<'a> WebSocketClient<'a> {
 
         let conn_buf = self.payload_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
 
-        // adapter lives only through the handshake block, so it drops before
-        // self.payload_buf is reassigned below — preventing the lifetime conflict.
+        // Inner block: adapter is scope-bound and drops here,
+        // before self.payload_buf is reassigned — no lifetime conflict.
         let buf = {
-            let adapter: NetworkAdapter<'_> = NetworkAdapter {
+            let adapter = NetworkAdapter {
                 stack: self.stack,
-                rx_buf: core::cell::RefCell::new(self.rx_buf.take()),
-                tx_buf: core::cell::RefCell::new(self.tx_buf.take()),
+                rx_buf: self.rx_buf.take(),
+                tx_buf: self.tx_buf.take(),
             };
 
-                // DNS resolution
-
-    let ip = adapter
-
-        .get_host_by_name(host.as_str(), AddrType::IPv4)
-
-        .await
-
-        .map_err(|_| WebSocketError::DnsResolutionFailed)?;
+            let ip = adapter
+                .get_host_by_name(host.as_str(), AddrType::IPv4)
+                .await
+                .map_err(|_| WebSocketError::DnsResolutionFailed)?;
 
             let mut conn: Connection<'_, NetworkAdapter<'_>, 64> =
                 Connection::new(conn_buf, &adapter, SocketAddr::new(ip, port));
@@ -435,7 +444,8 @@ impl<'a> WebSocketClient<'a> {
 
         match header.frame_type {
             FrameType::Text(_) => {
-                let text = core::str::from_utf8(payload).map_err(|_| WebSocketError::ProtocolError)?;
+                let text = core::str::from_utf8(payload)
+                    .map_err(|_| WebSocketError::ProtocolError)?;
                 Ok(Some(Message::Text(text)))
             }
             FrameType::Binary(_) => Ok(Some(Message::Binary(payload))),
@@ -462,4 +472,3 @@ impl<'a> WebSocketClient<'a> {
         }
     }
 }
-
