@@ -198,7 +198,7 @@ impl Dns for NetworkAdapter {
             .await
             .map_err(|_| DnsError)?;
         if let Some(espforge_platform::embassy_net::IpAddress::Ipv4(v4)) = addrs.first() {
-            let mut octets = [u8; 4];
+            let mut octets = [0u8; 4];
             octets.copy_from_slice(&v4.octets());
             Ok(IpAddr::V4(Ipv4Addr::from(octets)))
         } else {
