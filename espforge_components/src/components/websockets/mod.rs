@@ -3,6 +3,7 @@ use core::fmt;
 use espforge_platform::embassy_net::Stack;
 use heapless::String;
 
+#[derive(Debug)]
 pub enum Message<'a> {
     Text(&'a str),
     Binary(&'a [u8]),
@@ -13,6 +14,7 @@ pub enum Message<'a> {
 
 // ── Error ────────────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub enum WebSocketError {
     DnsResolutionFailed,
     ConnectionFailed,
@@ -84,10 +86,12 @@ pub struct WebSocketClient<'a> {
 }
 
 impl<'a> WebSocketClient<'a> {
+    /// Argument order matches what the espforge codegen emits:
+    /// `WebSocketClient::new(stack, resources, uri)`
     pub fn new(
         stack: Stack<'static>,
-        uri: &str,
         resources: &'a mut WebSocketResources,
+        uri: &str,
     ) -> Self {
         let mut s = String::new();
         let _ = s.push_str(uri);
@@ -100,7 +104,6 @@ impl<'a> WebSocketClient<'a> {
 
     // ── Parse URI ────────────────────────────────────────────────────────────
 
-    /// Returns `(host, port, path, is_wss)` as owned strings.
     fn parse_uri(&self) -> Result<(String<64>, u16, String<64>, bool), WebSocketError> {
         let s = self.uri.as_str();
 
@@ -140,10 +143,8 @@ impl<'a> WebSocketClient<'a> {
 
     /// Perform DNS resolution and TCP connect.
     ///
-    /// NOTE: The WebSocket HTTP upgrade handshake is not yet implemented in
-    /// this scaffold — the connection is established at the TCP level only.
-    /// Wire in a proper WS handshake (e.g. via `edge-ws`) once the socket
-    /// lifetime/storage strategy is decided.
+    /// NOTE: The WebSocket HTTP upgrade handshake is not yet implemented —
+    /// connection is established at the TCP level only.
     pub async fn connect(&mut self) -> Result<(), WebSocketError> {
         use espforge_platform::embassy_net::dns::DnsQueryType;
         use espforge_platform::embassy_net::tcp::TcpSocket;
@@ -177,24 +178,18 @@ impl<'a> WebSocketClient<'a> {
             .await
             .map_err(|_| WebSocketError::ConnectionFailed)?;
 
-        // wss:// (TLS) is not yet supported in this scaffold.
         if is_wss {
             return Err(WebSocketError::TlsBuffersMissing);
         }
 
-        // TODO: perform the WebSocket HTTP upgrade handshake here once a
-        // compatible WS library that accepts an already-connected TcpSocket
-        // is integrated.
+        // TODO: perform the WebSocket HTTP upgrade handshake over `socket`
+        // once a compatible library is integrated.
 
         Ok(())
     }
 
     // ── Send ─────────────────────────────────────────────────────────────────
 
-    /// Send a UTF-8 text frame.
-    ///
-    /// NOTE: stub — wire in the stored socket once the connection persistence
-    /// strategy is decided.
     pub async fn send_text(&mut self, _text: &str) -> Result<(), WebSocketError> {
         Err(WebSocketError::SendFailed)
     }

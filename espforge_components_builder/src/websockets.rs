@@ -1,22 +1,15 @@
-// espforge_components_builder/src/websockets.rs
-//
-// Fixes vs first attempt:
-//   • Field type now includes the 'static lifetime:
-//       WebSocketClient<'static>
-//   • Resources stored in a StaticCell (same pattern as http component).
-//   • URI literal passed directly to WebSocketClient::new().
-//   • No mention of rand_core, esp_hal, or embedded_tls — those are not deps
-//     of espforge_components_builder.
-
 use anyhow::Result;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext};
 use espforge_macros::ComponentPlugin;
 
 #[derive(ComponentPlugin)]
-#[plugin(name = "WebSocketClient", features = "websockets")]
+#[plugin(
+    name = "WebSocketClient",
+    features = "websockets",
+    pub_use = "espforge_components::components::websockets::Message"
+)]
 pub struct WebSocketClientPlugin;
 
 impl WebSocketClientPlugin {
@@ -24,8 +17,7 @@ impl WebSocketClientPlugin {
         if let Some(uri) = properties.get("uri").and_then(|v| v.as_str()) {
             if !uri.starts_with("ws://") && !uri.starts_with("wss://") {
                 return Err(anyhow::anyhow!(
-                    "WebSocket 'uri' must start with 'ws://' or 'wss://'; got '{}'",
-                    uri
+                    "WebSocket URI must start with ws:// or wss://"
                 ));
             }
         } else {
@@ -50,37 +42,44 @@ impl WebSocketClientPlugin {
 
         let needs_tls = uri.starts_with("wss://");
 
-        // RESOURCES_CELL_IDENT — e.g. WS_CLIENT_WS_RESOURCES
         let resources_cell = format_ident!("{}_WS_RESOURCES", instance_name.to_uppercase());
 
-        let resources_ctor: TokenStream = if needs_tls {
+        let static_resources: TokenStream = if needs_tls {
             quote! {
-                espforge_components::components::websockets::WebSocketResources::new_with_tls()
+                static #resources_cell: static_cell::StaticCell<
+                    espforge_components::components::websockets::WebSocketResources
+                > = static_cell::StaticCell::new();
             }
         } else {
             quote! {
-                espforge_components::components::websockets::WebSocketResources::new()
+                static #resources_cell: static_cell::StaticCell<
+                    espforge_components::components::websockets::WebSocketResources
+                > = static_cell::StaticCell::new();
             }
         };
 
-        // Field in the Components struct
-        let field: TokenStream = quote! {
-            pub #field_ident:
-                espforge_components::components::websockets::WebSocketClient<'static>
+        let resources_init: TokenStream = if needs_tls {
+            quote! {
+                #resources_cell.init(
+                    espforge_components::components::websockets::WebSocketResources::new_with_tls()
+                )
+            }
+        } else {
+            quote! {
+                #resources_cell.init(
+                    espforge_components::components::websockets::WebSocketResources::new()
+                )
+            }
         };
 
-        // Initialisation inside Components::new()
-        //
-        //   static CELL: StaticCell<WebSocketResources> = StaticCell::new();
-        //   let resources = CELL.init(WebSocketResources::new());
-        //   let ws_client = WebSocketClient::new(stack, resources, uri);
-        let init: TokenStream = quote! {
-            static #resources_cell: static_cell::StaticCell<
-                espforge_components::components::websockets::WebSocketResources
-            > = static_cell::StaticCell::new();
+        let field: TokenStream = quote! {
+            pub #field_ident: espforge_components::components::websockets::WebSocketClient<'static>
+        };
 
+        let init: TokenStream = quote! {
+            #static_resources
             let #field_ident = {
-                let resources = #resources_cell.init(#resources_ctor);
+                let resources = #resources_init;
                 espforge_components::components::websockets::WebSocketClient::new(
                     stack,
                     resources,

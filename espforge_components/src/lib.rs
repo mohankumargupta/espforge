@@ -19,13 +19,19 @@ pub use components::uart::Uart;
 
 #[cfg(feature = "http")]
 pub use components::http::HttpClient;
-
 #[cfg(feature = "http")]
 pub use components::http::HttpError;
-
 #[cfg(feature = "http")]
 pub use components::http::HttpResources;
-
 #[cfg(feature = "http")]
 pub use components::http::HttpResponse;
+
+#[cfg(feature = "websockets")]
+pub use components::websockets::Message;
+#[cfg(feature = "websockets")]
+pub use components::websockets::WebSocketClient;
+#[cfg(feature = "websockets")]
+pub use components::websockets::WebSocketError;
+#[cfg(feature = "websockets")]
+pub use components::websockets::WebSocketResources;
 
