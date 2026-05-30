@@ -9,6 +9,9 @@ pub mod psram;
 pub mod spi;
 pub mod uart;
 pub mod wifi;
+pub mod heap;
+
+use heap::HeapConfig;
 
 #[derive(Error, Debug)]
 pub enum ResolutionError {
@@ -38,6 +41,8 @@ pub struct Esp32Config {
     pub psram: Option<psram::PsramConfig>,
     #[serde(default)]
     pub wifi: Option<wifi::WifiConfig>,
+    /// Optional heap size override.
+    pub heap: Option<HeapConfig>,
 }
 
 pub trait ResolvePeripheral<'a>: AsRef<str> {
