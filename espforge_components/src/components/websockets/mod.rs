@@ -134,8 +134,12 @@ impl<'a> edge_nal::Readable for MyTcpSocket<'a> {
 }
 
 impl<'a> edge_nal::TcpShutdown for MyTcpSocket<'a> {
-    async fn close(&mut self, _what: edge_nal::tcp::Close) -> Result<(), Self::Error> {
+    async fn close(&mut self, _what: edge_nal::Close) -> Result<(), Self::Error> {
         self.0.close();
+        Ok(())
+    }
+    async fn abort(&mut self) -> Result<(), Self::Error> {
+        self.0.abort();
         Ok(())
     }
 }
@@ -153,14 +157,15 @@ impl edge_nal::Readable for DummyHalf {
     async fn readable(&mut self) -> Result<(), Self::Error> { Ok(()) }
 }
 impl edge_nal::TcpShutdown for DummyHalf {
-    async fn close(&mut self, _what: edge_nal::tcp::Close) -> Result<(), Self::Error> { Ok(()) }
+    async fn close(&mut self, _what: edge_nal::Close) -> Result<(), Self::Error> { Ok(()) }
+    async fn abort(&mut self) -> Result<(), Self::Error> { Ok(()) }
 }
 
 impl<'a> edge_nal::TcpSplit for MyTcpSocket<'a> {
-    type ReadHalf<'h> = DummyHalf where Self: 'h;
-    type WriteHalf<'h> = DummyHalf where Self: 'h;
+    type Read<'h> = DummyHalf where Self: 'h;
+    type Write<'h> = DummyHalf where Self: 'h;
     
-    fn split(&mut self) -> (Self::ReadHalf<'_>, Self::WriteHalf<'_>) {
+    fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) {
         (DummyHalf, DummyHalf) // Split is not used by WebSocketHandshake/edge-http 
     }
 }
@@ -307,10 +312,12 @@ impl<'a> WebSocketClient<'a> {
             .map_err(|_| WebSocketError::DnsResolutionFailed)?;
 
         let conn_buf = self.payload_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
-        let mut conn = Connection::new(conn_buf, &adapter, SocketAddr::new(ip, port));
+        
+        // Explicity pass generic `<_, 64>` to inform rustc of the max header capacity
+        let mut conn: Connection<'_, NetworkAdapter<'_>, 64> = Connection::new(conn_buf, &adapter, SocketAddr::new(ip, port));
 
         // Setup RNG and Nonce Buffers
-        let mut rng = espforge_platform::esp_hal::rng::Rng::new();
+        let rng = espforge_platform::esp_hal::rng::Rng::new();
         let mut nonce = [0_u8; NONCE_LEN];
         for i in (0..NONCE_LEN).step_by(4) {
             let r = rng.random().to_ne_bytes();
@@ -341,7 +348,7 @@ impl<'a> WebSocketClient<'a> {
 
     pub async fn send_text(&mut self, text: &str) -> Result<(), WebSocketError> {
         let socket = self.socket.as_mut().ok_or(WebSocketError::SendFailed)?;
-        let mut rng = espforge_platform::esp_hal::rng::Rng::new();
+        let rng = espforge_platform::esp_hal::rng::Rng::new();
         
         let header = FrameHeader {
             frame_type: FrameType::Text(false),
@@ -349,15 +356,16 @@ impl<'a> WebSocketClient<'a> {
             mask_key: Some(rng.random()),
         };
 
-        header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
-        header.send_payload(socket, text.as_bytes()).await.map_err(|_| WebSocketError::SendFailed)?;
+        // Explicitly reborrow `&mut *socket` so we don't accidentally consume the un-Copy reference
+        header.send(&mut *socket).await.map_err(|_| WebSocketError::SendFailed)?;
+        header.send_payload(&mut *socket, text.as_bytes()).await.map_err(|_| WebSocketError::SendFailed)?;
         
         Ok(())
     }
 
     pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WebSocketError> {
         let socket = self.socket.as_mut().ok_or(WebSocketError::SendFailed)?;
-        let mut rng = espforge_platform::esp_hal::rng::Rng::new();
+        let rng = espforge_platform::esp_hal::rng::Rng::new();
         
         let header = FrameHeader {
             frame_type: FrameType::Binary(false),
@@ -365,8 +373,8 @@ impl<'a> WebSocketClient<'a> {
             mask_key: Some(rng.random()),
         };
 
-        header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
-        header.send_payload(socket, data).await.map_err(|_| WebSocketError::SendFailed)?;
+        header.send(&mut *socket).await.map_err(|_| WebSocketError::SendFailed)?;
+        header.send_payload(&mut *socket, data).await.map_err(|_| WebSocketError::SendFailed)?;
         
         Ok(())
     }
@@ -377,12 +385,12 @@ impl<'a> WebSocketClient<'a> {
     ) -> Result<Option<Message<'b>>, WebSocketError> {
         let socket = self.socket.as_mut().ok_or(WebSocketError::ReceiveFailed)?;
         
-        let header = match FrameHeader::recv(socket).await {
+        let header = match FrameHeader::recv(&mut *socket).await {
             Ok(h) => h,
             Err(_) => return Err(WebSocketError::ReceiveFailed),
         };
         
-        let payload = header.recv_payload(socket, buf).await.map_err(|_| WebSocketError::ReceiveFailed)?;
+        let payload = header.recv_payload(&mut *socket, buf).await.map_err(|_| WebSocketError::ReceiveFailed)?;
         
         match header.frame_type {
             FrameType::Text(_) => {
@@ -397,14 +405,14 @@ impl<'a> WebSocketClient<'a> {
             }
             FrameType::Ping => {
                 // Automatically bounce back a Pong in response to a Ping frame. (Clients must mask)
-                let mut rng = espforge_platform::esp_hal::rng::Rng::new();
+                let rng = espforge_platform::esp_hal::rng::Rng::new();
                 let pong_header = FrameHeader {
                     frame_type: FrameType::Pong,
                     payload_len: payload.len() as u64,
                     mask_key: Some(rng.random()),
                 };
-                pong_header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
-                pong_header.send_payload(socket, payload).await.map_err(|_| WebSocketError::SendFailed)?;
+                pong_header.send(&mut *socket).await.map_err(|_| WebSocketError::SendFailed)?;
+                pong_header.send_payload(&mut *socket, payload).await.map_err(|_| WebSocketError::SendFailed)?;
                 Ok(Some(Message::Ping))
             }
             FrameType::Pong => {
@@ -414,3 +422,4 @@ impl<'a> WebSocketClient<'a> {
         }
     }
 }
+
