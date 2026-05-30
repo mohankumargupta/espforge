@@ -43,32 +43,42 @@ impl fmt::Display for WebSocketError {
     }
 }
 
+// ── Resources ────────────────────────────────────────────────────────────────
+//
+// Buffer sizes are kept small (1536 bytes each) so that the StaticCell for
+// this struct fits within the esp32c3's dram2_uninit segment.
+//
+// The old design stored Option<[u8; 16640]> inline for TLS buffers; even when
+// None, Rust still reserves the full 16641 bytes in the struct layout, causing
+// a ~33 KB overflow of dram2_uninit. TLS buffers must be allocated as separate
+// statics if ever needed.
+
 pub struct WebSocketResources {
-    pub rx_buf: [u8; 4096],
-    pub tx_buf: [u8; 4096],
-    pub payload_buf: [u8; 4096],
-    pub tls_rx_buf: Option<[u8; 16640]>,
-    pub tls_tx_buf: Option<[u8; 16640]>,
+    pub rx_buf: [u8; 1536],
+    pub tx_buf: [u8; 1536],
+    pub payload_buf: [u8; 1536],
+    /// True when the client was created with `new_with_tls()`. The actual TLS
+    /// byte arrays must live in their own `static` items to avoid DRAM
+    /// overflow — this flag just records the intent.
+    pub has_tls: bool,
 }
 
 impl WebSocketResources {
     pub const fn new() -> Self {
         Self {
-            rx_buf: [0u8; 4096],
-            tx_buf: [0u8; 4096],
-            payload_buf: [0u8; 4096],
-            tls_rx_buf: None,
-            tls_tx_buf: None,
+            rx_buf: [0u8; 1536],
+            tx_buf: [0u8; 1536],
+            payload_buf: [0u8; 1536],
+            has_tls: false,
         }
     }
 
     pub const fn new_with_tls() -> Self {
         Self {
-            rx_buf: [0u8; 4096],
-            tx_buf: [0u8; 4096],
-            payload_buf: [0u8; 4096],
-            tls_rx_buf: Some([0u8; 16640]),
-            tls_tx_buf: Some([0u8; 16640]),
+            rx_buf: [0u8; 1536],
+            tx_buf: [0u8; 1536],
+            payload_buf: [0u8; 1536],
+            has_tls: true,
         }
     }
 }
@@ -78,6 +88,8 @@ impl Default for WebSocketResources {
         Self::new()
     }
 }
+
+// ── Client ───────────────────────────────────────────────────────────────────
 
 pub struct WebSocketClient<'a> {
     stack: Stack<'static>,
@@ -151,7 +163,7 @@ impl<'a> WebSocketClient<'a> {
 
         let (host, port, _path, is_wss) = self.parse_uri()?;
 
-        if is_wss && (self.resources.tls_rx_buf.is_none() || self.resources.tls_tx_buf.is_none()) {
+        if is_wss && !self.resources.has_tls {
             return Err(WebSocketError::TlsBuffersMissing);
         }
 
@@ -179,6 +191,7 @@ impl<'a> WebSocketClient<'a> {
             .map_err(|_| WebSocketError::ConnectionFailed)?;
 
         if is_wss {
+            // wss:// requires TLS which is not yet implemented in this scaffold.
             return Err(WebSocketError::TlsBuffersMissing);
         }
 
