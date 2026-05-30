@@ -17,5 +17,5 @@ components:
   ws_client:
     using: WebSocketClient
     with:
-      uri: "ws://echo.websocket.org"
+      uri: "wss://echo.websocket.org"
 
