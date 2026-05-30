@@ -84,6 +84,87 @@ impl Default for WebSocketResources {
     }
 }
 
+// ── TCP Wrapper ──────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub struct DnsError;
+impl core::fmt::Display for DnsError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result { write!(f, "DnsError") }
+}
+impl core::error::Error for DnsError {}
+impl embedded_io_async::Error for DnsError {
+    fn kind(&self) -> embedded_io_async::ErrorKind { embedded_io_async::ErrorKind::Other }
+}
+
+#[derive(Debug)]
+pub struct NetError;
+impl core::fmt::Display for NetError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result { write!(f, "NetError") }
+}
+impl core::error::Error for NetError {}
+impl embedded_io_async::Error for NetError {
+    fn kind(&self) -> embedded_io_async::ErrorKind { embedded_io_async::ErrorKind::Other }
+}
+
+pub struct MyTcpSocket<'a>(pub espforge_platform::embassy_net::tcp::TcpSocket<'a>);
+
+impl<'a> embedded_io_async::ErrorType for MyTcpSocket<'a> {
+    type Error = NetError;
+}
+
+impl<'a> embedded_io_async::Read for MyTcpSocket<'a> {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.0.read(buf).await.map_err(|_| NetError)
+    }
+}
+
+impl<'a> embedded_io_async::Write for MyTcpSocket<'a> {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.0.write(buf).await.map_err(|_| NetError)
+    }
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.0.flush().await.map_err(|_| NetError)
+    }
+}
+
+impl<'a> edge_nal::Readable for MyTcpSocket<'a> {
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        Ok(()) // Simple proxy doesn't require readable signaling for websocket client
+    }
+}
+
+impl<'a> edge_nal::TcpShutdown for MyTcpSocket<'a> {
+    async fn close(&mut self, _what: edge_nal::tcp::Close) -> Result<(), Self::Error> {
+        self.0.close();
+        Ok(())
+    }
+}
+
+pub struct DummyHalf;
+impl embedded_io_async::ErrorType for DummyHalf { type Error = NetError; }
+impl embedded_io_async::Read for DummyHalf {
+    async fn read(&mut self, _buf: &mut [u8]) -> Result<usize, Self::Error> { Ok(0) }
+}
+impl embedded_io_async::Write for DummyHalf {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> { Ok(buf.len()) }
+    async fn flush(&mut self) -> Result<(), Self::Error> { Ok(()) }
+}
+impl edge_nal::Readable for DummyHalf {
+    async fn readable(&mut self) -> Result<(), Self::Error> { Ok(()) }
+}
+impl edge_nal::TcpShutdown for DummyHalf {
+    async fn close(&mut self, _what: edge_nal::tcp::Close) -> Result<(), Self::Error> { Ok(()) }
+}
+
+impl<'a> edge_nal::TcpSplit for MyTcpSocket<'a> {
+    type ReadHalf<'h> = DummyHalf where Self: 'h;
+    type WriteHalf<'h> = DummyHalf where Self: 'h;
+    
+    fn split(&mut self) -> (Self::ReadHalf<'_>, Self::WriteHalf<'_>) {
+        (DummyHalf, DummyHalf) // Split is not used by WebSocketHandshake/edge-http 
+    }
+}
+
 // ── Network Adapter ──────────────────────────────────────────────────────────
 
 /// A thin bridge between `embassy-net` and `edge-nal` traits 
@@ -94,27 +175,27 @@ pub struct NetworkAdapter<'a> {
 }
 
 impl<'a> Dns for NetworkAdapter<'a> {
-    type Error = espforge_platform::embassy_net::dns::Error;
+    type Error = DnsError;
     
     async fn get_host_by_name(&self, host: &str, _addr_type: AddrType) -> Result<IpAddr, Self::Error> {
-        let addrs = self.stack.dns_query(host, espforge_platform::embassy_net::dns::DnsQueryType::A).await?;
+        let addrs = self.stack.dns_query(host, espforge_platform::embassy_net::dns::DnsQueryType::A).await.map_err(|_| DnsError)?;
         if let Some(espforge_platform::embassy_net::IpAddress::Ipv4(v4)) = addrs.first() {
             let mut octets = [0u8; 4];
-            octets.copy_from_slice(v4.as_bytes());
+            octets.copy_from_slice(&v4.octets());
             Ok(IpAddr::V4(Ipv4Addr::from(octets)))
         } else {
-            Err(espforge_platform::embassy_net::dns::Error::Failed)
+            Err(DnsError)
         }
     }
     
     async fn get_host_by_address(&self, _addr: IpAddr, _result: &mut [u8]) -> Result<usize, Self::Error> {
-        Err(espforge_platform::embassy_net::dns::Error::Failed)
+        Err(DnsError)
     }
 }
 
 impl<'a> TcpConnect for NetworkAdapter<'a> {
-    type Error = espforge_platform::embassy_net::tcp::ConnectError;
-    type Socket<'m> = espforge_platform::embassy_net::tcp::TcpSocket<'a> where Self: 'm;
+    type Error = NetError;
+    type Socket<'m> = MyTcpSocket<'a> where Self: 'm;
     
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = espforge_platform::embassy_net::tcp::TcpSocket::new(
@@ -124,13 +205,13 @@ impl<'a> TcpConnect for NetworkAdapter<'a> {
         );
         let addr = espforge_platform::embassy_net::IpEndpoint::new(
             match remote.ip() {
-                IpAddr::V4(v4) => espforge_platform::embassy_net::IpAddress::Ipv4(espforge_platform::embassy_net::Ipv4Address::from_bytes(&v4.octets())),
+                IpAddr::V4(v4) => espforge_platform::embassy_net::IpAddress::Ipv4(espforge_platform::embassy_net::Ipv4Address::from_octets(v4.octets())),
                 IpAddr::V6(_) => panic!("IPv6 not supported"),
             },
             remote.port(),
         );
-        socket.connect(addr).await?;
-        Ok(socket)
+        socket.connect(addr).await.map_err(|_| NetError)?;
+        Ok(MyTcpSocket(socket))
     }
 }
 
@@ -139,7 +220,7 @@ impl<'a> TcpConnect for NetworkAdapter<'a> {
 pub struct WebSocketClient<'a> {
     stack: Stack<'static>,
     uri: String<128>,
-    socket: Option<espforge_platform::embassy_net::tcp::TcpSocket<'a>>,
+    socket: Option<MyTcpSocket<'a>>,
     payload_buf: Option<&'a mut [u8]>,
     rx_buf: Option<&'a mut [u8]>,
     tx_buf: Option<&'a mut [u8]>,
@@ -229,7 +310,7 @@ impl<'a> WebSocketClient<'a> {
         let mut conn = Connection::new(conn_buf, &adapter, SocketAddr::new(ip, port));
 
         // Setup RNG and Nonce Buffers
-        let mut rng = espforge_platform::esp_hal::rng::Rng::new(unsafe { espforge_platform::esp_hal::peripherals::RNG::steal() });
+        let mut rng = espforge_platform::esp_hal::rng::Rng::new();
         let mut nonce = [0_u8; NONCE_LEN];
         for i in (0..NONCE_LEN).step_by(4) {
             let r = rng.random().to_ne_bytes();
@@ -260,7 +341,7 @@ impl<'a> WebSocketClient<'a> {
 
     pub async fn send_text(&mut self, text: &str) -> Result<(), WebSocketError> {
         let socket = self.socket.as_mut().ok_or(WebSocketError::SendFailed)?;
-        let mut rng = espforge_platform::esp_hal::rng::Rng::new(unsafe { espforge_platform::esp_hal::peripherals::RNG::steal() });
+        let mut rng = espforge_platform::esp_hal::rng::Rng::new();
         
         let header = FrameHeader {
             frame_type: FrameType::Text(false),
@@ -276,7 +357,7 @@ impl<'a> WebSocketClient<'a> {
 
     pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WebSocketError> {
         let socket = self.socket.as_mut().ok_or(WebSocketError::SendFailed)?;
-        let mut rng = espforge_platform::esp_hal::rng::Rng::new(unsafe { espforge_platform::esp_hal::peripherals::RNG::steal() });
+        let mut rng = espforge_platform::esp_hal::rng::Rng::new();
         
         let header = FrameHeader {
             frame_type: FrameType::Binary(false),
@@ -316,7 +397,7 @@ impl<'a> WebSocketClient<'a> {
             }
             FrameType::Ping => {
                 // Automatically bounce back a Pong in response to a Ping frame. (Clients must mask)
-                let mut rng = espforge_platform::esp_hal::rng::Rng::new(unsafe { espforge_platform::esp_hal::peripherals::RNG::steal() });
+                let mut rng = espforge_platform::esp_hal::rng::Rng::new();
                 let pong_header = FrameHeader {
                     frame_type: FrameType::Pong,
                     payload_len: payload.len() as u64,
@@ -333,4 +414,3 @@ impl<'a> WebSocketClient<'a> {
         }
     }
 }
-
