@@ -9,7 +9,7 @@ pub enum Message<'a> {
     Binary(&'a [u8]),
     Ping,
     Pong,
-    Close,
+    Close(Option<u16>),
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────

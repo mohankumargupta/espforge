@@ -1,8 +1,10 @@
 use anyhow::Result;
+use espforge_configuration::plugin::{
+    Dependency, GeneratedCode, GenerationContext,
+};
+use espforge_macros::ComponentPlugin;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-
-use espforge_macros::ComponentPlugin;
 
 #[derive(ComponentPlugin)]
 #[plugin(
@@ -44,20 +46,6 @@ impl WebSocketClientPlugin {
 
         let resources_cell = format_ident!("{}_WS_RESOURCES", instance_name.to_uppercase());
 
-        let static_resources: TokenStream = if needs_tls {
-            quote! {
-                static #resources_cell: static_cell::StaticCell<
-                    espforge_components::components::websockets::WebSocketResources
-                > = static_cell::StaticCell::new();
-            }
-        } else {
-            quote! {
-                static #resources_cell: static_cell::StaticCell<
-                    espforge_components::components::websockets::WebSocketResources
-                > = static_cell::StaticCell::new();
-            }
-        };
-
         let resources_init: TokenStream = if needs_tls {
             quote! {
                 #resources_cell.init(
@@ -77,7 +65,9 @@ impl WebSocketClientPlugin {
         };
 
         let init: TokenStream = quote! {
-            #static_resources
+            static #resources_cell: static_cell::StaticCell<
+                espforge_components::components::websockets::WebSocketResources
+            > = static_cell::StaticCell::new();
             let #field_ident = {
                 let resources = #resources_init;
                 espforge_components::components::websockets::WebSocketClient::new(
