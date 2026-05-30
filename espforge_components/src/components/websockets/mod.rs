@@ -66,18 +66,18 @@ pub struct WebSocketResources {
 impl WebSocketResources {
     pub const fn new() -> Self {
         Self {
-            rx_buf: Some(8; 1536]),
-            tx_buf: Some(8; 1536]),
-            payload_buf: Some(8; 1536]),
+            rx_buf: Some<[u8; 1536]>,
+            tx_buf: Some<[u8; 1536]>,
+            payload_buf: Some<[u8; 1536]>,
             has_tls: false,
         }
     }
 
     pub const fn new_with_tls() -> Self {
         Self {
-            rx_buf: Some(8; 1536]),
-            tx_buf: Some(8; 1536]),
-            payload_buf: Some(8; 1536]),
+            rx_buf: Some<[u8; 1536]>,
+            tx_buf: Some<[u8; 1536]>,
+            payload_buf: Some<[u8; 1536]>,
             has_tls: true,
         }
     }
@@ -198,7 +198,7 @@ impl Dns for NetworkAdapter {
             .await
             .map_err(|_| DnsError)?;
         if let Some(espforge_platform::embassy_net::IpAddress::Ipv4(v4)) = addrs.first() {
-            let mut octets = 8; 4];
+            let mut octets = [u8; 4];
             octets.copy_from_slice(&v4.octets());
             Ok(IpAddr::V4(Ipv4Addr::from(octets)))
         } else {
