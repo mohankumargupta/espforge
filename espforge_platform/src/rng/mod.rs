@@ -16,14 +16,12 @@ impl Rng {
     /// # Safety
     ///
     /// The caller must ensure that no other code holds a reference to the
-    /// `RNG` peripheral at the same time.  In practice this is called once
+    /// RNG peripheral at the same time. In practice this is called once
     /// per random-number-generation site and the peripheral is released
     /// immediately after.
     pub unsafe fn new() -> Self {
-        // SAFETY: upheld by caller
-        Self {
-            inner: HalRng::new(unsafe { esp_hal::peripherals::RNG::steal() }),
-        }
+        // esp-hal 1.1: Rng::new() takes no arguments
+        Self { inner: HalRng::new() }
     }
 
     /// Return a random `u32`.
@@ -40,8 +38,11 @@ impl Rng {
             i += 4;
         }
         if i < buf.len() {
+            // Compute the remaining length before borrowing buf mutably,
+            // avoiding a simultaneous mutable + immutable borrow.
+            let remaining = buf.len() - i;
             let r = self.inner.random().to_ne_bytes();
-            buf[i..].copy_from_slice(&r[..buf.len() - i]);
+            buf[i..].copy_from_slice(&r[..remaining]);
         }
     }
 }
