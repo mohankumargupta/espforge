@@ -318,6 +318,16 @@ impl<'a> WebSocketClient<'a> {
                 tx_buf: core::cell::RefCell::new(self.tx_buf.take()),
             };
 
+                // DNS resolution
+
+    let ip = adapter
+
+        .get_host_by_name(host.as_str(), AddrType::IPv4)
+
+        .await
+
+        .map_err(|_| WebSocketError::DnsResolutionFailed)?;
+
             let mut conn: Connection<'_, NetworkAdapter<'_>, 64> =
                 Connection::new(conn_buf, &adapter, SocketAddr::new(ip, port));
 
