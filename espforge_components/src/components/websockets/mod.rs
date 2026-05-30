@@ -218,8 +218,8 @@ impl TcpConnect for NetworkAdapter {
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = espforge_platform::embassy_net::tcp::TcpSocket::new(
             self.stack,
-            &mut self.rx_buf.take().unwrap(),
-            &mut self.tx_buf.take().unwrap(),
+            self.rx_buf.take().unwrap(),
+            self.tx_buf.take().unwrap(),
         );
         let addr = espforge_platform::embassy_net::IpEndpoint::new(
             match remote.ip() {
@@ -338,7 +338,7 @@ impl WebSocketClient {
                 .map_err(|_| WebSocketError::DnsResolutionFailed)?;
 
             let mut conn: Connection<'_, NetworkAdapter, 64> =
-                Connection::new(conn_buf, &adapter, SocketAddr::new(ip, port));
+                Connection::new(&mut conn_buf, &adapter, SocketAddr::new(ip, port));
 
             let rng = espforge_platform::esp_hal::rng::Rng::new();
             let mut nonce = [0_u8; NONCE_LEN];
