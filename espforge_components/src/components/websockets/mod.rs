@@ -337,7 +337,7 @@ impl WebSocketClient {
                 .await
                 .map_err(|_| WebSocketError::DnsResolutionFailed)?;
 
-            let mut conn: Connection<'_, NetworkAdapter<'_>, 64> =
+            let mut conn: Connection<'_, NetworkAdapter, 64> =
                 Connection::new(conn_buf, &adapter, SocketAddr::new(ip, port));
 
             let rng = espforge_platform::esp_hal::rng::Rng::new();
