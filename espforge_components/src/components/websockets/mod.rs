@@ -6,6 +6,11 @@ use heapless::String;
 use edge_http::io::client::Connection;
 use edge_nal::{AddrType, TcpConnect as _};
 
+// embedded-tls is optional; gate the alias so the crate is only resolved when
+// the "websockets" feature (which activates dep:embedded-tls) is enabled.
+#[cfg(feature = "websockets")]
+use embedded_tls as tls;
+
 pub enum Message<'a> {
     Text(&'a str),
     Binary(&'a [u8]),
@@ -352,24 +357,22 @@ impl<'b> edge_nal::TcpConnect for TlsNetworkAdapter<'b> {
         &self,
         remote: core::net::SocketAddr,
     ) -> Result<Self::Socket<'_>, Self::Error> {
-        use embedded_tls::{TlsConfig, TlsContext, TlsVerify, NoiseRng};
-
         // Plain TCP first via the inner adapter
         let tcp = self.inner.connect(remote).await?;
 
-        let tls_config = TlsConfig::new()
+        let tls_config = tls::TlsConfig::new()
             .with_server_name(self.host)
-            .with_cert_verification(TlsVerify::None);
+            .with_cert_verification(tls::TlsVerify::None);
 
         // SAFETY: read_buf and write_buf are borrowed from WebSocketClient for
         // the full duration of connect_tls(), which contains this call.
         let read_buf  = unsafe { &mut *(self.read_buf  as *mut _) };
         let write_buf = unsafe { &mut *(self.write_buf as *mut _) };
 
-        let mut tls_conn = embedded_tls::TlsConnection::new(tcp, read_buf, write_buf);
+        let mut tls_conn = tls::TlsConnection::new(tcp, read_buf, write_buf);
 
         tls_conn
-            .open(TlsContext::new(&tls_config, NoiseRng(self.seed)))
+            .open(tls::TlsContext::new(&tls_config, tls::NoiseRng(self.seed)))
             .await
             .map_err(|_| NetError)?;
 
