@@ -218,8 +218,8 @@ impl TcpConnect for NetworkAdapter {
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = espforge_platform::embassy_net::tcp::TcpSocket::new(
             self.stack,
-            self.rx_buf.take().unwrap(),
-            self.tx_buf.take().unwrap(),
+            &mut self.rx_buf.take().unwrap(),
+            &mut self.tx_buf.take().unwrap(),
         );
         let addr = espforge_platform::embassy_net::IpEndpoint::new(
             match remote.ip() {
