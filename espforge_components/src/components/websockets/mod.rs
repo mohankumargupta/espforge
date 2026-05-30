@@ -6,7 +6,8 @@ use heapless::String;
 
 use edge_http::io::client::Connection;
 use edge_http::ws::{MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
-use edge_nal::{AddrType, Dns, TcpConnect};
+//use edge_nal::{AddrType, Dns, TcpConnect};
+use edge_net::{AddrType, Dns, TcpConnect};
 use edge_ws::{FrameHeader, FrameType};
 
 #[derive(Debug)]
