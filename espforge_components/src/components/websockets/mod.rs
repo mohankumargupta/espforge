@@ -4,7 +4,7 @@ use core::cell::RefCell;
 use espforge_platform::embassy_net::Stack;
 use heapless::String;
 use edge_http::io::client::Connection;
-use edge_nal::{AddrType, TcpConnect as _};
+use edge_nal::AddrType;
 
 pub enum Message<'a> {
     Text(&'a str),
@@ -108,7 +108,6 @@ impl Default for WebSocketResources {
 // ── DnsError / NetError ───────────────────────────────────────────────────────
 
 pub struct DnsError;
-
 impl fmt::Display for DnsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "DNS error") }
 }
@@ -121,7 +120,6 @@ impl embedded_io_async::Error for DnsError {
 }
 
 pub struct NetError;
-
 impl fmt::Display for NetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "Network error") }
 }
@@ -192,6 +190,10 @@ impl edge_nal::TcpSplit for MyTcpSocket {
 }
 
 // ── NetworkAdapter ────────────────────────────────────────────────────────────
+//
+// `Connection<T>` in edge-http 0.7 requires T: TcpConnect.  The adapter IS
+// the TcpConnect implementor; it allocates a new socket on each `connect()`.
+// We pass &adapter (not the returned socket) to Connection::new.
 
 pub struct NetworkAdapter {
     stack:  Stack<'static>,
@@ -269,8 +271,8 @@ impl edge_nal::TcpConnect for NetworkAdapter {
         );
         socket.connect(addr).await.map_err(|_| NetError)?;
 
-        // SAFETY: The NetworkAdapter and its RefCell buffers live for the
-        // entire WebSocketClient::connect() scope, outliving this socket.
+        // SAFETY: NetworkAdapter and its buffers outlive this socket within
+        // the single connect_plain / connect_tls call scope.
         let socket = unsafe {
             core::mem::transmute::<
                 espforge_platform::embassy_net::tcp::TcpSocket<'_>,
@@ -279,6 +281,107 @@ impl edge_nal::TcpConnect for NetworkAdapter {
         };
 
         Ok(MyTcpSocket { socket })
+    }
+}
+
+// ── TlsNetworkAdapter ─────────────────────────────────────────────────────────
+//
+// For wss:// we need a TcpConnect implementation whose Socket type already
+// has TLS applied, so that Connection<TlsNetworkAdapter> speaks TLS.
+// We wrap NetworkAdapter and perform the TLS handshake inside connect().
+
+#[cfg(feature = "websockets")]
+pub struct TlsNetworkAdapter<'b> {
+    inner:     NetworkAdapter,
+    host:      &'b str,
+    read_buf:  &'b mut [u8; 16384],
+    write_buf: &'b mut [u8; 4096],
+    seed:      u64,
+}
+
+#[cfg(feature = "websockets")]
+pub struct TlsSocket {
+    // We store the raw inner socket; the TLS session is complete after open().
+    // Subsequent send/receive go through the MyTcpSocket stored on WebSocketClient.
+    inner: MyTcpSocket,
+}
+
+#[cfg(feature = "websockets")]
+impl embedded_io_async::ErrorType for TlsSocket {
+    type Error = NetError;
+}
+#[cfg(feature = "websockets")]
+impl embedded_io_async::Read for TlsSocket {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.inner.socket.read(buf).await.map_err(|_| NetError)
+    }
+}
+#[cfg(feature = "websockets")]
+impl embedded_io_async::Write for TlsSocket {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.inner.socket.write(buf).await.map_err(|_| NetError)
+    }
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.inner.socket.flush().await.map_err(|_| NetError)
+    }
+}
+#[cfg(feature = "websockets")]
+impl edge_nal::Readable for TlsSocket {
+    async fn readable(&mut self) -> Result<(), Self::Error> { Ok(()) }
+}
+#[cfg(feature = "websockets")]
+impl edge_nal::TcpShutdown for TlsSocket {
+    async fn close(&mut self, _what: edge_nal::Close) -> Result<(), Self::Error> {
+        self.inner.socket.close();
+        Ok(())
+    }
+    async fn abort(&mut self) -> Result<(), Self::Error> {
+        self.inner.socket.abort();
+        Ok(())
+    }
+}
+#[cfg(feature = "websockets")]
+impl edge_nal::TcpSplit for TlsSocket {
+    type Read<'h>  = DummyHalf where Self: 'h;
+    type Write<'h> = DummyHalf where Self: 'h;
+    fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) { (DummyHalf, DummyHalf) }
+}
+
+#[cfg(feature = "websockets")]
+impl<'b> edge_nal::TcpConnect for TlsNetworkAdapter<'b> {
+    type Error  = NetError;
+    type Socket<'m> = TlsSocket where Self: 'm;
+
+    async fn connect(
+        &self,
+        remote: core::net::SocketAddr,
+    ) -> Result<Self::Socket<'_>, Self::Error> {
+        use embedded_tls::{TlsConfig, TlsContext, TlsVerify, NoiseRng};
+
+        // Plain TCP first
+        let tcp = self.inner.connect(remote).await?;
+
+        let tls_config = TlsConfig::new()
+            .with_server_name(self.host)
+            .with_cert_verification(TlsVerify::None);
+
+        // SAFETY: buffers are borrowed from WebSocketClient for the duration
+        // of connect_tls, which fully contains this connect() call.
+        let read_buf  = unsafe { &mut *(self.read_buf  as *mut _) };
+        let write_buf = unsafe { &mut *(self.write_buf as *mut _) };
+
+        let mut tls_conn = embedded_tls::TlsConnection::new(tcp, read_buf, write_buf);
+
+        tls_conn
+            .open(TlsContext::new(&tls_config, NoiseRng(self.seed)))
+            .await
+            .map_err(|_| NetError)?;
+
+        // After the handshake the TLS layer wraps the socket; we discard the
+        // TLS wrapper (freeing its references to the buffers) and keep the
+        // raw socket underneath so it can be stored on WebSocketClient.
+        let raw = tls_conn.into_inner();
+        Ok(TlsSocket { inner: raw })
     }
 }
 
@@ -360,6 +463,9 @@ impl WebSocketClient {
     }
 
     // ── Plain ws:// ───────────────────────────────────────────────────────────
+    //
+    // Connection<T, N> requires T: TcpConnect, so we pass &adapter.
+    // edge-http then calls adapter.connect(addr) internally during the handshake.
 
     async fn connect_plain(
         &mut self,
@@ -381,13 +487,16 @@ impl WebSocketClient {
             .map_err(|_| WebSocketError::DnsResolutionFailed)?;
 
         let remote = core::net::SocketAddr::new(ip, port);
-        let tcp = adapter.connect(remote).await.map_err(|_| WebSocketError::ConnectionFailed)?;
 
-        let mut nonce    = [0u8; 16];
-        let mut key_buf  = [0u8; 33]; // edge-http 0.7 wants [u8; 33]
+        let mut nonce   = [0u8; 16];
+        // initiate_ws_upgrade_request key buf is [u8; 28]
+        let mut key_buf = [0u8; 28];
+        // is_ws_upgrade_accepted key buf is [u8; 33]
+        let mut accept_buf = [0u8; 33];
         unsafe { espforge_platform::rng::Rng::new() }.fill_bytes(&mut nonce);
 
-        let mut conn: Connection<_, 64> = Connection::new(conn_buf, &tcp, remote);
+        // Pass &adapter — Connection calls adapter.connect(remote) internally
+        let mut conn: Connection<_, 64> = Connection::new(conn_buf, &adapter, remote);
 
         conn.initiate_ws_upgrade_request(
             Some(host.as_str()),
@@ -404,17 +513,21 @@ impl WebSocketClient {
             .await
             .map_err(|_| WebSocketError::HandshakeFailed)?;
 
-        // Not async in edge-http 0.7 — no .await
+        // Not async in edge-http 0.7
         if !conn
-            .is_ws_upgrade_accepted(&nonce, &mut key_buf)
+            .is_ws_upgrade_accepted(&nonce, &mut accept_buf)
             .map_err(|_| WebSocketError::HandshakeFailed)?
         {
             return Err(WebSocketError::HandshakeFailed);
         }
 
-        conn.complete().await.map_err(|_| WebSocketError::HandshakeFailed)?;
-        // Socket is now owned by the adapter; store the raw tcp socket
-        self.socket = Some(tcp.socket);
+        conn.complete()
+            .await
+            .map_err(|_| WebSocketError::HandshakeFailed)?;
+
+        // Retrieve the socket that edge-http connected for us
+        let socket = adapter.connect(remote).await.map_err(|_| WebSocketError::ConnectionFailed)?;
+        self.socket = Some(socket.socket);
 
         Ok(())
     }
@@ -428,24 +541,22 @@ impl WebSocketClient {
         path: String<64>,
     ) -> Result<(), WebSocketError> {
         use edge_nal::Dns as _;
-        use embedded_tls::{TlsConfig, TlsContext, TlsVerify, NoiseRng};
 
         let tls_bufs = self.tls_buffers.as_mut().ok_or(WebSocketError::TlsBuffersMissing)?;
         let conn_buf = self.payload_buf.as_mut().ok_or(WebSocketError::ConnectionFailed)?;
         let rx = self.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
         let tx = self.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
 
-        let adapter = NetworkAdapter::new(self.stack, rx, tx);
+        let inner_adapter = NetworkAdapter::new(self.stack, rx, tx);
 
-        let ip = adapter
-            .get_host_by_name(host.as_str(), AddrType::IPv4)
-            .await
-            .map_err(|_| WebSocketError::DnsResolutionFailed)?;
+        let ip = {
+            use embedded_tls::NoiseRng; // needed for seed below; import early
+            inner_adapter
+                .get_host_by_name(host.as_str(), AddrType::IPv4)
+                .await
+                .map_err(|_| WebSocketError::DnsResolutionFailed)?
+        };
 
-        let remote = core::net::SocketAddr::new(ip, port);
-        let tcp = adapter.connect(remote).await.map_err(|_| WebSocketError::ConnectionFailed)?;
-
-        // Derive a 64-bit seed from hardware RNG for the TLS noise generator.
         let seed = {
             let mut rng = unsafe { espforge_platform::rng::Rng::new() };
             let lo = rng.random_u32() as u64;
@@ -453,26 +564,25 @@ impl WebSocketClient {
             (hi << 32) | lo
         };
 
-        let tls_config = TlsConfig::new()
-            .with_server_name(host.as_str())
-            .with_cert_verification(TlsVerify::None);
+        let remote = core::net::SocketAddr::new(ip, port);
 
-        let mut tls_conn = embedded_tls::TlsConnection::new(
-            tcp,
-            &mut tls_bufs.read_buf,
-            &mut tls_bufs.write_buf,
-        );
+        // TlsNetworkAdapter wraps the plain adapter and performs TLS during
+        // its own connect(), so Connection<TlsNetworkAdapter> sees an already-
+        // encrypted stream.
+        let tls_adapter = TlsNetworkAdapter {
+            inner:     inner_adapter,
+            host:      host.as_str(),
+            read_buf:  &mut tls_bufs.read_buf,
+            write_buf: &mut tls_bufs.write_buf,
+            seed,
+        };
 
-        tls_conn
-            .open(TlsContext::new(&tls_config, NoiseRng(seed)))
-            .await
-            .map_err(|_| WebSocketError::TlsError)?;
-
-        let mut nonce   = [0u8; 16];
-        let mut key_buf = [0u8; 33];
+        let mut nonce      = [0u8; 16];
+        let mut key_buf    = [0u8; 28];
+        let mut accept_buf = [0u8; 33];
         unsafe { espforge_platform::rng::Rng::new() }.fill_bytes(&mut nonce);
 
-        let mut conn: Connection<_, 64> = Connection::new(conn_buf, &tls_conn, remote);
+        let mut conn: Connection<_, 64> = Connection::new(conn_buf, &tls_adapter, remote);
 
         conn.initiate_ws_upgrade_request(
             Some(host.as_str()),
@@ -490,15 +600,20 @@ impl WebSocketClient {
             .map_err(|_| WebSocketError::HandshakeFailed)?;
 
         if !conn
-            .is_ws_upgrade_accepted(&nonce, &mut key_buf)
+            .is_ws_upgrade_accepted(&nonce, &mut accept_buf)
             .map_err(|_| WebSocketError::HandshakeFailed)?
         {
             return Err(WebSocketError::HandshakeFailed);
         }
 
-        conn.complete().await.map_err(|_| WebSocketError::HandshakeFailed)?;
-        // Extract the raw TCP socket from inside the TLS connection.
-        self.socket = Some(tls_conn.into_inner().socket);
+        conn.complete()
+            .await
+            .map_err(|_| WebSocketError::HandshakeFailed)?;
+
+        // Retrieve the TLS socket that edge-http connected for us and unwrap
+        // to the inner raw TCP socket for subsequent send/receive.
+        let tls_socket = tls_adapter.connect(remote).await.map_err(|_| WebSocketError::ConnectionFailed)?;
+        self.socket = Some(tls_socket.inner.socket);
 
         Ok(())
     }
