@@ -7,7 +7,7 @@ espforge:
 esp32:
   # Explicit heap configuration required for TLS buffers
   heap:
-    size: 73728 # 72KB - enough for stack + TLS overhead
+    size: 50000 # 72KB - enough for stack + TLS overhead
   wifi:
     ssid: Wokwi-GUEST
     password: ""
