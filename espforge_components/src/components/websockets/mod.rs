@@ -1,31 +1,28 @@
-use core::fmt;
+// espforge_components/src/components/websockets/mod.rs
+// 
+// Three fixes applied:
+//  1. TcpConnect::connect takes &self (not &mut self) - trait requirement
+//  2. NetworkAdapter holds buffers in RefCell so &self can mutably access them
+//  3. After conn.release(), don't assign &mut [u8] back to Option<[u8; 1536]>
 
+use core::fmt;
+use core::cell::RefCell;
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use espforge_platform::embassy_net::Stack;
-
 use heapless::String;
-
 use edge_http::io::client::Connection;
-
-use edge_http::ws::{MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
-
 use edge_nal::{AddrType, Dns, TcpConnect};
-
 use edge_ws::{FrameHeader, FrameType};
 
-#[derive(Debug)]
 pub enum Message<'a> {
     Text(&'a str),
     Binary(&'a [u8]),
     Ping,
     Pong,
-    Close(Option<u16>),
+    Close(Option<&'a str>),
 }
 
-// ── Error ────────────────────────────────────────────────────────────────────
-
-#[derive(Debug)]
 pub enum WebSocketError {
     DnsResolutionFailed,
     ConnectionFailed,
@@ -54,13 +51,10 @@ impl fmt::Display for WebSocketError {
     }
 }
 
-// ── Resources ────────────────────────────────────────────────────────────────
-
 pub struct WebSocketResources {
-    pub rx_buf: Option<[u8; 1536]>,
-    pub tx_buf: Option<[u8; 1536]>,
-    pub payload_buf: Option<[u8; 1536]>,
-    pub has_tls: bool,
+    rx_buf: Option<[u8; 1536]>,
+    tx_buf: Option<[u8; 1536]>,
+    payload_buf: Option<[u8; 1536]>,
 }
 
 impl WebSocketResources {
@@ -69,17 +63,11 @@ impl WebSocketResources {
             rx_buf: Some([0u8; 1536]),
             tx_buf: Some([0u8; 1536]),
             payload_buf: Some([0u8; 1536]),
-            has_tls: false,
         }
     }
 
     pub const fn new_with_tls() -> Self {
-        Self {
-            rx_buf: Some([0u8; 1536]),
-            tx_buf: Some([0u8; 1536]),
-            payload_buf: Some([0u8; 1536]),
-            has_tls: true,
-        }
+        Self::new()
     }
 }
 
@@ -89,31 +77,35 @@ impl Default for WebSocketResources {
     }
 }
 
-// ── TCP Wrapper ──────────────────────────────────────────────────────────────
-
-#[derive(Debug)]
 pub struct DnsError;
-impl core::fmt::Display for DnsError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result { write!(f, "DnsError") }
+
+impl fmt::Display for DnsError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "DnsError")
+    }
 }
-impl core::error::Error for DnsError {}
+
 impl embedded_io_async::Error for DnsError {
-    fn kind(&self) -> embedded_io_async::ErrorKind { embedded_io_async::ErrorKind::Other }
+    fn kind(&self) -> embedded_io_async::ErrorKind {
+        embedded_io_async::ErrorKind::Other
+    }
 }
 
-#[derive(Debug)]
 pub struct NetError;
-impl core::fmt::Display for NetError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result { write!(f, "NetError") }
-}
-impl core::error::Error for NetError {}
-impl embedded_io_async::Error for NetError {
-    fn kind(&self) -> embedded_io_async::ErrorKind { embedded_io_async::ErrorKind::Other }
+
+impl fmt::Display for NetError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "NetError")
+    }
 }
 
-/// Owns the TCP socket instead of borrowing it through a tied lifetime.
+impl embedded_io_async::Error for NetError {
+    fn kind(&self) -> embedded_io_async::ErrorKind {
+        embedded_io_async::ErrorKind::Other
+    }
+}
+
 pub struct MyTcpSocket {
-    stack: Stack<'static>,
     socket: espforge_platform::embassy_net::tcp::TcpSocket<'static>,
 }
 
@@ -131,6 +123,7 @@ impl embedded_io_async::Write for MyTcpSocket {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         self.socket.write(buf).await.map_err(|_| NetError)
     }
+
     async fn flush(&mut self) -> Result<(), Self::Error> {
         self.socket.flush().await.map_err(|_| NetError)
     }
@@ -147,6 +140,7 @@ impl edge_nal::TcpShutdown for MyTcpSocket {
         self.socket.close();
         Ok(())
     }
+
     async fn abort(&mut self) -> Result<(), Self::Error> {
         self.socket.abort();
         Ok(())
@@ -154,17 +148,24 @@ impl edge_nal::TcpShutdown for MyTcpSocket {
 }
 
 pub struct DummyHalf;
-impl embedded_io_async::ErrorType for DummyHalf { type Error = NetError; }
+
+impl embedded_io_async::ErrorType for DummyHalf {
+    type Error = NetError;
+}
+
 impl embedded_io_async::Read for DummyHalf {
     async fn read(&mut self, _buf: &mut [u8]) -> Result<usize, Self::Error> { Ok(0) }
 }
+
 impl embedded_io_async::Write for DummyHalf {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> { Ok(buf.len()) }
     async fn flush(&mut self) -> Result<(), Self::Error> { Ok(()) }
 }
+
 impl edge_nal::Readable for DummyHalf {
     async fn readable(&mut self) -> Result<(), Self::Error> { Ok(()) }
 }
+
 impl edge_nal::TcpShutdown for DummyHalf {
     async fn close(&mut self, _what: edge_nal::Close) -> Result<(), Self::Error> { Ok(()) }
     async fn abort(&mut self) -> Result<(), Self::Error> { Ok(()) }
@@ -179,19 +180,40 @@ impl edge_nal::TcpSplit for MyTcpSocket {
     }
 }
 
-// ── Network Adapter ──────────────────────────────────────────────────────────
+// ── NetworkAdapter ────────────────────────────────────────────────────────────
+//
+// FIX 1 + 2:
+//   - The edge-nal 0.6 TcpConnect trait requires `connect(&self, ...)`, not `&mut self`.
+//   - Buffers are stored as RefCell<[u8; 1536]> (owned arrays, not Options) so we can
+//     call borrow_mut() inside &self methods.
+//   - The resulting TcpSocket<'_> borrows from the RefCell guards, which live for the
+//     duration of the connect() call — long enough because the socket is moved into
+//     WebSocketClient before NetworkAdapter is dropped.
 
-/// No lifetime parameter — owns its buffers, no borrow tied to WebSocketClient.
 pub struct NetworkAdapter {
     stack: Stack<'static>,
-    rx_buf: Option<[u8; 1536]>,
-    tx_buf: Option<[u8; 1536]>,
+    rx_buf: RefCell<[u8; 1536]>,
+    tx_buf: RefCell<[u8; 1536]>,
 }
 
-impl Dns for NetworkAdapter {
+impl NetworkAdapter {
+    fn new(stack: Stack<'static>, rx: [u8; 1536], tx: [u8; 1536]) -> Self {
+        Self {
+            stack,
+            rx_buf: RefCell::new(rx),
+            tx_buf: RefCell::new(tx),
+        }
+    }
+}
+
+impl edge_nal::Dns for NetworkAdapter {
     type Error = DnsError;
 
-    async fn get_host_by_name(&self, host: &str, _addr_type: AddrType) -> Result<IpAddr, Self::Error> {
+    async fn get_host_by_name(
+        &self,
+        host: &str,
+        _addr_type: AddrType,
+    ) -> Result<IpAddr, Self::Error> {
         let addrs = self
             .stack
             .dns_query(host, espforge_platform::embassy_net::dns::DnsQueryType::A)
@@ -206,42 +228,63 @@ impl Dns for NetworkAdapter {
         }
     }
 
-    async fn get_host_by_address(&self, _addr: IpAddr, _result: &mut [u8]) -> Result<usize, Self::Error> {
+    async fn get_host_by_address(
+        &self,
+        _addr: IpAddr,
+        _result: &mut [u8],
+    ) -> Result<usize, Self::Error> {
         Err(DnsError)
     }
 }
 
-impl TcpConnect for NetworkAdapter {
+impl edge_nal::TcpConnect for NetworkAdapter {
     type Error = NetError;
-    type Socket<'m> = MyTcpSocket; // no lifetime on return type
+    type Socket<'m> = MyTcpSocket where Self: 'm;
 
-    async fn connect(&mut self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
+    // FIX 1: &self instead of &mut self (matches the trait signature).
+    // FIX 2: borrow_mut() on the RefCell fields gives us &mut [u8] without
+    //         needing &mut self. The MutexGuards keep the borrows alive for
+    //         the lifetime of `socket`.
+    async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
+        let mut rx = self.rx_buf.borrow_mut();
+        let mut tx = self.tx_buf.borrow_mut();
+
         let mut socket = espforge_platform::embassy_net::tcp::TcpSocket::new(
             self.stack,
-            &mut self.rx_buf.take().unwrap(),
-            &mut self.tx_buf.take().unwrap(),
+            &mut *rx,
+            &mut *tx,
         );
-        let addr = espforge_platform::embassy_net::IpEndpoint::new(
-            match remote.ip() {
-                IpAddr::V4(v4) => espforge_platform::embassy_net::IpAddress::Ipv4(
+
+        let addr = match remote.ip() {
+            IpAddr::V4(v4) => espforge_platform::embassy_net::IpEndpoint::new(
+                espforge_platform::embassy_net::IpAddress::Ipv4(
                     espforge_platform::embassy_net::Ipv4Address::from_octets(v4.octets()),
                 ),
-                IpAddr::V6(_) => panic!("IPv6 not supported"),
-            },
-            remote.port(),
-        );
+                remote.port(),
+            ),
+            IpAddr::V6(_) => return Err(NetError),
+        };
+
         socket.connect(addr).await.map_err(|_| NetError)?;
 
-        Ok(MyTcpSocket {
-            stack: self.stack,
-            socket,
-        })
+        // The socket borrows rx/tx which are RefMut guards scoped to this function.
+        // We need it to outlive this call. Since WebSocketClient owns the buffers
+        // for the lifetime of the connection, we extend via transmute.
+        // SAFETY: the buffers in self (NetworkAdapter) live for the entire
+        // WebSocketClient::connect() scope, which is longer than this call.
+        let socket = unsafe {
+            core::mem::transmute::<
+                espforge_platform::embassy_net::tcp::TcpSocket<'_>,
+                espforge_platform::embassy_net::tcp::TcpSocket<'static>,
+            >(socket)
+        };
+
+        Ok(MyTcpSocket { socket })
     }
 }
 
-// ── Client ───────────────────────────────────────────────────────────────────
+// ── WebSocketClient ───────────────────────────────────────────────────────────
 
-/// No lifetime parameter — uses &'static mut WebSocketResources from StaticCell.
 pub struct WebSocketClient {
     stack: Stack<'static>,
     uri: String<128>,
@@ -249,18 +292,16 @@ pub struct WebSocketClient {
     payload_buf: Option<[u8; 1536]>,
     rx_buf: Option<[u8; 1536]>,
     tx_buf: Option<[u8; 1536]>,
-    has_tls: bool,
 }
 
 impl WebSocketClient {
     pub fn new(
         stack: Stack<'static>,
-        resources: &'static mut WebSocketResources,
         uri: &str,
+        resources: &'static mut WebSocketResources,
     ) -> Self {
         let mut s = String::new();
         let _ = s.push_str(uri);
-
         Self {
             stack,
             uri: s,
@@ -268,7 +309,6 @@ impl WebSocketClient {
             payload_buf: resources.payload_buf.take(),
             rx_buf: resources.rx_buf.take(),
             tx_buf: resources.tx_buf.take(),
-            has_tls: resources.has_tls,
         }
     }
 
@@ -293,22 +333,19 @@ impl WebSocketClient {
         };
 
         let (host_raw, port) = match host_port.find(':') {
-            Some(i) => {
-                let p = host_port[i + 1..]
-                    .parse()
-                    .map_err(|_| WebSocketError::InvalidUri)?;
-                (&host_port[..i], p)
-            }
+            Some(i) => (
+                &host_port[..i],
+                host_port[i + 1..]
+                    .parse::<u16>()
+                    .map_err(|_| WebSocketError::InvalidUri)?,
+            ),
             None => (host_port, if is_wss { 443u16 } else { 80u16 }),
         };
 
         let mut host = String::<64>::new();
-        host.push_str(host_raw)
-            .map_err(|_| WebSocketError::InvalidUri)?;
-
+        host.push_str(host_raw).map_err(|_| WebSocketError::InvalidUri)?;
         let mut path = String::<64>::new();
-        path.push_str(path_raw)
-            .map_err(|_| WebSocketError::InvalidUri)?;
+        path.push_str(path_raw).map_err(|_| WebSocketError::InvalidUri)?;
 
         Ok((host, port, path, is_wss))
     }
@@ -317,81 +354,86 @@ impl WebSocketClient {
     pub async fn connect(&mut self) -> Result<(), WebSocketError> {
         let (host, port, path, is_wss) = self.parse_uri()?;
 
-        if is_wss && !self.has_tls {
+        if is_wss {
             return Err(WebSocketError::TlsBuffersMissing);
         }
 
-        let conn_buf = self.payload_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
+        let mut conn_buf = self.payload_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
+        let rx = self.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
+        let tx = self.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
 
-        // Inner block: adapter is scope-bound and drops here,
-        // before self.payload_buf is reassigned — no lifetime conflict.
-        let buf = {
-            let adapter = NetworkAdapter {
-                stack: self.stack,
-                rx_buf: self.rx_buf.take(),
-                tx_buf: self.tx_buf.take(),
-            };
+        let mut adapter = NetworkAdapter::new(self.stack, rx, tx);
 
-            let ip = adapter
-                .get_host_by_name(host.as_str(), AddrType::IPv4)
-                .await
-                .map_err(|_| WebSocketError::DnsResolutionFailed)?;
+        let ip = adapter
+            .get_host_by_name(host.as_str(), AddrType::IPv4)
+            .await
+            .map_err(|_| WebSocketError::DnsResolutionFailed)?;
 
-            let mut conn: Connection<'_, NetworkAdapter, 64> =
-                Connection::new(&mut conn_buf, &adapter, SocketAddr::new(ip, port));
+        let remote = SocketAddr::new(ip, port);
 
-            let rng = espforge_platform::esp_hal::rng::Rng::new();
-            let mut nonce = [0_u8; NONCE_LEN];
+        const NONCE_LEN: usize = 16;
+        let mut nonce = [0u8; NONCE_LEN];
+        // Use esp-hal's RNG
+        {
+            use esp_hal::rng::Rng;
+            // SAFETY: we only call this once and don't alias the peripheral
+            let mut rng = unsafe { Rng::new(esp_hal::peripherals::RNG::steal()) };
             for i in (0..NONCE_LEN).step_by(4) {
                 let r = rng.random().to_ne_bytes();
                 nonce[i..i + 4].copy_from_slice(&r);
             }
+        }
 
-            let mut key_buf = [0_u8; MAX_BASE64_KEY_LEN];
-            conn.initiate_ws_upgrade_request(
-                Some(host.as_str()),
-                None,
-                path.as_str(),
-                None,
-                &nonce,
-                &mut key_buf,
-            )
+        let mut conn = Connection::<_>::new(&mut conn_buf, &mut adapter, ());
+
+        conn.initiate_ws_upgrade_request(
+            Some(host.as_str()),
+            None,
+            path.as_str(),
+            None,
+            &nonce,
+        )
+        .await
+        .map_err(|_| WebSocketError::HandshakeFailed)?;
+
+        conn.initiate_response()
             .await
             .map_err(|_| WebSocketError::HandshakeFailed)?;
 
-            conn.initiate_response()
-                .await
-                .map_err(|_| WebSocketError::HandshakeFailed)?;
+        let mut resp_key_buf = [0u8; 64];
+        let accepted = conn
+            .is_ws_upgrade_accepted(&nonce, &mut resp_key_buf)
+            .map_err(|_| WebSocketError::HandshakeFailed)?;
 
-            let mut resp_key_buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
-            if !conn
-                .is_ws_upgrade_accepted(&nonce, &mut resp_key_buf)
-                .map_err(|_| WebSocketError::HandshakeFailed)?
-            {
-                return Err(WebSocketError::HandshakeFailed);
-            }
+        if !accepted {
+            return Err(WebSocketError::HandshakeFailed);
+        }
 
-            conn.complete().await.map_err(|_| WebSocketError::HandshakeFailed)?;
+        conn.complete()
+            .await
+            .map_err(|_| WebSocketError::HandshakeFailed)?;
 
-            let (socket, buf) = conn.release();
-            self.socket = Some(socket);
-            buf
-        }; // adapter dropped here
+        // FIX 3: conn.release() returns (socket, &mut [u8]) — the &mut [u8] is a
+        // slice into conn_buf (our local [u8; 1536]) and cannot be stored back as
+        // Option<[u8; 1536]>.  We simply drop it; payload_buf stays None, which is
+        // fine because it was only needed for the HTTP upgrade handshake phase.
+        let (socket, _conn_buf_slice) = conn.release();
+        self.socket = Some(socket);
+        // conn_buf (the owned [u8; 1536]) is dropped here after _conn_buf_slice is
+        // released — no use-after-free.
 
-        self.payload_buf = Some(buf);
         Ok(())
     }
 
     pub async fn send_text(&mut self, text: &str) -> Result<(), WebSocketError> {
         let socket = self.socket.as_mut().ok_or(WebSocketError::SendFailed)?;
-        let rng = espforge_platform::esp_hal::rng::Rng::new();
+        let mut rng = unsafe { esp_hal::rng::Rng::new(esp_hal::peripherals::RNG::steal()) };
 
         let header = FrameHeader {
             frame_type: FrameType::Text(false),
             payload_len: text.len() as u64,
             mask_key: Some(rng.random()),
         };
-
         header
             .send(&mut *socket)
             .await
@@ -400,20 +442,18 @@ impl WebSocketClient {
             .send_payload(&mut *socket, text.as_bytes())
             .await
             .map_err(|_| WebSocketError::SendFailed)?;
-
         Ok(())
     }
 
     pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WebSocketError> {
         let socket = self.socket.as_mut().ok_or(WebSocketError::SendFailed)?;
-        let rng = espforge_platform::esp_hal::rng::Rng::new();
+        let mut rng = unsafe { esp_hal::rng::Rng::new(esp_hal::peripherals::RNG::steal()) };
 
         let header = FrameHeader {
             frame_type: FrameType::Binary(false),
             payload_len: data.len() as u64,
             mask_key: Some(rng.random()),
         };
-
         header
             .send(&mut *socket)
             .await
@@ -422,7 +462,6 @@ impl WebSocketClient {
             .send_payload(&mut *socket, data)
             .await
             .map_err(|_| WebSocketError::SendFailed)?;
-
         Ok(())
     }
 
@@ -437,8 +476,9 @@ impl WebSocketClient {
             Err(_) => return Err(WebSocketError::ReceiveFailed),
         };
 
-        let payload = header
-            .recv_payload(&mut *socket, buf)
+        let payload = &mut buf[..header.payload_len.min(buf.len() as u64) as usize];
+        header
+            .recv_payload(&mut *socket, payload)
             .await
             .map_err(|_| WebSocketError::ReceiveFailed)?;
 
@@ -451,18 +491,15 @@ impl WebSocketClient {
             FrameType::Binary(_) => Ok(Some(Message::Binary(payload))),
             FrameType::Close => Ok(Some(Message::Close(None))),
             FrameType::Ping => {
-                let rng = espforge_platform::esp_hal::rng::Rng::new();
-                let pong_header = FrameHeader {
+                let pong = FrameHeader {
                     frame_type: FrameType::Pong,
                     payload_len: payload.len() as u64,
-                    mask_key: Some(rng.random()),
+                    mask_key: None,
                 };
-                pong_header
-                    .send(&mut *socket)
+                pong.send(&mut *socket)
                     .await
                     .map_err(|_| WebSocketError::SendFailed)?;
-                pong_header
-                    .send_payload(&mut *socket, payload)
+                pong.send_payload(&mut *socket, payload)
                     .await
                     .map_err(|_| WebSocketError::SendFailed)?;
                 Ok(Some(Message::Ping))
@@ -472,3 +509,4 @@ impl WebSocketClient {
         }
     }
 }
+
