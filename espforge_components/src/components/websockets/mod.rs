@@ -1,7 +1,13 @@
 use core::fmt;
+use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use espforge_platform::embassy_net::Stack;
 use heapless::String;
+
+use edge_http::io::client::Connection;
+use edge_http::ws::{MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
+use edge_nal::{AddrType, Dns, TcpConnect};
+use edge_ws::{FrameHeader, FrameType};
 
 #[derive(Debug)]
 pub enum Message<'a> {
@@ -44,22 +50,11 @@ impl fmt::Display for WebSocketError {
 }
 
 // ── Resources ────────────────────────────────────────────────────────────────
-//
-// Buffer sizes are kept small (1536 bytes each) so that the StaticCell for
-// this struct fits within the esp32c3's dram2_uninit segment.
-//
-// The old design stored Option<[u8; 16640]> inline for TLS buffers; even when
-// None, Rust still reserves the full 16641 bytes in the struct layout, causing
-// a ~33 KB overflow of dram2_uninit. TLS buffers must be allocated as separate
-// statics if ever needed.
 
 pub struct WebSocketResources {
     pub rx_buf: [u8; 1536],
     pub tx_buf: [u8; 1536],
     pub payload_buf: [u8; 1536],
-    /// True when the client was created with `new_with_tls()`. The actual TLS
-    /// byte arrays must live in their own `static` items to avoid DRAM
-    /// overflow — this flag just records the intent.
     pub has_tls: bool,
 }
 
@@ -89,17 +84,69 @@ impl Default for WebSocketResources {
     }
 }
 
+// ── Network Adapter ──────────────────────────────────────────────────────────
+
+/// A thin bridge between `embassy-net` and `edge-nal` traits 
+pub struct NetworkAdapter<'a> {
+    stack: Stack<'static>,
+    rx_buf: core::cell::RefCell<Option<&'a mut [u8]>>,
+    tx_buf: core::cell::RefCell<Option<&'a mut [u8]>>,
+}
+
+impl<'a> Dns for NetworkAdapter<'a> {
+    type Error = espforge_platform::embassy_net::dns::Error;
+    
+    async fn get_host_by_name(&self, host: &str, _addr_type: AddrType) -> Result<IpAddr, Self::Error> {
+        let addrs = self.stack.dns_query(host, espforge_platform::embassy_net::dns::DnsQueryType::A).await?;
+        if let Some(espforge_platform::embassy_net::IpAddress::Ipv4(v4)) = addrs.first() {
+            let mut octets = [0u8; 4];
+            octets.copy_from_slice(v4.as_bytes());
+            Ok(IpAddr::V4(Ipv4Addr::from(octets)))
+        } else {
+            Err(espforge_platform::embassy_net::dns::Error::Failed)
+        }
+    }
+    
+    async fn get_host_by_address(&self, _addr: IpAddr, _result: &mut [u8]) -> Result<usize, Self::Error> {
+        Err(espforge_platform::embassy_net::dns::Error::Failed)
+    }
+}
+
+impl<'a> TcpConnect for NetworkAdapter<'a> {
+    type Error = espforge_platform::embassy_net::tcp::ConnectError;
+    type Socket<'m> = espforge_platform::embassy_net::tcp::TcpSocket<'a> where Self: 'm;
+    
+    async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
+        let mut socket = espforge_platform::embassy_net::tcp::TcpSocket::new(
+            self.stack,
+            self.rx_buf.borrow_mut().take().unwrap(),
+            self.tx_buf.borrow_mut().take().unwrap(),
+        );
+        let addr = espforge_platform::embassy_net::IpEndpoint::new(
+            match remote.ip() {
+                IpAddr::V4(v4) => espforge_platform::embassy_net::IpAddress::Ipv4(espforge_platform::embassy_net::Ipv4Address::from_bytes(&v4.octets())),
+                IpAddr::V6(_) => panic!("IPv6 not supported"),
+            },
+            remote.port(),
+        );
+        socket.connect(addr).await?;
+        Ok(socket)
+    }
+}
+
 // ── Client ───────────────────────────────────────────────────────────────────
 
 pub struct WebSocketClient<'a> {
     stack: Stack<'static>,
     uri: String<128>,
-    resources: &'a mut WebSocketResources,
+    socket: Option<espforge_platform::embassy_net::tcp::TcpSocket<'a>>,
+    payload_buf: Option<&'a mut [u8]>,
+    rx_buf: Option<&'a mut [u8]>,
+    tx_buf: Option<&'a mut [u8]>,
+    has_tls: bool,
 }
 
 impl<'a> WebSocketClient<'a> {
-    /// Argument order matches what the espforge codegen emits:
-    /// `WebSocketClient::new(stack, resources, uri)`
     pub fn new(
         stack: Stack<'static>,
         resources: &'a mut WebSocketResources,
@@ -107,14 +154,21 @@ impl<'a> WebSocketClient<'a> {
     ) -> Self {
         let mut s = String::new();
         let _ = s.push_str(uri);
-        Self { stack, uri: s, resources }
+        
+        Self {
+            stack,
+            uri: s, 
+            socket: None,
+            payload_buf: Some(&mut resources.payload_buf),
+            rx_buf: Some(&mut resources.rx_buf),
+            tx_buf: Some(&mut resources.tx_buf),
+            has_tls: resources.has_tls,
+        }
     }
 
     pub fn is_connected(&self) -> bool {
         self.stack.is_link_up() && self.stack.config_v4().is_some()
     }
-
-    // ── Parse URI ────────────────────────────────────────────────────────────
 
     fn parse_uri(&self) -> Result<(String<64>, u16, String<64>, bool), WebSocketError> {
         let s = self.uri.as_str();
@@ -151,73 +205,132 @@ impl<'a> WebSocketClient<'a> {
         Ok((host, port, path, is_wss))
     }
 
-    // ── Connect ──────────────────────────────────────────────────────────────
-
-    /// Perform DNS resolution and TCP connect.
-    ///
-    /// NOTE: The WebSocket HTTP upgrade handshake is not yet implemented —
-    /// connection is established at the TCP level only.
+    /// Perform DNS resolution, TCP connect, and edge-http WebSocket handshake.
     pub async fn connect(&mut self) -> Result<(), WebSocketError> {
-        use espforge_platform::embassy_net::dns::DnsQueryType;
-        use espforge_platform::embassy_net::tcp::TcpSocket;
+        let (host, port, path, is_wss) = self.parse_uri()?;
 
-        let (host, port, _path, is_wss) = self.parse_uri()?;
-
-        if is_wss && !self.resources.has_tls {
+        if is_wss && !self.has_tls {
             return Err(WebSocketError::TlsBuffersMissing);
         }
 
-        // DNS resolution
-        let addrs = self
-            .stack
-            .dns_query(host.as_str(), DnsQueryType::A)
+        // Configure network adapter
+        let adapter = NetworkAdapter {
+            stack: self.stack,
+            rx_buf: core::cell::RefCell::new(self.rx_buf.take()),
+            tx_buf: core::cell::RefCell::new(self.tx_buf.take()),
+        };
+
+        // Perform DNS via the NAL adapter
+        let ip = adapter.get_host_by_name(host.as_str(), AddrType::IPv4)
             .await
             .map_err(|_| WebSocketError::DnsResolutionFailed)?;
 
-        let ip = addrs.first().copied().ok_or(WebSocketError::DnsResolutionFailed)?;
+        let conn_buf = self.payload_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
+        let mut conn = Connection::new(conn_buf, &adapter, SocketAddr::new(ip, port));
 
-        let endpoint = espforge_platform::embassy_net::IpEndpoint::new(ip.into(), port);
-
-        // TCP connect
-        let mut socket = TcpSocket::new(
-            self.stack,
-            &mut self.resources.rx_buf,
-            &mut self.resources.tx_buf,
-        );
-
-        socket
-            .connect(endpoint)
-            .await
-            .map_err(|_| WebSocketError::ConnectionFailed)?;
-
-        if is_wss {
-            // wss:// requires TLS which is not yet implemented in this scaffold.
-            return Err(WebSocketError::TlsBuffersMissing);
+        // Setup RNG and Nonce Buffers
+        let mut rng = espforge_platform::esp_hal::rng::Rng::new(unsafe { espforge_platform::esp_hal::peripherals::RNG::steal() });
+        let mut nonce = [0_u8; NONCE_LEN];
+        for i in (0..NONCE_LEN).step_by(4) {
+            let r = rng.random().to_ne_bytes();
+            nonce[i..i+4].copy_from_slice(&r);
         }
 
-        // TODO: perform the WebSocket HTTP upgrade handshake over `socket`
-        // once a compatible library is integrated.
+        let mut key_buf = [0_u8; MAX_BASE64_KEY_LEN];
+        conn.initiate_ws_upgrade_request(Some(host.as_str()), None, path.as_str(), None, &nonce, &mut key_buf)
+            .await
+            .map_err(|_| WebSocketError::HandshakeFailed)?;
+            
+        conn.initiate_response().await.map_err(|_| WebSocketError::HandshakeFailed)?;
 
+        let mut resp_key_buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
+        if !conn.is_ws_upgrade_accepted(&nonce, &mut resp_key_buf).map_err(|_| WebSocketError::HandshakeFailed)? {
+            return Err(WebSocketError::HandshakeFailed);
+        }
+
+        conn.complete().await.map_err(|_| WebSocketError::HandshakeFailed)?;
+
+        // Connection Upgraded. Release ownership of the connected TCP socket
+        let (socket, buf) = conn.release();
+        
+        self.socket = Some(socket);
+        self.payload_buf = Some(buf); // Re-take ownership for payload reads/writes
         Ok(())
     }
 
-    // ── Send ─────────────────────────────────────────────────────────────────
+    pub async fn send_text(&mut self, text: &str) -> Result<(), WebSocketError> {
+        let socket = self.socket.as_mut().ok_or(WebSocketError::SendFailed)?;
+        let mut rng = espforge_platform::esp_hal::rng::Rng::new(unsafe { espforge_platform::esp_hal::peripherals::RNG::steal() });
+        
+        let header = FrameHeader {
+            frame_type: FrameType::Text(false),
+            payload_len: text.len() as u64,
+            mask_key: Some(rng.random()),
+        };
 
-    pub async fn send_text(&mut self, _text: &str) -> Result<(), WebSocketError> {
-        Err(WebSocketError::SendFailed)
+        header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
+        header.send_payload(socket, text.as_bytes()).await.map_err(|_| WebSocketError::SendFailed)?;
+        
+        Ok(())
     }
 
-    pub async fn send_binary(&mut self, _data: &[u8]) -> Result<(), WebSocketError> {
-        Err(WebSocketError::SendFailed)
-    }
+    pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WebSocketError> {
+        let socket = self.socket.as_mut().ok_or(WebSocketError::SendFailed)?;
+        let mut rng = espforge_platform::esp_hal::rng::Rng::new(unsafe { espforge_platform::esp_hal::peripherals::RNG::steal() });
+        
+        let header = FrameHeader {
+            frame_type: FrameType::Binary(false),
+            payload_len: data.len() as u64,
+            mask_key: Some(rng.random()),
+        };
 
-    // ── Receive ──────────────────────────────────────────────────────────────
+        header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
+        header.send_payload(socket, data).await.map_err(|_| WebSocketError::SendFailed)?;
+        
+        Ok(())
+    }
 
     pub async fn receive<'b>(
         &mut self,
-        _buf: &'b mut [u8],
+        buf: &'b mut [u8],
     ) -> Result<Option<Message<'b>>, WebSocketError> {
-        Ok(None)
+        let socket = self.socket.as_mut().ok_or(WebSocketError::ReceiveFailed)?;
+        
+        let header = match FrameHeader::recv(socket).await {
+            Ok(h) => h,
+            Err(_) => return Err(WebSocketError::ReceiveFailed),
+        };
+        
+        let payload = header.recv_payload(socket, buf).await.map_err(|_| WebSocketError::ReceiveFailed)?;
+        
+        match header.frame_type {
+            FrameType::Text(_) => {
+                let text = core::str::from_utf8(payload).map_err(|_| WebSocketError::ProtocolError)?;
+                Ok(Some(Message::Text(text)))
+            }
+            FrameType::Binary(_) => {
+                Ok(Some(Message::Binary(payload)))
+            }
+            FrameType::Close => {
+                Ok(Some(Message::Close(None)))
+            }
+            FrameType::Ping => {
+                // Automatically bounce back a Pong in response to a Ping frame. (Clients must mask)
+                let mut rng = espforge_platform::esp_hal::rng::Rng::new(unsafe { espforge_platform::esp_hal::peripherals::RNG::steal() });
+                let pong_header = FrameHeader {
+                    frame_type: FrameType::Pong,
+                    payload_len: payload.len() as u64,
+                    mask_key: Some(rng.random()),
+                };
+                pong_header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
+                pong_header.send_payload(socket, payload).await.map_err(|_| WebSocketError::SendFailed)?;
+                Ok(Some(Message::Ping))
+            }
+            FrameType::Pong => {
+                Ok(Some(Message::Pong))
+            }
+            _ => Err(WebSocketError::UnexpectedFrame),
+        }
     }
 }
 
