@@ -66,18 +66,18 @@ pub struct WebSocketResources {
 impl WebSocketResources {
     pub const fn new() -> Self {
         Self {
-            rx_buf: 8; 1536],
-            tx_buf: 8; 1536],
-            payload_buf: 8; 1536],
+            rx_buf: [8; 1536],
+            tx_buf: [8; 1536],
+            payload_buf: [8; 1536],
             has_tls: false,
         }
     }
 
     pub const fn new_with_tls() -> Self {
         Self {
-            rx_buf: 8; 1536],
-            tx_buf: 8; 1536],
-            payload_buf: 8; 1536],
+            rx_buf: [8; 1536],
+            tx_buf: [8; 1536],
+            payload_buf: [8; 1536],
             has_tls: true,
         }
     }
