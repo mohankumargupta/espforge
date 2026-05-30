@@ -1,10 +1,3 @@
-// espforge_components/src/components/websockets/mod.rs
-// 
-// Three fixes applied:
-//  1. TcpConnect::connect takes &self (not &mut self) - trait requirement
-//  2. NetworkAdapter holds buffers in RefCell so &self can mutably access them
-//  3. After conn.release(), don't assign &mut [u8] back to Option<[u8; 1536]>
-
 use core::fmt;
 use core::cell::RefCell;
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -12,8 +5,10 @@ use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 use espforge_platform::embassy_net::Stack;
 use heapless::String;
 use edge_http::io::client::Connection;
-use edge_nal::{AddrType, Dns, TcpConnect};
+use edge_nal::AddrType;
 use edge_ws::{FrameHeader, FrameType};
+
+// ── Public message type ───────────────────────────────────────────────────────
 
 pub enum Message<'a> {
     Text(&'a str),
@@ -22,6 +17,8 @@ pub enum Message<'a> {
     Pong,
     Close(Option<&'a str>),
 }
+
+// ── Errors ────────────────────────────────────────────────────────────────────
 
 pub enum WebSocketError {
     DnsResolutionFailed,
@@ -39,17 +36,19 @@ impl fmt::Display for WebSocketError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DnsResolutionFailed => write!(f, "DNS resolution failed"),
-            Self::ConnectionFailed   => write!(f, "Connection failed"),
-            Self::HandshakeFailed   => write!(f, "WebSocket handshake failed"),
-            Self::SendFailed        => write!(f, "Send failed"),
-            Self::ReceiveFailed     => write!(f, "Receive failed"),
-            Self::InvalidUri        => write!(f, "Invalid WebSocket URI"),
-            Self::TlsBuffersMissing => write!(f, "TLS buffers required for wss://"),
-            Self::ProtocolError     => write!(f, "WebSocket protocol error"),
-            Self::UnexpectedFrame   => write!(f, "Unexpected WebSocket frame type"),
+            Self::ConnectionFailed    => write!(f, "Connection failed"),
+            Self::HandshakeFailed     => write!(f, "WebSocket handshake failed"),
+            Self::SendFailed          => write!(f, "Send failed"),
+            Self::ReceiveFailed       => write!(f, "Receive failed"),
+            Self::InvalidUri          => write!(f, "Invalid WebSocket URI"),
+            Self::TlsBuffersMissing   => write!(f, "TLS buffers required for wss://"),
+            Self::ProtocolError       => write!(f, "WebSocket protocol error"),
+            Self::UnexpectedFrame     => write!(f, "Unexpected WebSocket frame type"),
         }
     }
 }
+
+// ── Resources ─────────────────────────────────────────────────────────────────
 
 pub struct WebSocketResources {
     rx_buf: Option<[u8; 1536]>,
@@ -77,13 +76,27 @@ impl Default for WebSocketResources {
     }
 }
 
+// ── DnsError / NetError ───────────────────────────────────────────────────────
+//
+// embedded-io 0.7 requires Error: core::error::Error.
+// In no_std we implement core::error::Error manually (it has no required methods).
+
 pub struct DnsError;
 
 impl fmt::Display for DnsError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DNS error")
+    }
+}
+
+impl fmt::Debug for DnsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "DnsError")
     }
 }
+
+// core::error::Error has no required methods in Rust ≥ 1.81 (stabilised for no_std).
+impl core::error::Error for DnsError {}
 
 impl embedded_io_async::Error for DnsError {
     fn kind(&self) -> embedded_io_async::ErrorKind {
@@ -94,16 +107,26 @@ impl embedded_io_async::Error for DnsError {
 pub struct NetError;
 
 impl fmt::Display for NetError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Network error")
+    }
+}
+
+impl fmt::Debug for NetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "NetError")
     }
 }
+
+impl core::error::Error for NetError {}
 
 impl embedded_io_async::Error for NetError {
     fn kind(&self) -> embedded_io_async::ErrorKind {
         embedded_io_async::ErrorKind::Other
     }
 }
+
+// ── MyTcpSocket ───────────────────────────────────────────────────────────────
 
 pub struct MyTcpSocket {
     socket: espforge_platform::embassy_net::tcp::TcpSocket<'static>,
@@ -147,6 +170,8 @@ impl edge_nal::TcpShutdown for MyTcpSocket {
     }
 }
 
+// TcpSplit is required by edge-nal; we provide a no-op implementation since
+// we always use the socket as a whole, never split.
 pub struct DummyHalf;
 
 impl embedded_io_async::ErrorType for DummyHalf {
@@ -182,13 +207,8 @@ impl edge_nal::TcpSplit for MyTcpSocket {
 
 // ── NetworkAdapter ────────────────────────────────────────────────────────────
 //
-// FIX 1 + 2:
-//   - The edge-nal 0.6 TcpConnect trait requires `connect(&self, ...)`, not `&mut self`.
-//   - Buffers are stored as RefCell<[u8; 1536]> (owned arrays, not Options) so we can
-//     call borrow_mut() inside &self methods.
-//   - The resulting TcpSocket<'_> borrows from the RefCell guards, which live for the
-//     duration of the connect() call — long enough because the socket is moved into
-//     WebSocketClient before NetworkAdapter is dropped.
+// Holds the TCP socket buffers in RefCell so that TcpConnect::connect, which
+// takes &self per the trait definition, can still access them mutably.
 
 pub struct NetworkAdapter {
     stack: Stack<'static>,
@@ -219,6 +239,7 @@ impl edge_nal::Dns for NetworkAdapter {
             .dns_query(host, espforge_platform::embassy_net::dns::DnsQueryType::A)
             .await
             .map_err(|_| DnsError)?;
+
         if let Some(espforge_platform::embassy_net::IpAddress::Ipv4(v4)) = addrs.first() {
             let mut octets = [0u8; 4];
             octets.copy_from_slice(&v4.octets());
@@ -241,10 +262,7 @@ impl edge_nal::TcpConnect for NetworkAdapter {
     type Error = NetError;
     type Socket<'m> = MyTcpSocket where Self: 'm;
 
-    // FIX 1: &self instead of &mut self (matches the trait signature).
-    // FIX 2: borrow_mut() on the RefCell fields gives us &mut [u8] without
-    //         needing &mut self. The MutexGuards keep the borrows alive for
-    //         the lifetime of `socket`.
+    // Trait requires &self. Buffers are accessed via RefCell borrow_mut().
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut rx = self.rx_buf.borrow_mut();
         let mut tx = self.tx_buf.borrow_mut();
@@ -267,11 +285,9 @@ impl edge_nal::TcpConnect for NetworkAdapter {
 
         socket.connect(addr).await.map_err(|_| NetError)?;
 
-        // The socket borrows rx/tx which are RefMut guards scoped to this function.
-        // We need it to outlive this call. Since WebSocketClient owns the buffers
-        // for the lifetime of the connection, we extend via transmute.
-        // SAFETY: the buffers in self (NetworkAdapter) live for the entire
-        // WebSocketClient::connect() scope, which is longer than this call.
+        // SAFETY: The NetworkAdapter (and its RefCell buffers) lives for the
+        // entire WebSocketClient::connect() scope, which outlives any use of
+        // the returned socket within that scope.
         let socket = unsafe {
             core::mem::transmute::<
                 espforge_platform::embassy_net::tcp::TcpSocket<'_>,
@@ -350,7 +366,7 @@ impl WebSocketClient {
         Ok((host, port, path, is_wss))
     }
 
-    /// Perform DNS resolution, TCP connect, and edge-http WebSocket handshake.
+    /// Perform DNS resolution, TCP connect, and WebSocket upgrade handshake.
     pub async fn connect(&mut self) -> Result<(), WebSocketError> {
         let (host, port, path, is_wss) = self.parse_uri()?;
 
@@ -362,8 +378,10 @@ impl WebSocketClient {
         let rx = self.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
         let tx = self.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
 
-        let mut adapter = NetworkAdapter::new(self.stack, rx, tx);
+        let adapter = NetworkAdapter::new(self.stack, rx, tx);
 
+        // Resolve DNS
+        use edge_nal::Dns;
         let ip = adapter
             .get_host_by_name(host.as_str(), AddrType::IPv4)
             .await
@@ -371,27 +389,25 @@ impl WebSocketClient {
 
         let remote = SocketAddr::new(ip, port);
 
+        // Generate random nonce using the platform RNG wrapper (no esp_hal dep needed here)
         const NONCE_LEN: usize = 16;
         let mut nonce = [0u8; NONCE_LEN];
-        // Use esp-hal's RNG
-        {
-            use esp_hal::rng::Rng;
-            // SAFETY: we only call this once and don't alias the peripheral
-            let mut rng = unsafe { Rng::new(esp_hal::peripherals::RNG::steal()) };
-            for i in (0..NONCE_LEN).step_by(4) {
-                let r = rng.random().to_ne_bytes();
-                nonce[i..i + 4].copy_from_slice(&r);
-            }
-        }
+        // SAFETY: called once, peripheral released before next use
+        unsafe { espforge_platform::rng::Rng::new() }.fill_bytes(&mut nonce);
 
-        let mut conn = Connection::<_>::new(&mut conn_buf, &mut adapter, ());
+        // edge-http 0.7: Connection::new(buf, socket, addr: SocketAddr)
+        let mut conn = Connection::<_>::new(&mut conn_buf, &adapter, remote);
 
+        // initiate_ws_upgrade_request has 6 parameters in edge-http 0.7:
+        //   host, origin, path, extra_headers, nonce, headers_buf: &mut [u8; 28]
+        let mut headers_buf = [0u8; 28];
         conn.initiate_ws_upgrade_request(
             Some(host.as_str()),
             None,
             path.as_str(),
             None,
             &nonce,
+            &mut headers_buf,
         )
         .await
         .map_err(|_| WebSocketError::HandshakeFailed)?;
@@ -400,7 +416,8 @@ impl WebSocketClient {
             .await
             .map_err(|_| WebSocketError::HandshakeFailed)?;
 
-        let mut resp_key_buf = [0u8; 64];
+        // is_ws_upgrade_accepted takes &mut [u8; 33] in edge-http 0.7
+        let mut resp_key_buf = [0u8; 33];
         let accepted = conn
             .is_ws_upgrade_accepted(&nonce, &mut resp_key_buf)
             .map_err(|_| WebSocketError::HandshakeFailed)?;
@@ -413,31 +430,26 @@ impl WebSocketClient {
             .await
             .map_err(|_| WebSocketError::HandshakeFailed)?;
 
-        // FIX 3: conn.release() returns (socket, &mut [u8]) — the &mut [u8] is a
-        // slice into conn_buf (our local [u8; 1536]) and cannot be stored back as
-        // Option<[u8; 1536]>.  We simply drop it; payload_buf stays None, which is
-        // fine because it was only needed for the HTTP upgrade handshake phase.
-        let (socket, _conn_buf_slice) = conn.release();
+        // conn.release() returns (socket, &mut [u8]) — the slice borrows conn_buf.
+        // We take the socket and drop everything else; payload_buf stays None,
+        // which is fine since it was only needed for the HTTP upgrade phase.
+        let (socket, _) = conn.release();
         self.socket = Some(socket);
-        // conn_buf (the owned [u8; 1536]) is dropped here after _conn_buf_slice is
-        // released — no use-after-free.
 
         Ok(())
     }
 
     pub async fn send_text(&mut self, text: &str) -> Result<(), WebSocketError> {
         let socket = self.socket.as_mut().ok_or(WebSocketError::SendFailed)?;
-        let mut rng = unsafe { esp_hal::rng::Rng::new(esp_hal::peripherals::RNG::steal()) };
+        // SAFETY: called once per send, peripheral released immediately
+        let mask_key = unsafe { espforge_platform::rng::Rng::new() }.random_u32();
 
         let header = FrameHeader {
             frame_type: FrameType::Text(false),
             payload_len: text.len() as u64,
-            mask_key: Some(rng.random()),
+            mask_key: Some(mask_key),
         };
-        header
-            .send(&mut *socket)
-            .await
-            .map_err(|_| WebSocketError::SendFailed)?;
+        header.send(&mut *socket).await.map_err(|_| WebSocketError::SendFailed)?;
         header
             .send_payload(&mut *socket, text.as_bytes())
             .await
@@ -447,17 +459,14 @@ impl WebSocketClient {
 
     pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WebSocketError> {
         let socket = self.socket.as_mut().ok_or(WebSocketError::SendFailed)?;
-        let mut rng = unsafe { esp_hal::rng::Rng::new(esp_hal::peripherals::RNG::steal()) };
+        let mask_key = unsafe { espforge_platform::rng::Rng::new() }.random_u32();
 
         let header = FrameHeader {
             frame_type: FrameType::Binary(false),
             payload_len: data.len() as u64,
-            mask_key: Some(rng.random()),
+            mask_key: Some(mask_key),
         };
-        header
-            .send(&mut *socket)
-            .await
-            .map_err(|_| WebSocketError::SendFailed)?;
+        header.send(&mut *socket).await.map_err(|_| WebSocketError::SendFailed)?;
         header
             .send_payload(&mut *socket, data)
             .await
@@ -471,12 +480,14 @@ impl WebSocketClient {
     ) -> Result<Option<Message<'b>>, WebSocketError> {
         let socket = self.socket.as_mut().ok_or(WebSocketError::ReceiveFailed)?;
 
-        let header = match FrameHeader::recv(&mut *socket).await {
-            Ok(h) => h,
-            Err(_) => return Err(WebSocketError::ReceiveFailed),
-        };
+        let header = FrameHeader::recv(&mut *socket)
+            .await
+            .map_err(|_| WebSocketError::ReceiveFailed)?;
 
-        let payload = &mut buf[..header.payload_len.min(buf.len() as u64) as usize];
+        // FIX: compute the length first so we only hold one borrow on `buf`
+        let len = header.payload_len.min(buf.len() as u64) as usize;
+        let payload = &mut buf[..len];
+
         header
             .recv_payload(&mut *socket, payload)
             .await
