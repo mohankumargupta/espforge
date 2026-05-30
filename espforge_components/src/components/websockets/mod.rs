@@ -312,7 +312,7 @@ impl<'a> WebSocketClient<'a> {
         // adapter lives only through the handshake block, so it drops before
         // self.payload_buf is reassigned below — preventing the lifetime conflict.
         let buf = {
-            let adapter: NetworkAdapter<'a> = NetworkAdapter {
+            let adapter: NetworkAdapter<'_> = NetworkAdapter {
                 stack: self.stack,
                 rx_buf: core::cell::RefCell::new(self.rx_buf.take()),
                 tx_buf: core::cell::RefCell::new(self.tx_buf.take()),
