@@ -4,8 +4,14 @@ use espforge_macros::ComponentPlugin;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
+// pub_use re-exports Message into the generated crate's root so user app.rs
+// can write: use crate::{ Context, component, Message };
 #[derive(ComponentPlugin)]
-#[plugin(name = "WebSocketClient", features = "websockets")]
+#[plugin(
+    name = "WebSocketClient",
+    features = "websockets",
+    pub_use = "espforge_components::components::websockets::Message"
+)]
 pub struct WebSocketClientPlugin;
 
 impl WebSocketClientPlugin {
@@ -48,19 +54,10 @@ impl WebSocketClientPlugin {
 
         let resources_cell = format_ident!("{}_WS_RESOURCES", instance_name.to_uppercase());
 
-        // Static cell holding the WebSocketResources (unchanged from before).
-        let static_decl: TokenStream = if needs_tls {
-            quote! {
-                static #resources_cell: static_cell::StaticCell<
-                    espforge_components::components::websockets::WebSocketResources
-                > = static_cell::StaticCell::new();
-            }
-        } else {
-            quote! {
-                static #resources_cell: static_cell::StaticCell<
-                    espforge_components::components::websockets::WebSocketResources
-                > = static_cell::StaticCell::new();
-            }
+        let static_decl: TokenStream = quote! {
+            static #resources_cell: static_cell::StaticCell<
+                espforge_components::components::websockets::WebSocketResources
+            > = static_cell::StaticCell::new();
         };
 
         // Field type — WebSocketClient has no lifetime parameter.
@@ -68,7 +65,6 @@ impl WebSocketClientPlugin {
             pub #field_ident: espforge_components::components::websockets::WebSocketClient
         };
 
-        // Initialisation — correct arg order: (stack, uri, resources).
         let resources_init = if needs_tls {
             quote! {
                 espforge_components::components::websockets::WebSocketResources::new_with_tls()
@@ -79,6 +75,7 @@ impl WebSocketClientPlugin {
             }
         };
 
+        // Correct arg order: (stack, uri, resources)
         let init: TokenStream = quote! {
             #static_decl
             let resources = #resources_cell.init(#resources_init);

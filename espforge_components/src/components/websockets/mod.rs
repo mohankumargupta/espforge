@@ -20,6 +20,7 @@ pub enum Message<'a> {
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
+ #[derive(Debug)]
 pub enum WebSocketError {
     DnsResolutionFailed,
     ConnectionFailed,
