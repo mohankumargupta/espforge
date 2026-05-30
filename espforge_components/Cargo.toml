@@ -12,6 +12,11 @@ homepage.workspace = true
 documentation.workspace = true
 
 [dependencies]
+edge-ws = { version = "0.7", optional = true }
+edge-http = { version = "0.7", optional = true } # Needed for upgrade logic
+edge-net = { version = "0.13.1", optional = true }
+embedded-tls = { version = "0.18", optional = true }
+rand_core = { version = "0.10", optional = true }
 espforge_common = { version = "0.1.7", path = "../espforge_common", default-features = false }
 espforge_platform = { version = "0.1.14", path = "../espforge_platform" }
 embedded-hal = "1.0.0"
@@ -30,7 +35,16 @@ led = []
 http = ["dep:reqwless", "dep:heapless", "espforge_platform/wifi"]
 std = ["espforge_common/std"]
 embassy = ["espforge_platform/embassy"]
-websockets = ["dep:heapless", "espforge_platform/wifi", "espforge_platform/tls", "dep:embedded-io-async"]
+websockets = [
+    "dep:heapless", 
+    "espforge_platform/wifi", 
+    "espforge_platform/tls", 
+    "dep:embedded-io-async",
+        "dep:edge-ws",
+    "dep:edge-http",
+    "dep:edge-net",
+    "dep:rand_core",
+]
 
 
 
