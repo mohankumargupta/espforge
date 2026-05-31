@@ -72,6 +72,7 @@ embedded-hal = "1.0.0"
 embedded-hal-bus = "0.3.0"
 embedded-io = { version = "0.7.1", default-features = false }
 embedded-graphics = "0.8.1"
+embedded-tls = { version = "0.18.0", default-features = false}
 
 #esp-hal = "1.0.0"
 esp-backtrace = "0.18.1"
@@ -118,12 +119,6 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
-
-[patch.crates-io]
-# Intercepts the crates.io version and replaces it with the Git version locally
-embedded-tls = { git = "https://github.com/drogue-iot/embedded-tls.git" }
-
-
 
 # Speed up compilation and execution of crypto dependencies
 # [profile.dev.package.p384]
