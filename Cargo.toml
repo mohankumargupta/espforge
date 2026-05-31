@@ -121,22 +121,22 @@ strip = true
 
 
 # Speed up compilation and execution of crypto dependencies
-[profile.dev.package.p384]
-opt-level = 3
-debug = false
+# [profile.dev.package.p384]
+# opt-level = 3
+# debug = false
 
-[profile.dev.package.p256]
-opt-level = 3
-debug = false
+# [profile.dev.package.p256]
+# opt-level = 3
+# debug = false
 
-[profile.dev.package.elliptic-curve]
-opt-level = 3
-debug = false
+# [profile.dev.package.elliptic-curve]
+# opt-level = 3
+# debug = false
 
-[profile.dev.package.sha2]
-opt-level = 3
-debug = false
+# [profile.dev.package.sha2]
+# opt-level = 3
+# debug = false
 
-[profile.dev.package.aes-gcm]
-opt-level = 3
-debug = false
+# [profile.dev.package.aes-gcm]
+# opt-level = 3
+# debug = false
