@@ -3298,3 +3298,8 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[patch.unused]]
+name = "embedded-tls"
+version = "0.19.0"
+source = "git+https://github.com/drogue-iot/embedded-tls.git#865e1fd983c583228e3bbeb9f4996f1abc454ca3"

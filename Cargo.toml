@@ -119,6 +119,11 @@ lto = true
 codegen-units = 1
 strip = true
 
+[patch.crates-io]
+# Intercepts the crates.io version and replaces it with the Git version locally
+embedded-tls = { git = "https://github.com/drogue-iot/embedded-tls.git" }
+
+
 
 # Speed up compilation and execution of crypto dependencies
 # [profile.dev.package.p384]
