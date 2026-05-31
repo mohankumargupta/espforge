@@ -22,7 +22,7 @@ espforge_common = { version = "0.1.7", path = "../espforge_common", default-feat
 espforge_platform = { version = "0.1.14", path = "../espforge_platform" }
 embedded-hal = "1.0.0"
 embedded-io = { version = "0.7.1", optional = true, default-features = false}
-embedded-io-async = { version = "0.7", optional = true }
+embedded-io-async = { version = "0.7", optional = true, default-features = false  }
 reqwless = { workspace = true, optional = true, default-features = false}
 heapless = { workspace = true, optional = true }
 
