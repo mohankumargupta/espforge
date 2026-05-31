@@ -181,7 +181,7 @@ impl edge_nal::Readable for MyTcpSocket {
 }
 
 // Create a wrapper for the read half
-pub struct MyTcpSocketRead<'a> {
+struct MyTcpSocketRead<'a> {
     reader: espforge_platform::embassy_net::tcp::TcpReader<'a>,
 }
 
@@ -202,7 +202,7 @@ impl<'a> edge_nal::Readable for MyTcpSocketRead<'a> {
 }
 
 // Create a wrapper for the write half
-pub struct MyTcpSocketWrite<'a> {
+struct MyTcpSocketWrite<'a> {
     writer: espforge_platform::embassy_net::tcp::TcpWriter<'a>,
 }
 
