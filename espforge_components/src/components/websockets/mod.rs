@@ -126,6 +126,9 @@ impl Default for WebSocketResources {
 
 struct DnsError;
 
+impl core::error::Error for DnsError {}
+impl core::error::Error for NetError {}
+
 impl fmt::Display for DnsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "DNS error")
@@ -168,6 +171,64 @@ struct MyTcpSocket {
 
 impl ErrorType for MyTcpSocket {
     type Error = NetError;
+}
+
+// Implement Readable for the main socket
+impl edge_nal::Readable for MyTcpSocket {
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+// Create a wrapper for the read half
+pub struct MyTcpSocketRead<'a> {
+    reader: espforge_platform::embassy_net::tcp::TcpReader<'a>,
+}
+
+impl<'a> embedded_io_async::ErrorType for MyTcpSocketRead<'a> {
+    type Error = NetError;
+}
+
+impl<'a> embedded_io_async::Read for MyTcpSocketRead<'a> {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.reader.read(buf).await.map_err(|_| NetError)
+    }
+}
+
+impl<'a> edge_nal::Readable for MyTcpSocketRead<'a> {
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+// Create a wrapper for the write half
+pub struct MyTcpSocketWrite<'a> {
+    writer: espforge_platform::embassy_net::tcp::TcpWriter<'a>,
+}
+
+impl<'a> embedded_io_async::ErrorType for MyTcpSocketWrite<'a> {
+    type Error = NetError;
+}
+
+impl<'a> embedded_io_async::Write for MyTcpSocketWrite<'a> {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.writer.write(buf).await.map_err(|_| NetError)
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.writer.flush().await.map_err(|_| NetError)
+    }
+}
+
+// Implement TcpSplit to tie it all together
+impl edge_nal::TcpSplit for MyTcpSocket {
+    type Read<'a> = MyTcpSocketRead<'a> where Self: 'a;
+    type Write<'a> = MyTcpSocketWrite<'a> where Self: 'a;
+
+    fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) {
+        let (reader, writer) = self.socket.split();
+        (MyTcpSocketRead { reader }, MyTcpSocketWrite { writer })
+    }
 }
 
 impl AsyncRead for MyTcpSocket {
