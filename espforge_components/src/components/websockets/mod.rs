@@ -362,7 +362,7 @@ impl<'b> edge_nal::TcpConnect for TlsNetworkAdapter<'b> {
 
         let tls_config = tls::TlsConfig::new()
             .with_server_name(self.host)
-            .with_cert_verification(tls::TlsVerify::None);
+            .with_cert_verification(tls::NoVerify::None);
 
         // SAFETY: read_buf and write_buf are borrowed from WebSocketClient for
         // the full duration of connect_tls(), which contains this call.
