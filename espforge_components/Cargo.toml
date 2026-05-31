@@ -17,7 +17,7 @@ edge-http = { version = "0.7", optional = true } # Needed for upgrade logic
 edge-net = { version = "0.13.1", optional = true }
 edge-nal = { version = "0.6", optional = true}
 embedded-tls = { version = "0.18", optional = true, default-features = false}
-rand_core = { version = "0.10", optional = true }
+rand_core = { version = "0.6", optional = true }
 espforge_common = { version = "0.1.7", path = "../espforge_common", default-features = false }
 espforge_platform = { version = "0.1.14", path = "../espforge_platform" }
 embedded-hal = "1.0.0"
