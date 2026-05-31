@@ -70,7 +70,7 @@ toml_edit = "0.23.9"
 
 embedded-hal = "1.0.0"
 embedded-hal-bus = "0.3.0"
-embedded-io = "0.7.1"
+embedded-io = { version = "0.7.1", default-features = false }
 embedded-graphics = "0.8.1"
 
 #esp-hal = "1.0.0"
