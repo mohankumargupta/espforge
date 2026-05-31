@@ -29,7 +29,7 @@ pub enum Message<'a> {
 }
 
 // ── Error type ─────────────────────────────────────────────────────────────────
-
+#[derive(Debug)]
 pub enum WebSocketError {
     DnsResolutionFailed,
     ConnectionFailed,
@@ -42,6 +42,7 @@ pub enum WebSocketError {
     ProtocolError,
     UnexpectedFrame,
 }
+
 
 impl fmt::Display for WebSocketError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
