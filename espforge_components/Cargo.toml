@@ -47,6 +47,7 @@ websockets = [
     "dep:edge-http",
     "dep:edge-net",
     "dep:rand_core",
+    "dep:embedded-tls",
 ]
 
 
