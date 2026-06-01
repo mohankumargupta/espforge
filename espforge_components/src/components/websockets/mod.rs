@@ -456,18 +456,16 @@ pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result
         Ok(())
     }
 
-pub async fn connect_tls<T>(
+// FIX: Remove the generic type parameter <T> and accept MyTcpSocket directly
+    pub async fn connect_tls(
         &mut self,
-        raw_socket: T, 
+        raw_socket: MyTcpSocket, 
         tls_ctx: mbedtls_rs::TlsReference<'a>,
-    ) -> Result<(), WebSocketError> 
-    where
-        T: embedded_io_async::Read + embedded_io_async::Write + 'a,
-    {
-        // FIXED: Swapped `.new()` with structural Client initialization
-        let session_config = mbedtls_rs::SessionConfig::Client; 
+    ) -> Result<(), WebSocketError> {
+        // FIX: Construct the variant using its default inner configuration
+        let session_config = mbedtls_rs::SessionConfig::Client(Default::default()); 
         
-        // Instantiate the session using your provided structural implementation
+        // Instantiate the session
         let session = mbedtls_rs::Session::new(
             tls_ctx,
             raw_socket,
@@ -475,18 +473,19 @@ pub async fn connect_tls<T>(
         )
         .map_err(|_| WebSocketError::TlsError)?;
 
-        // Wrap the session object up inside our target dynamic layout allocation type
+        // Wrap the session object up inside our target Box type
         let mut boxed_session = alloc::boxed::Box::new(session);
 
         // Establish the encrypted TLS session handshake
         boxed_session.connect().await.map_err(|_| WebSocketError::TlsError)?;
 
-        // Safely store the active session inside the client state mapping context
-        // This will safely compile because our socket parameter matches the internal struct type mapping
+        // Safely store the active session inside the client state context
+        // This will now match Box<Session<'_, MyTcpSocket>> perfectly!
         self.tls_socket = Some(boxed_session);
         Ok(())
     }
     
+
     async fn do_ws_upgrade_plain(
         &mut self,
         socket: &mut MyTcpSocket,
