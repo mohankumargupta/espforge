@@ -455,38 +455,37 @@ pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result
         Ok(())
     }
 
-pub async fn connect_tls(
+pub async fn connect_tls<T>(
         &mut self,
         raw_socket: T, 
         tls_ctx: mbedtls_rs::TlsReference<'a>,
-    ) -> Result<(), WebSocketError> {
-        let (host, _port, _path, _is_wss) = self.parse_uri()?;
-
-        // FIX: Instantiate the config using the proper root-level helper.
-        // If your target SessionConfig implementation doesn't provide `new()`, 
-        // use its Default implementation or your custom constructor variant.
-        let session_config = mbedtls_rs::SessionConfig::new(); 
+    ) -> Result<(), WebSocketError> 
+    where
+        T: embedded_io_async::Read + embedded_io_async::Write + 'a,
+    {
+        // FIXED: Swapped `.new()` with structural Client initialization
+        let session_config = mbedtls_rs::SessionConfig::Client; 
         
         // Instantiate the session using your provided structural implementation
-        let mut session = mbedtls_rs::Session::new(
+        let session = mbedtls_rs::Session::new(
             tls_ctx,
             raw_socket,
             &session_config,
         )
         .map_err(|_| WebSocketError::TlsError)?;
 
-        // Establish the encrypted TLS session handshake
-        session.connect().await.map_err(|_| WebSocketError::TlsError)?;
+        // Wrap the session object up inside our target dynamic layout allocation type
+        let mut boxed_session = alloc::boxed::Box::new(session);
 
-        // Perform your standard WebSocket upgrade handshaking sequences over the session here
-        // self.perform_websocket_handshake(&mut session, host, path).await?;
+        // Establish the encrypted TLS session handshake
+        boxed_session.connect().await.map_err(|_| WebSocketError::TlsError)?;
 
         // Safely store the active session inside the client state mapping context
-        self.tls_socket = Some(alloc::boxed::Box::new(session));
+        // This will safely compile because our socket parameter matches the internal struct type mapping
+        self.tls_socket = Some(boxed_session);
         Ok(())
     }
-
-
+    
     async fn do_ws_upgrade_plain(
         &mut self,
         socket: &mut MyTcpSocket,
