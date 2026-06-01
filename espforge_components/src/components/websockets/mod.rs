@@ -438,7 +438,7 @@ impl WebSocketClient {
         port: u16,
         path: String<64>,
     ) -> Result<(), WebSocketError> {
-        use mbedtls_rs::{Session, Certificate, Mode, TlsVersion};
+        use mbedtls_rs::{Session,Client, Certificate, TlsVersion};
 
         let rx = self.resources.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
         let tx = self.resources.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
@@ -461,7 +461,7 @@ impl WebSocketClient {
         let mut session = Session::new(
             plain_socket.socket,
             host.as_str(),
-            Mode::Client,
+            Client,
             TlsVersion::Tls1_3,
             Certificates::new(),
         )
