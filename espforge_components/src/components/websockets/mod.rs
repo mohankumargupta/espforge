@@ -486,10 +486,11 @@ async fn connect_tls(
 
         // 2. Initialize using your explicit TlsReference parameter structure
         // Assuming `self.tls_engine` is where you store your global `Tls` reference instance.
-        //let tls_ref = self.tls_engine.create_reference(); 
+        let tls_ref = self.tls_engine.create_reference(); 
+        
 
         let tcp_stream = self.socket.as_mut().ok_or(WebSocketError::NotConnected)?;
-        let mut session = Session::new(client_config, tcp_stream)
+        let mut session = Session::new(tls_ref, tcp_stream, &client_config)
             .map_err(|_| WebSocketError::TlsError)?;
 
 
