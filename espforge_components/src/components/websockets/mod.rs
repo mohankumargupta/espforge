@@ -405,7 +405,7 @@ pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result
         
         // 2. Resolve the host name to a valid IP address using your stack's DNS resolver
         let remote_ip = self.stack
-            .dns_query(host)
+            .dns_query(&host, espforge_platform::embassy_net::dns::DnsQueryType::A)
             .await
             .map_err(|_| WebSocketError::DnsFailed)?[0]; // Take the first resolved IP slice
 
