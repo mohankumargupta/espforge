@@ -418,7 +418,7 @@ pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result
         self.connect_tls(raw_socket, tls_ctx).await
     }
 
-    
+
     async fn connect_plain(
         &mut self,
         host: String<64>,
@@ -452,11 +452,18 @@ pub async fn connect_tls(
     ) -> Result<(), WebSocketError> {
         let (host, _port, path, _is_wss) = self.parse_uri()?;
 
-        let mut session_config = mbedtls_rs::Config::new(
-            mbedtls_rs::Endpoint::Client,
-            mbedtls_rs::Transport::Stream,
-            mbedtls_rs::Preset::Default,
+// FIX: Point to the correct nested module locations in esp-mbedtls
+        let mut session_config = mbedtls_rs::ssl::config::Config::new(
+            mbedtls_rs::ssl::config::Endpoint::Client,
+            mbedtls_rs::ssl::config::Transport::Stream,
+            mbedtls_rs::ssl::config::Preset::Default,
         );
+
+        // let mut session_config = mbedtls_rs::Config::new(
+        //     mbedtls_rs::Endpoint::Client,
+        //     mbedtls_rs::Transport::Stream,
+        //     mbedtls_rs::Preset::Default,
+        // );
         
         // Configure your TLS session behavior here (SNI, verification blocks, etc.)
         // session_config.set_sni(host); 
