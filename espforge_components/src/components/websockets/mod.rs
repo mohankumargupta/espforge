@@ -454,7 +454,7 @@ impl<'a> WebSocketClient<'a>
 
     pub async fn connect_tls<C>(
         &mut self,
-        connector: &C,              
+        connector: C,              
         addr: core::net::SocketAddr, 
         tls_ctx: mbedtls_rs::TlsReference<'a>,
     ) -> Result<(), WebSocketError>
