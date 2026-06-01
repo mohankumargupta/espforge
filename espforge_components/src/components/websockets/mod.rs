@@ -344,18 +344,19 @@ impl<T: embedded_io_async::Read<Error = NetError> + embedded_io_async::Write<Err
 
 pub struct WebSocketClient<'a, T>
 where
-    T: embedded_io_async::Read<Error = NetError> + embedded_io_async::Write<Error = NetError>,
+    T: Read + Write,
 {
     stack:       Stack<'static>,
     uri:         String<128>,
     socket:      Option<MyTcpSocket>,
     tls_socket:  Option<alloc::boxed::Box<mbedtls_rs::Session<'a, T>>>, 
     resources:   WebSocketResources,
+    _lifetime: core::marker::PhantomData<&'a ()>,
 }
 
 impl<'a, T> WebSocketClient<'a, T> 
 where
-    T: Read<Error = NetError> + Write<Error = NetError> + 'a,
+    T: Read + Write + 'a,
 {
     pub fn new(
         stack: Stack<'static>,
@@ -448,77 +449,34 @@ where
         Ok(())
     }
 
-async fn connect_tls(
+pub async fn connect_tls<C>(
         &mut self,
-        host: String<64>,
-        port: u16,
-        path: String<64>,
-    ) -> Result<(), WebSocketError> {
-        use mbedtls_rs::{Session, SessionConfig, ClientSessionConfig, Certificate, TlsVersion};
-
-        let rx = self.resources.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
-        let tx = self.resources.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
-
-        let adapter = NetworkAdapter::new(self.stack, rx, tx);
-
-        let ip = edge_nal::Dns::get_host_by_name(&adapter, host.as_str(), AddrType::IPv4)
+        connector: &C,              // Your edge-nal network connector instance
+        addr: core::net::SocketAddr, // Target address endpoint
+    ) -> Result<(), WebSocketError>
+    where
+        C: TcpConnect<Socket<'a> = T>, // Ensure it yields the type our client stores
+    {
+        // 1. TlsConnector automatically establishes the TCP connection 
+        //    AND completes the entire TLS handshake under the hood!
+        let tls_stream = connector
+            .connect(addr)
             .await
-            .map_err(|_| WebSocketError::DnsResolutionFailed)?;
-
-        let remote: core::net::SocketAddr = core::net::SocketAddr::new(ip, port);
-        let tcp_socket = adapter
-            .connect(remote)
-            .await
-            .map_err(|_| WebSocketError::ConnectionFailed)?;
-
-        // 1. Build a C-compatible stack-allocated configuration framework
-        let mut client_config = ClientSessionConfig::new();
-        client_config.min_version = TlsVersion::Tls1_3;
-        client_config.ca_chain = None;
-        
-        // NOTE: Since your `ClientSessionConfig` handles `server_name` as optional, 
-        // we omit setting it directly here if it runs into lifetime borrowing issues 
-        // with local stack configurations. Instead, we can apply it dynamically 
-        // on the initialized mutable instance using `session.set_server_name(...)` below!
-        client_config.server_name = None; 
-
-        let session_config = SessionConfig::Client(client_config);
-
-        // 2. Initialize using your explicit TlsReference parameter structure
-        // Assuming `self.tls_engine` is where you store your global `Tls` reference instance.
-        let tls_ref = self.tls_engine.create_reference(); 
-        
-
-        let tcp_stream = self.socket.as_mut().ok_or(WebSocketError::NotConnected)?;
-        let mut session = Session::new(tls_ref, tcp_stream, &session_config)
             .map_err(|_| WebSocketError::TlsError)?;
 
-
-
-        // 3. Dynamically set the hostname on the session using a temporary C-String safe wrapper
-        let mut host_c_str = heapless::Vec::<u8, 65>::new();
-        host_c_str.extend_from_slice(host.as_bytes()).map_err(|_| WebSocketError::TlsError)?;
-        host_c_str.push(0).map_err(|_| WebSocketError::TlsError)?; // Add terminal NULL byte
-        
-        let server_name = core::ffi::CStr::from_bytes_with_nul(&host_c_str)
-            .map_err(|_| WebSocketError::TlsError)?;
-            
-        session.set_server_name(server_name).map_err(|_| WebSocketError::TlsError)?;
-
-        // 4. Complete the handshake processing path
-        session.connect().await.map_err(|_| WebSocketError::TlsError)?;
-
+        // 2. Perform your websocket handshake upgrade on top of this secure stream
         let mut nonce = [0u8; 16];
         unsafe { espforge_platform::rng::Rng::new() }.fill_bytes(&mut nonce);
 
-        self.do_ws_upgrade_tls(&mut session, &host, &path, &nonce)
+        // Your upgrade function treats the secure stream just like a normal socket
+        self.do_ws_upgrade_tls(&mut tls_stream, &self.uri.host, &self.uri.path, &nonce)
             .await?;
 
-        // Box the session type up to satisfy your structure storage target definitions
-        self.tls_socket = Some(alloc::boxed::Box::new(session));
+        // 3. Save the stream straight into your active socket field
+        self.socket = Some(tls_stream);
+
         Ok(())
-    }    
-    // ── upgrade helpers ─────────────────────────────────────────────────────────
+    }    // ── upgrade helpers ─────────────────────────────────────────────────────────
 
     async fn do_ws_upgrade_plain(
         &mut self,
