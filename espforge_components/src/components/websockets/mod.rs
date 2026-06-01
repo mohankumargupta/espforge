@@ -1,6 +1,8 @@
 #![no_std] // If this is your main/lib file, otherwise just add the line below:
 extern crate alloc;
 
+use embedded_io_async::{Read, Write};
+
 use core::fmt;
 use core::cell::RefCell;
 
@@ -350,7 +352,10 @@ where
     resources:   WebSocketResources,
 }
 
-impl<T> WebSocketClient<'_, T> {
+impl<T> WebSocketClient<'_, T> 
+where
+    T: Read<Error = NetError> + Write<Error = NetError> + 'a,
+{
     pub fn new(
         stack: Stack<'static>,
         uri: &str,
