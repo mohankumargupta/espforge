@@ -96,7 +96,7 @@ impl embedded_io_async::Error for DnsError {
 }
 
 #[derive(Debug)]
-struct NetError;
+pub struct NetError;
 
 impl fmt::Display for NetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "Network error") }
