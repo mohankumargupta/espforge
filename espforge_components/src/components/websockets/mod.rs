@@ -350,7 +350,7 @@ where
     resources:   WebSocketResources,
 }
 
-impl WebSocketClient {
+impl WebSocketClient<'_> {
     pub fn new(
         stack: Stack<'static>,
         uri: &str,
