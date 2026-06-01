@@ -335,7 +335,7 @@ pub struct WebSocketClient<'a>
     stack:       Stack<'static>,
     uri:         String<128>,
     socket:      Option<MyTcpSocket>,
-    tls_socket:  Option<alloc::boxed::Box<mbedtls_rs::Session<'a>>>, 
+    tls_socket:  Option<alloc::boxed::Box<mbedtls_rs::Session<'a, MyTcpSocket>>>, 
     resources:   WebSocketResources,
     _lifetime: core::marker::PhantomData<&'a ()>,
 }
