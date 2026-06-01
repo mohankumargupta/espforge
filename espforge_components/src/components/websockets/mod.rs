@@ -339,18 +339,18 @@ impl<T: embedded_io_async::Read<Error = NetError> + embedded_io_async::Write<Err
 
 // ── WebSocketClient ─────────────────────────────────────────────────────────────
 
-pub struct WebSocketClient<'a, S>
+pub struct WebSocketClient<'a, T>
 where
     S: embedded_io_async::Read<Error = NetError> + embedded_io_async::Write<Error = NetError>,
 {
     stack:       Stack<'static>,
     uri:         String<128>,
     socket:      Option<MyTcpSocket>,
-    tls_socket:  Option<alloc::boxed::Box<mbedtls_rs::Session<'a, S>>>, 
+    tls_socket:  Option<alloc::boxed::Box<mbedtls_rs::Session<'a, T>>>, 
     resources:   WebSocketResources,
 }
 
-impl<S> WebSocketClient<'_, S> {
+impl<T> WebSocketClient<'_, T> {
     pub fn new(
         stack: Stack<'static>,
         uri: &str,
