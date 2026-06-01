@@ -473,7 +473,7 @@ async fn connect_tls(
         // 1. Build a C-compatible stack-allocated configuration framework
         let mut client_config = ClientSessionConfig::new();
         client_config.min_version = TlsVersion::Tls1_3;
-        client_config.ca_chain = Some(mbedtls_rs::Certificate::empty());
+        client_config.ca_chain = None;
         
         // NOTE: Since your `ClientSessionConfig` handles `server_name` as optional, 
         // we omit setting it directly here if it runs into lifetime borrowing issues 
