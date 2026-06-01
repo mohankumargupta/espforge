@@ -418,9 +418,12 @@ where
     pub async fn connect(&mut self) -> Result<(), WebSocketError> {
         let (host, port, path, is_wss) = self.parse_uri()?;
         if is_wss {
-            self.connect_tls(host, port, path).await
+            let addr = core::net::SocketAddr::new(ip, port);
+            self.connect_tls(&self.stack, addr).await;
+            //self.connect_tls(host, port, path).await
         } else {
-            self.connect_plain(host, port, path).await
+            let addr = core::net::SocketAddr::new(ip, port);
+            //self.connect_plain(host, port, path).await
         }
     }
 
