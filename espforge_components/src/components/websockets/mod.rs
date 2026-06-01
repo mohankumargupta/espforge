@@ -346,7 +346,7 @@ where
     stack:       Stack<'static>,
     uri:         String<128>,
     socket:      Option<MyTcpSocket>,
-    tls_socket:  Option<alloc::boxed::Box<Session<'a, S>>>, 
+    tls_socket:  Option<alloc::boxed::Box<mbedtls_rs::Session<'a, S>>>, 
     resources:   WebSocketResources,
 }
 
