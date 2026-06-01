@@ -410,7 +410,7 @@ pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result
             .await
             .map_err(|_| WebSocketError::DnsFailed)?[0]; // Take the first resolved IP slice
 
-        let addr = core::net::SocketAddr::new(remote_ip, port);
+        let addr = core::net::SocketAddr::new(remote_ip.into(), port);
 
         // 3. Setup temporary local buffers to instantiate our NetworkAdapter context helper
         let rx = [0u8; 1536];
