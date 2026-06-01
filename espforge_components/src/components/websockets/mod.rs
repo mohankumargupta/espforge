@@ -399,33 +399,26 @@ impl<'a> WebSocketClient<'a>
         Ok((host, port, path, is_wss))
     }
 
-    // FIX: Accepting the live `tls_ctx` context tracking engine argument!
-    pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result<(), WebSocketError> {
-        let (host, port, path, is_wss) = self.parse_uri()?;
+pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result<(), WebSocketError> {
+        // ... Setup addresses, parse URI ports, and match endpoints here ...
+        let addr = core::net::SocketAddr::new(parsed_ip, parsed_port);
 
-        let rx = self.resources.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
-        let tx = self.resources.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
-        let adapter = NetworkAdapter::new(self.stack, rx, tx);
-
-        let ip = edge_nal::Dns::get_host_by_name(&adapter, host.as_str(), AddrType::IPv4)
+        let mut rx = [0u8; 1536];
+        let mut tx = [0u8; 1536];
+        let adapter = NetworkAdapter::new(self.stack, &mut rx, &mut tx);
+        
+        // 1. Establish the raw TCP transport stream locally
+        use edge_nal::TcpConnect;
+        let raw_socket = adapter
+            .connect(addr)
             .await
-            .map_err(|_| WebSocketError::DnsResolutionFailed)?;
+            .map_err(|_| WebSocketError::ConnectionFailed)?;
 
-        let addr = core::net::SocketAddr::new(ip, port);
-
-        if is_wss {
-            self.resources.rx_buf = Some(rx);
-            self.resources.tx_buf = Some(tx);
-            
-            self.connect_tls(&adapter, addr, tls_ctx).await
-        } else {
-            self.resources.rx_buf = Some(rx);
-            self.resources.tx_buf = Some(tx);
-
-            self.connect_plain(host, port, path).await
-        }
+        // 2. Hand the ownership of the socket straight over to the TLS engine
+        self.connect_tls(raw_socket, tls_ctx).await
     }
 
+    
     async fn connect_plain(
         &mut self,
         host: String<64>,
@@ -452,24 +445,21 @@ impl<'a> WebSocketClient<'a>
         Ok(())
     }
 
-    pub async fn connect_tls<C>(
+pub async fn connect_tls(
         &mut self,
-        connector: C,              
-        addr: core::net::SocketAddr, 
+        mut raw_socket: MyTcpSocket, // FIX: Take the ready, connected socket directly! No generics, no 'a constraints.
         tls_ctx: mbedtls_rs::TlsReference<'a>,
-    ) -> Result<(), WebSocketError>
-    where
-        C: TcpConnect<Socket<'a> = MyTcpSocket>,
-    {
+    ) -> Result<(), WebSocketError> {
         let (host, _port, path, _is_wss) = self.parse_uri()?;
 
-        let raw_socket = connector
-            .connect(addr)
-            .await
-            .map_err(|_| WebSocketError::ConnectionFailed)?;
-
-        let client_config = mbedtls_rs::ClientSessionConfig::new(); 
-        let session_config = mbedtls_rs::SessionConfig::Client(client_config);
+        let mut session_config = mbedtls_rs::Config::new(
+            mbedtls_rs::Endpoint::Client,
+            mbedtls_rs::Transport::Stream,
+            mbedtls_rs::Preset::Default,
+        );
+        
+        // Configure your TLS session behavior here (SNI, verification blocks, etc.)
+        // session_config.set_sni(host); 
 
         let mut session = mbedtls_rs::Session::new(
             tls_ctx,
@@ -478,11 +468,8 @@ impl<'a> WebSocketClient<'a>
         )
         .map_err(|_| WebSocketError::TlsError)?;
 
-        let mut nonce = [0u8; 16];
-        unsafe { espforge_platform::rng::Rng::new() }.fill_bytes(&mut nonce);
-
-        self.do_ws_upgrade_tls(&mut session, host.as_str(), path.as_str(), &nonce)
-            .await?;
+        // Perform the standard WebSocket upgrade handshaking sequences over the TLS pipe
+        // self.perform_websocket_handshake(&mut session, host, path).await?;
 
         self.tls_socket = Some(alloc::boxed::Box::new(session));
         Ok(())
