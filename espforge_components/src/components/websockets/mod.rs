@@ -449,7 +449,7 @@ pub async fn connect(&mut self) -> Result<(), WebSocketError> {
             self.connect_plain(host, port, path).await
         }
     }
-    
+
     async fn connect_plain(
         &mut self,
         host: String<64>,
@@ -482,7 +482,7 @@ pub async fn connect_tls<C>(
         addr: core::net::SocketAddr, // Target address endpoint
     ) -> Result<(), WebSocketError>
     where
-        C: TcpConnect<Socket<'a> = T> + 'a, // Ensure it yields the type our client stores
+        C: TcpConnect<Socket<'a> = MyTcpSocket> + 'a, // Ensure it yields the type our client stores
     {
         // 1. TlsConnector automatically establishes the TCP connection 
         //    AND completes the entire TLS handshake under the hood!
