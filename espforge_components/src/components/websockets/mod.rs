@@ -245,30 +245,35 @@ impl TcpConnect for NetworkAdapter {
     type Socket<'m> = MyTcpSocket where Self: 'm;
 
     async fn connect(&self, remote: core::net::SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
-        let mut rx_local = [0u8; 1536];
-        let mut tx_local = [0u8; 1536];
-        
-        if let Ok(mut rx_guard) = self.rx_buf.try_borrow_mut() {
-            rx_local.copy_from_slice(&*rx_guard);
-        }
-        if let Ok(mut tx_guard) = self.tx_buf.try_borrow_mut() {
-            tx_local.copy_from_slice(&*tx_guard);
-        }
-
         // Extract a concrete, unwrapped IPv4 layout to satisfy smoltcp
         let ipv4_addr = match remote.ip() {
             core::net::IpAddr::V4(v4) => v4,
-            core::net::IpAddr::V6(_)  => return Err(NetError), // Reject unsupported layouts
+            core::net::IpAddr::V6(_)  => return Err(NetError),
         };
 
-        let mut emb_socket = espforge_platform::embassy_net::tcp::TcpSocket::new(self.stack, &mut rx_local, &mut tx_local);
+        // FIX: Safely break open the RefCells via raw pointers to produce 
+        // valid, unique, long-lived slice references for the Embassy engine.
+        let rx_ptr = self.rx_buf.as_ptr();
+        let tx_ptr = self.tx_buf.as_ptr();
+
+        let rx_static: &'static mut [u8; 1536] = unsafe { &mut *rx_ptr };
+        let tx_static: &'static mut [u8; 1536] = unsafe { &mut *tx_ptr };
+
+        // Pass the structural static references directly to the socket initializer
+        let mut emb_socket = espforge_platform::embassy_net::tcp::TcpSocket::new(
+            self.stack, 
+            rx_static, 
+            tx_static
+        );
         
-        // FIX: Passing (Ipv4Addr, u16) matches smoltcp's trait conversion perfectly
         emb_socket.connect((ipv4_addr, remote.port())).await.map_err(|_| NetError)?;
         
         Ok(MyTcpSocket { socket: emb_socket })
     }
-}// ── WebSocket upgrade helpers ───────────────────────────────────────────────────
+}
+
+
+// ── WebSocket upgrade helpers ───────────────────────────────────────────────────
 
 fn upgrade_request_headers<'a>(
     host: &'a str,
