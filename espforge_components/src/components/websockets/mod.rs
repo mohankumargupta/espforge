@@ -400,23 +400,33 @@ impl<'a> WebSocketClient<'a>
     }
 
 pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result<(), WebSocketError> {
-        // ... Setup addresses, parse URI ports, and match endpoints here ...
-        let addr = core::net::SocketAddr::new(parsed_ip, parsed_port);
-
-        let mut rx = [0u8; 1536];
-        let mut tx = [0u8; 1536];
-        let adapter = NetworkAdapter::new(self.stack, &mut rx, &mut tx);
+        // 1. Parse the host domain and target port out of the client URI configuration
+        let (host, port, _path, _is_wss) = self.parse_uri()?;
         
-        // 1. Establish the raw TCP transport stream locally
+        // 2. Resolve the host name to a valid IP address using your stack's DNS resolver
+        let remote_ip = self.stack
+            .dns_query(host, espforge_platform::embassy_net::dns::AddrFilter::IPv4)
+            .await
+            .map_err(|_| WebSocketError::DnsFailed)?[0]; // Take the first resolved IP slice
+
+        let addr = core::net::SocketAddr::new(remote_ip, port);
+
+        // 3. Setup temporary local buffers to instantiate our NetworkAdapter context helper
+        let rx = [0u8; 1536];
+        let tx = [0u8; 1536];
+        let adapter = NetworkAdapter::new(self.stack, rx, tx);
+        
+        // 4. Establish the raw TCP transport stream locally
         use edge_nal::TcpConnect;
         let raw_socket = adapter
             .connect(addr)
             .await
             .map_err(|_| WebSocketError::ConnectionFailed)?;
 
-        // 2. Hand the ownership of the socket straight over to the TLS engine
+        // 5. Hand ownership of the socket straight over to the TLS engine to upgrade the pipe
         self.connect_tls(raw_socket, tls_ctx).await
     }
+
 
 
     async fn connect_plain(
