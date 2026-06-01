@@ -15,15 +15,22 @@ documentation.workspace = true
 edge-ws = { version = "0.7", optional = true }
 edge-http = { version = "0.7", optional = true } # Needed for upgrade logic
 edge-net = { version = "0.13.1", optional = true }
-edge-nal = { version = "0.6", optional = true}
-embedded-tls = { workspace = true, optional = true, default-features = false}
-rand_core = { version = "0.6", optional = true, default-features = false}
+edge-nal = { version = "0.6", optional = true }
+# esp-mbedtls replaces embedded-tls for TLS on ESP32 bare-metal.
+# Not yet on crates.io — must be a git dependency.
+esp-mbedtls = { git = "https://github.com/esp-rs/esp-mbedtls.git", optional = true }
+# Keep rand_core for nonce generation in the plain WebSocket path
+rand_core = { version = "0.6", optional = true, default-features = false }
+# SHA-1 for Sec-WebSocket-Accept header verification
+sha1 = { version = "0.10", optional = true, default-features = false }
+# base64 for Sec-WebSocket-Key encoding
+base64 = { version = "0.21", optional = true, default-features = false, features = ["alloc"] }
 espforge_common = { version = "0.1.7", path = "../espforge_common", default-features = false }
 espforge_platform = { version = "0.1.14", path = "../espforge_platform" }
 embedded-hal = "1.0.0"
-embedded-io = { version = "0.7.1", optional = true, default-features = false}
-embedded-io-async = { version = "0.7", optional = true, default-features = false  }
-reqwless = { workspace = true, optional = true, default-features = false}
+embedded-io = { version = "0.7.1", optional = true, default-features = false }
+embedded-io-async = { version = "0.7", optional = true, default-features = false }
+reqwless = { workspace = true, optional = true, default-features = false }
 heapless = { workspace = true, optional = true }
 
 [features]
@@ -37,9 +44,9 @@ http = ["dep:reqwless", "dep:heapless", "espforge_platform/wifi"]
 std = ["espforge_common/std"]
 embassy = ["espforge_platform/embassy"]
 websockets = [
-    "dep:heapless", 
-    "espforge_platform/wifi", 
-    "espforge_platform/tls", 
+    "dep:heapless",
+    "espforge_platform/wifi",
+    "espforge_platform/tls",
     "espforge_platform/embassy",
     "dep:embedded-io-async",
     "dep:edge-ws",
@@ -47,10 +54,12 @@ websockets = [
     "dep:edge-http",
     "dep:edge-net",
     "dep:rand_core",
-    "dep:embedded-tls",
+    "dep:sha1",
+    "dep:base64",
+    # esp-mbedtls with its async feature for Embassy
+    "dep:esp-mbedtls",
+    "esp-mbedtls?/async",
 ]
-
-
 
 [package.metadata.dist]
 dist = false
