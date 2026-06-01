@@ -454,7 +454,7 @@ impl<'a> WebSocketClient<'a>
 
     pub async fn connect_tls<C>(
         &mut self,
-        connector: &C,              
+        connector: &'a C,              
         addr: core::net::SocketAddr, 
         tls_ctx: mbedtls_rs::TlsReference<'a>,
     ) -> Result<(), WebSocketError>
@@ -594,6 +594,8 @@ impl<'a> WebSocketClient<'a>
 
     // ── send / receive ──────────────────────────────────────────────────────────
 
+// ── send / receive ──────────────────────────────────────────────────────────
+
     pub async fn send_text(&mut self, text: &str) -> Result<(), WebSocketError> {
         let mask_key = unsafe { espforge_platform::rng::Rng::new() }.random_u32();
         use edge_ws::{FrameHeader, FrameType};
@@ -609,8 +611,9 @@ impl<'a> WebSocketClient<'a>
             header.send_payload(&mut **session, text.as_bytes()).await.map_err(|_| WebSocketError::SendFailed)?;
             (**session).flush().await.map_err(|_| WebSocketError::SendFailed)?;
         } else if let Some(socket) = self.socket.as_mut() {
-            header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
-            header.send_payload(socket, text.as_bytes()).await.map_err(|_| WebSocketError::SendFailed)?;
+            // FIX: Reborrow via &mut *socket so ownership doesn't permanently move on step 1
+            header.send(&mut *socket).await.map_err(|_| WebSocketError::SendFailed)?;
+            header.send_payload(&mut *socket, text.as_bytes()).await.map_err(|_| WebSocketError::SendFailed)?;
             socket.flush().await.map_err(|_| WebSocketError::SendFailed)?;
         } else {
             return Err(WebSocketError::SendFailed);
@@ -632,8 +635,9 @@ impl<'a> WebSocketClient<'a>
             header.send(&mut **session).await.map_err(|_| WebSocketError::SendFailed)?;
             header.send_payload(&mut **session, data).await.map_err(|_| WebSocketError::SendFailed)?;
         } else if let Some(socket) = self.socket.as_mut() {
-            header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
-            header.send_payload(socket, data).await.map_err(|_| WebSocketError::SendFailed)?;
+            // FIX: Reborrow via &mut *socket here as well
+            header.send(&mut *socket).await.map_err(|_| WebSocketError::SendFailed)?;
+            header.send_payload(&mut *socket, data).await.map_err(|_| WebSocketError::SendFailed)?;
         } else {
             return Err(WebSocketError::SendFailed);
         }
@@ -669,10 +673,12 @@ impl<'a> WebSocketClient<'a>
         if let Some(session) = self.tls_socket.as_mut() {
             recv_from!(&mut **session)
         } else if let Some(socket) = self.socket.as_mut() {
-            recv_from!(socket)
+            // FIX: Reborrow the raw socket into the macro call expansion
+            recv_from!(&mut *socket)
         } else {
             Err(WebSocketError::ReceiveFailed)
         }
     }
+
 }
 
