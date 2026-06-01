@@ -341,7 +341,7 @@ impl<T: embedded_io_async::Read<Error = NetError> + embedded_io_async::Write<Err
 
 pub struct WebSocketClient<'a, T>
 where
-    S: embedded_io_async::Read<Error = NetError> + embedded_io_async::Write<Error = NetError>,
+    T: embedded_io_async::Read<Error = NetError> + embedded_io_async::Write<Error = NetError>,
 {
     stack:       Stack<'static>,
     uri:         String<128>,
