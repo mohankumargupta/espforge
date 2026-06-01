@@ -482,7 +482,7 @@ async fn connect_tls(
         // on the initialized mutable instance using `session.set_server_name(...)` below!
         client_config.server_name = None; 
 
-        //let session_config = SessionConfig::Client(client_config);
+        let session_config = SessionConfig::Client(client_config);
 
         // 2. Initialize using your explicit TlsReference parameter structure
         // Assuming `self.tls_engine` is where you store your global `Tls` reference instance.
@@ -490,7 +490,7 @@ async fn connect_tls(
         
 
         let tcp_stream = self.socket.as_mut().ok_or(WebSocketError::NotConnected)?;
-        let mut session = Session::new(tls_ref, tcp_stream, &client_config)
+        let mut session = Session::new(tls_ref, tcp_stream, &session_config)
             .map_err(|_| WebSocketError::TlsError)?;
 
 
