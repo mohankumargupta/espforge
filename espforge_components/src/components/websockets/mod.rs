@@ -251,7 +251,7 @@ impl TcpConnect for NetworkAdapter {
     type Error = NetError;
     type Socket<'m> = MyTcpSocket where Self: 'm;
 
-pub async fn connect(&mut self) -> Result<(), WebSocketError> {
+async fn connect(&mut self) -> Result<(), WebSocketError> {
         // 1. Parse target destination parameters out of your URI string
         let (host, port, path, is_wss) = self.parse_uri()?;
 
