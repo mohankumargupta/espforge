@@ -456,7 +456,7 @@ pub async fn connect_tls<C>(
         addr: core::net::SocketAddr, // Target address endpoint
     ) -> Result<(), WebSocketError>
     where
-        C: TcpConnect<Socket<'a> = T>, // Ensure it yields the type our client stores
+        C: TcpConnect<Socket<'a> = T> + 'a, // Ensure it yields the type our client stores
     {
         // 1. TlsConnector automatically establishes the TCP connection 
         //    AND completes the entire TLS handshake under the hood!
