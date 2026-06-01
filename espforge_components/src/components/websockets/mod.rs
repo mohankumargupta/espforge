@@ -480,6 +480,7 @@ pub async fn connect_tls<C>(
         &mut self,
         connector: &C,              
         addr: core::net::SocketAddr, 
+        tls_ctx: mbedtls_rs::TlsReference<'a>,
     ) -> Result<(), WebSocketError>
     where
         C: TcpConnect<Socket<'a> = MyTcpSocket> + 'a,
@@ -496,11 +497,10 @@ pub async fn connect_tls<C>(
         // 3. Build your session configuration layout
         let client_config = mbedtls_rs::ClientSessionConfig::new(); 
         let session_config = mbedtls_rs::SessionConfig::Client(client_config);
-        let tls_reference = mbedtls_rs::TlsReference::new();
 
         // 4. Bind the socket into the transparent TLS wrapper session context
         let mut session = mbedtls_rs::Session::new(
-            tls_reference,
+            tls_ctx,
             raw_socket,
             &session_config,
         )
@@ -520,7 +520,7 @@ pub async fn connect_tls<C>(
         Ok(())
     }
 
-    
+
     async fn do_ws_upgrade_plain(
         &mut self,
         socket: &mut MyTcpSocket,
