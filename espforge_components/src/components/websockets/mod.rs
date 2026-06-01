@@ -29,6 +29,7 @@ pub enum WebSocketError {
     TlsError,
     ProtocolError,
     UnexpectedFrame,
+    NotConnected,
 }
 
 impl fmt::Display for WebSocketError {
