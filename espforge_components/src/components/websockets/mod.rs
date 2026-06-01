@@ -239,7 +239,7 @@ impl Dns for NetworkAdapter {
     }
 }
 
-// FIX: Real low-level implementation of edge_nal::TcpConnect for our Adapter
+// ── Trait implementation of edge_nal::TcpConnect for our Adapter
 impl TcpConnect for NetworkAdapter {
     type Error = NetError;
     type Socket<'m> = MyTcpSocket where Self: 'm;
@@ -256,12 +256,13 @@ impl TcpConnect for NetworkAdapter {
         }
 
         let mut emb_socket = espforge_platform::embassy_net::tcp::TcpSocket::new(self.stack, &mut rx_local, &mut tx_local);
-        emb_socket.connect(remote).await.map_err(|_| NetError)?;
+        
+        // FIX: Extract IP and Port as a primitive tuple pair to feed smoltcp's From trait layout safely
+        emb_socket.connect((remote.ip(), remote.port())).await.map_err(|_| NetError)?;
         
         Ok(MyTcpSocket { socket: emb_socket })
     }
 }
-
 // ── WebSocket upgrade helpers ───────────────────────────────────────────────────
 
 fn upgrade_request_headers<'a>(
