@@ -185,9 +185,9 @@ impl AsyncWrite for MyTcpSocket {
 // FIX: Removed invalid 'type Error' constraint and updated context signatures
 impl TcpShutdown for MyTcpSocket {
 // Update the method signature to match the trait declaration
-    async fn close(&mut self, behavior: edge_nal::Close) -> Result<(), Self::Error> {
-        // You can still call your underlying session's close method
-        self.session.close().await.map_err(|_| WebSocketError::TlsError)?;
+async fn close(&mut self, behavior: edge_nal::Close) -> Result<(), Self::Error> {
+        // Change self.session to self.socket
+        self.socket.close().await.map_err(|_| WebSocketError::TlsError)?;
         Ok(())
     }
 
