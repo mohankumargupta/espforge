@@ -187,7 +187,7 @@ impl TcpShutdown for MyTcpSocket {
 // Update the method signature to match the trait declaration
 async fn close(&mut self, behavior: edge_nal::Close) -> Result<(), Self::Error> {
         // Change self.session to self.socket
-        self.socket.close().map_err(|_| WebSocketError::TlsError)?;
+        self.socket.close();
         Ok(())
     }
 
