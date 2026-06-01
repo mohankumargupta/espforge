@@ -463,7 +463,7 @@ impl WebSocketClient {
         // FIX: Handled standard mbedtls TlsMode naming schemas if applicable
         let mut session = Session::new(
             tcp_socket,
-            mbedtls_rs::TlsMode::Client,
+            mbedtls_rs::endpoint::Role::Client,
             TlsVersion::Tls1_3,
             Certificate::new(),
             host.as_str(),
