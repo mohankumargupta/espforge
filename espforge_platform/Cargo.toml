@@ -23,7 +23,7 @@ embassy-net = { workspace = true, optional = true, features = ["proto-ipv4", "me
 
 # esp-mbedtls is the TLS backend for ESP32 bare-metal (replaces embedded-tls).
 # Only needed when the 'tls' feature is active (e.g. websockets over wss://).
-esp-mbedtls = { git = "https://github.com/esp-rs/esp-mbedtls.git", optional = true }
+mbedtls-rs = { git = "https://github.com/esp-rs/esp-mbedtls.git", optional = true }
 
 [features]
 default = []
@@ -33,7 +33,7 @@ uart = ["dep:embedded-io"]
 psram = []
 wifi = ["dep:embassy-net"]
 # 'tls' now pulls in esp-mbedtls with its async Embassy support
-tls = ["dep:esp-mbedtls", "esp-mbedtls/async", "dep:embassy-net"]
+tls = ["dep:mbedtls-rs", "dep:embassy-net"]
 embassy = ["dep:embassy-sync", "dep:embassy-time"]
 esp32 = ["esp-hal/esp32"]
 esp32c3 = ["esp-hal/esp32c3"]
