@@ -182,8 +182,10 @@ impl AsyncWrite for MyTcpSocket {
 
 // FIX: Removed invalid 'type Error' constraint and updated context signatures
 impl TcpShutdown for MyTcpSocket {
-    async fn close(&mut self) -> Result<(), Self::Error> {
-        self.socket.close();
+// Update the method signature to match the trait declaration
+    async fn close(&mut self, behavior: edge_nal::Close) -> Result<(), Self::Error> {
+        // You can still call your underlying session's close method
+        self.session.close().await.map_err(|_| WebSocketError::TlsError)?;
         Ok(())
     }
 
@@ -437,13 +439,13 @@ impl WebSocketClient {
         Ok(())
     }
 
-    async fn connect_tls(
+async fn connect_tls(
         &mut self,
         host: String<64>,
         port: u16,
         path: String<64>,
     ) -> Result<(), WebSocketError> {
-        use mbedtls_rs::{Session, Certificate, TlsVersion};
+        use mbedtls_rs::{Session, SessionConfig, ClientSessionConfig, Certificate, TlsVersion};
 
         let rx = self.resources.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
         let tx = self.resources.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
@@ -460,16 +462,37 @@ impl WebSocketClient {
             .await
             .map_err(|_| WebSocketError::ConnectionFailed)?;
 
-        // FIX: Handled standard mbedtls TlsMode naming schemas if applicable
-        let mut session = Session::new(
-            tcp_socket,
-            mbedtls_rs::endpoint::Role::Client,
-            TlsVersion::Tls1_3,
-            Certificate::new(),
-            host.as_str(),
-        )
-        .map_err(|_| WebSocketError::TlsError)?;
+        // 1. Build a C-compatible stack-allocated configuration framework
+        let mut client_config = ClientSessionConfig::new();
+        client_config.min_version = TlsVersion::Tls1_3;
+        client_config.ca_chain = Some(Certificate::new());
+        
+        // NOTE: Since your `ClientSessionConfig` handles `server_name` as optional, 
+        // we omit setting it directly here if it runs into lifetime borrowing issues 
+        // with local stack configurations. Instead, we can apply it dynamically 
+        // on the initialized mutable instance using `session.set_server_name(...)` below!
+        client_config.server_name = None; 
 
+        let session_config = SessionConfig::Client(client_config);
+
+        // 2. Initialize using your explicit TlsReference parameter structure
+        // Assuming `self.tls_engine` is where you store your global `Tls` reference instance.
+        let tls_ref = self.tls_engine.create_reference(); 
+
+        let mut session = Session::new(tls_ref, tcp_socket, &session_config)
+            .map_err(|_| WebSocketError::TlsError)?;
+
+        // 3. Dynamically set the hostname on the session using a temporary C-String safe wrapper
+        let mut host_c_str = heapless::Vec::<u8, 65>::new();
+        host_c_str.extend_from_slice(host.as_bytes()).map_err(|_| WebSocketError::TlsError)?;
+        host_c_str.push(0).map_err(|_| WebSocketError::TlsError)?; // Add terminal NULL byte
+        
+        let server_name = core::ffi::CStr::from_bytes_with_nul(&host_c_str)
+            .map_err(|_| WebSocketError::TlsError)?;
+            
+        session.set_server_name(server_name).map_err(|_| WebSocketError::TlsError)?;
+
+        // 4. Complete the handshake processing path
         session.connect().await.map_err(|_| WebSocketError::TlsError)?;
 
         let mut nonce = [0u8; 16];
@@ -478,11 +501,10 @@ impl WebSocketClient {
         self.do_ws_upgrade_tls(&mut session, &host, &path, &nonce)
             .await?;
 
-        // Mapping structural types explicitly allows mapping custom NetError wrappers over third-party errors safely
+        // Box the session type up to satisfy your structure storage target definitions
         self.tls_socket = Some(alloc::boxed::Box::new(session));
         Ok(())
-    }
-
+    }    
     // ── upgrade helpers ─────────────────────────────────────────────────────────
 
     async fn do_ws_upgrade_plain(
