@@ -454,12 +454,12 @@ impl<'a> WebSocketClient<'a>
 
     pub async fn connect_tls<C>(
         &mut self,
-        connector: &'a C,              
+        connector: &C,              
         addr: core::net::SocketAddr, 
         tls_ctx: mbedtls_rs::TlsReference<'a>,
     ) -> Result<(), WebSocketError>
     where
-        C: TcpConnect<Socket<'a> = MyTcpSocket> + 'a,
+        C: TcpConnect<Socket<'a> = MyTcpSocket>,
     {
         let (host, _port, path, _is_wss) = self.parse_uri()?;
 
