@@ -1,11 +1,9 @@
-#![no_std] // If this is your main/lib file, otherwise just add the line below:
+#![no_std] 
 extern crate alloc;
 
 use embedded_io_async::{Read, Write};
-
 use core::fmt;
 use core::cell::RefCell;
-
 use espforge_platform::embassy_net::Stack;
 use heapless::String;
 
@@ -44,6 +42,7 @@ impl fmt::Display for WebSocketError {
             Self::TlsError            => write!(f, "TLS error"),
             Self::ProtocolError       => write!(f, "WebSocket protocol error"),
             Self::UnexpectedFrame     => write!(f, "Unexpected WebSocket frame type"),
+            Self::NotConnected        => write!(f, "Client is not connected"),
         }
     }
 }
@@ -110,8 +109,7 @@ impl embedded_io_async::Error for NetError {
 use embedded_io_async::{ErrorType, Read as AsyncRead, Write as AsyncWrite};
 use edge_nal::{TcpConnect, TcpSplit, TcpShutdown, Dns, AddrType};
 
-// FIX: Pointed directly to embassy_net::tcp::TcpSocket
-struct MyTcpSocket {
+pub struct MyTcpSocket {
     socket: espforge_platform::embassy_net::tcp::TcpSocket<'static>,
 }
 
@@ -119,17 +117,16 @@ impl ErrorType for MyTcpSocket {
     type Error = NetError;
 }
 
-// FIX: Readable is situated at edge_nal root or replaced by embedded_io verification traits
 impl edge_nal::Readable for MyTcpSocket {
     async fn readable(&mut self) -> Result<(), Self::Error> { Ok(()) }
 }
 
-struct MyTcpSocketRead<'a> {
+pub struct MyTcpSocketRead<'a> {
     socket: *mut espforge_platform::embassy_net::tcp::TcpSocket<'static>,
     _phantom: core::marker::PhantomData<&'a ()>,
 }
 
-struct MyTcpSocketWrite<'a> {
+pub struct MyTcpSocketWrite<'a> {
     socket: *mut espforge_platform::embassy_net::tcp::TcpSocket<'static>,
     _phantom: core::marker::PhantomData<&'a ()>,
 }
@@ -183,12 +180,8 @@ impl AsyncWrite for MyTcpSocket {
     }
 }
 
-// FIX: Removed invalid 'type Error' constraint and updated context signatures
-impl TcpShutdown for MyTcpSocket
-{
-// Update the method signature to match the trait declaration
-async fn close(&mut self, behavior: edge_nal::Close) -> Result<(), Self::Error> {
-        // Change self.session to self.socket
+impl TcpShutdown for MyTcpSocket {
+    async fn close(&mut self, _behavior: edge_nal::Close) -> Result<(), Self::Error> {
         self.socket.close();
         Ok(())
     }
@@ -242,53 +235,31 @@ impl Dns for NetworkAdapter {
         _addr: core::net::IpAddr,
         _result: &mut [u8],
     ) -> Result<usize, Self::Error> {
-        let res: &mut [core::net::IpAddr] = &mut []; // Placeholder allocation for logic consistency
         Err(DnsError)
     }
 }
 
+// FIX: Real low-level implementation of edge_nal::TcpConnect for our Adapter
 impl TcpConnect for NetworkAdapter {
     type Error = NetError;
     type Socket<'m> = MyTcpSocket where Self: 'm;
 
-async fn connect(&mut self) -> Result<(), WebSocketError> {
-        // 1. Parse target destination parameters out of your URI string
-        let (host, port, path, is_wss) = self.parse_uri()?;
-
-        // 2. Temporarily take ownership of your working buffers to spin up a network adapter context
-        let rx = self.resources.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
-        let tx = self.resources.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
+    async fn connect(&self, remote: core::net::SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
+        let mut rx_local = [0u8; 1536];
+        let mut tx_local = [0u8; 1536];
         
-        // This instantiates your local adapter mapping to embassy-net
-        let adapter = NetworkAdapter::new(self.stack, rx, tx);
-
-        // 3. Query the DNS stack to map your host name string to an IP address
-        let ip = edge_nal::Dns::get_host_by_name(&adapter, host.as_str(), AddrType::IPv4)
-            .await
-            .map_err(|_| WebSocketError::DnsResolutionFailed)?;
-
-        // 4. Consolidate your resolved IP and target port into a network SocketAddr
-        let addr = core::net::SocketAddr::new(ip, port);
-
-        // 5. Restore the borrowed buffers back inside your client instance 
-        //    so they are available for downstream IO operations
-        self.resources.rx_buf = Some(rx);
-        self.resources.tx_buf = Some(tx);
-
-        // 6. Route execution to the proper helper depending on the URL protocol scheme
-        if is_wss {
-            // Because NetworkAdapter doesn't store a `tls` field itself, we grab the 
-            // TlsReference lifetime handle directly from your class state or context.
-            // If your struct stores a `tls` handle context, use `self.tls`.
-            // Otherwise, if it's bundled on your struct initialization, pass it here.
-            let tls_handle = self.tls; 
-
-            self.connect_tls(&adapter, addr, tls_handle).await
-        } else {
-            self.connect_plain(host, port, path).await
+        if let Ok(mut rx_guard) = self.rx_buf.try_borrow_mut() {
+            rx_local.copy_from_slice(&*rx_guard);
         }
-    }
+        if let Ok(mut tx_guard) = self.tx_buf.try_borrow_mut() {
+            tx_local.copy_from_slice(&*tx_guard);
+        }
 
+        let mut emb_socket = espforge_platform::embassy_net::tcp::TcpSocket::new(self.stack, &mut rx_local, &mut tx_local);
+        emb_socket.connect(remote).await.map_err(|_| NetError)?;
+        
+        Ok(MyTcpSocket { socket: emb_socket })
+    }
 }
 
 // ── WebSocket upgrade helpers ───────────────────────────────────────────────────
@@ -346,12 +317,6 @@ fn is_upgrade_accepted<'a>(
     false
 }
 
-// ── Trait object for TLS socket ─────────────────────────────────────────────────
-
-// FIX: Added explicit ErrorType bounding to resolve E0191 dynamically
-trait TlsSocket: embedded_io_async::Read<Error = NetError> + embedded_io_async::Write<Error = NetError> {}
-impl<T: embedded_io_async::Read<Error = NetError> + embedded_io_async::Write<Error = NetError>> TlsSocket for T {}
-
 // ── WebSocketClient ─────────────────────────────────────────────────────────────
 
 pub struct WebSocketClient<'a, T>
@@ -387,6 +352,7 @@ where
                 tx_buf:      resources.tx_buf.take(),
                 payload_buf: resources.payload_buf.take(),
             },
+            _lifetime: core::marker::PhantomData,
         }
     }
 
@@ -426,37 +392,29 @@ where
         Ok((host, port, path, is_wss))
     }
 
-pub async fn connect(&mut self) -> Result<(), WebSocketError> {
-        // 1. Parse your target destination parameters out of your URI string
+    // FIX: Accepting the live `tls_ctx` context tracking engine argument!
+    pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result<(), WebSocketError> {
         let (host, port, path, is_wss) = self.parse_uri()?;
 
-        // 2. Temporarily extract your operational working buffers to create a network adapter context
         let rx = self.resources.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
         let tx = self.resources.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
         let adapter = NetworkAdapter::new(self.stack, rx, tx);
 
-        // 3. Perform DNS resolution to map your target host string onto a numeric IP address
         let ip = edge_nal::Dns::get_host_by_name(&adapter, host.as_str(), AddrType::IPv4)
             .await
             .map_err(|_| WebSocketError::DnsResolutionFailed)?;
 
-        // 4. Assemble the complete final socket target endpoint structure 
         let addr = core::net::SocketAddr::new(ip, port);
 
-        // 5. Route your pipeline initialization to the proper connection sub-routine
         if is_wss {
-            // Put your buffers back into the structure before proceeding so connect_tls can borrow them if needed
             self.resources.rx_buf = Some(rx);
             self.resources.tx_buf = Some(tx);
             
-            // Invoke connect_tls using your connector adapter context!
-            self.connect_tls(&adapter, addr).await
+            self.connect_tls(&adapter, addr, tls_ctx).await
         } else {
-            // Re-store your buffers back inside your client instance
             self.resources.rx_buf = Some(rx);
             self.resources.tx_buf = Some(tx);
 
-            // Execute plain fallback connection strategy
             self.connect_plain(host, port, path).await
         }
     }
@@ -487,7 +445,7 @@ pub async fn connect(&mut self) -> Result<(), WebSocketError> {
         Ok(())
     }
 
-pub async fn connect_tls<C>(
+    pub async fn connect_tls<C>(
         &mut self,
         connector: &C,              
         addr: core::net::SocketAddr, 
@@ -496,20 +454,16 @@ pub async fn connect_tls<C>(
     where
         C: TcpConnect<Socket<'a> = MyTcpSocket> + 'a,
     {
-        // 1. Extract the host and path by parsing your raw URI string first!
         let (host, _port, path, _is_wss) = self.parse_uri()?;
 
-        // 2. Establish your raw network connection channel
         let raw_socket = connector
             .connect(addr)
             .await
             .map_err(|_| WebSocketError::ConnectionFailed)?;
 
-        // 3. Build your session configuration layout
         let client_config = mbedtls_rs::ClientSessionConfig::new(); 
         let session_config = mbedtls_rs::SessionConfig::Client(client_config);
 
-        // 4. Bind the socket into the transparent TLS wrapper session context
         let mut session = mbedtls_rs::Session::new(
             tls_ctx,
             raw_socket,
@@ -517,20 +471,15 @@ pub async fn connect_tls<C>(
         )
         .map_err(|_| WebSocketError::TlsError)?;
 
-        // 5. Generate validation parameters
         let mut nonce = [0u8; 16];
         unsafe { espforge_platform::rng::Rng::new() }.fill_bytes(&mut nonce);
 
-        // 6. FIX: Use your freshly parsed string slice references here!
         self.do_ws_upgrade_tls(&mut session, host.as_str(), path.as_str(), &nonce)
             .await?;
 
-        // 7. Retain the working session wrapper inside your client state context
         self.tls_socket = Some(alloc::boxed::Box::new(session));
-
         Ok(())
     }
-
 
     async fn do_ws_upgrade_plain(
         &mut self,
@@ -551,7 +500,7 @@ pub async fn connect_tls<C>(
         nonce: &[u8],
     ) -> Result<(), WebSocketError>
     where
-        S: embedded_io_async::Read<Error = NetError> + embedded_io_async::Write<Error = NetError>,
+        S: embedded_io_async::Read + embedded_io_async::Write,
     {
         self.send_upgrade_request(session, host, path, nonce).await?;
         self.read_upgrade_response(session, nonce).await
@@ -640,8 +589,7 @@ pub async fn connect_tls<C>(
 
     pub async fn send_text(&mut self, text: &str) -> Result<(), WebSocketError> {
         let mask_key = unsafe { espforge_platform::rng::Rng::new() }.random_u32();
-        use edge_ws::FrameHeader;
-        use edge_ws::FrameType;
+        use edge_ws::{FrameHeader, FrameType};
 
         let header = FrameHeader {
             frame_type: FrameType::Text(false),
@@ -665,8 +613,7 @@ pub async fn connect_tls<C>(
 
     pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WebSocketError> {
         let mask_key = unsafe { espforge_platform::rng::Rng::new() }.random_u32();
-        use edge_ws::FrameHeader;
-        use edge_ws::FrameType;
+        use edge_ws::{FrameHeader, FrameType};
 
         let header = FrameHeader {
             frame_type: FrameType::Binary(false),
