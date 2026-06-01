@@ -457,27 +457,17 @@ pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result
 
 pub async fn connect_tls(
         &mut self,
-        mut raw_socket: MyTcpSocket, // FIX: Take the ready, connected socket directly! No generics, no 'a constraints.
+        raw_socket: T, 
         tls_ctx: mbedtls_rs::TlsReference<'a>,
     ) -> Result<(), WebSocketError> {
-        let (host, _port, path, _is_wss) = self.parse_uri()?;
+        let (host, _port, _path, _is_wss) = self.parse_uri()?;
 
-// FIX: Point to the correct nested module locations in esp-mbedtls
-        let mut session_config = mbedtls_rs::Config::new(
-            mbedtls_rs::Client,
-            mbedtls_rs::Stream,
-            mbedtls_rs::Default,
-        );
-
-        // let mut session_config = mbedtls_rs::Config::new(
-        //     mbedtls_rs::Endpoint::Client,
-        //     mbedtls_rs::Transport::Stream,
-        //     mbedtls_rs::Preset::Default,
-        // );
+        // FIX: Instantiate the config using the proper root-level helper.
+        // If your target SessionConfig implementation doesn't provide `new()`, 
+        // use its Default implementation or your custom constructor variant.
+        let session_config = mbedtls_rs::SessionConfig::new(); 
         
-        // Configure your TLS session behavior here (SNI, verification blocks, etc.)
-        // session_config.set_sni(host); 
-
+        // Instantiate the session using your provided structural implementation
         let mut session = mbedtls_rs::Session::new(
             tls_ctx,
             raw_socket,
@@ -485,13 +475,18 @@ pub async fn connect_tls(
         )
         .map_err(|_| WebSocketError::TlsError)?;
 
-        // Perform the standard WebSocket upgrade handshaking sequences over the TLS pipe
+        // Establish the encrypted TLS session handshake
+        session.connect().await.map_err(|_| WebSocketError::TlsError)?;
+
+        // Perform your standard WebSocket upgrade handshaking sequences over the session here
         // self.perform_websocket_handshake(&mut session, host, path).await?;
 
+        // Safely store the active session inside the client state mapping context
         self.tls_socket = Some(alloc::boxed::Box::new(session));
         Ok(())
     }
 
+    
     async fn do_ws_upgrade_plain(
         &mut self,
         socket: &mut MyTcpSocket,
