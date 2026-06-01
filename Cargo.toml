@@ -75,21 +75,21 @@ embedded-graphics = "0.8.1"
 embedded-tls = { version = "0.18.0", default-features = false}
 
 #esp-hal = "1.0.0"
-esp-backtrace = "0.18.1"
-esp-println = "0.16.1"
+esp-backtrace = "0.19.0"
+esp-println = "0.17.0"
 
 quote = "1.0"
 syn = { version = "2.0", features = ["full", "parsing"] }
 proc-macro2 = "1.0"
 prettyplease = "0.2"
 
-embassy-executor = "0.9.1"
+embassy-executor = "0.10.0"
 embassy-time = "0.5.0"
-embassy-sync = "0.7"
+embassy-sync = "0.8"
 
-embassy-net = "0.8.0"
+embassy-net = "0.9.1"
 reqwless = { version = "0.14", default-features = false }
-heapless = "0.9.2"
+heapless = "0.9.3"
 
 inventory = "0.3"
 static_cell = "2.1"
