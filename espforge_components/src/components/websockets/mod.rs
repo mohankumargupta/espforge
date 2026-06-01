@@ -487,7 +487,7 @@ async fn connect_tls(
         // Assuming `self.tls_engine` is where you store your global `Tls` reference instance.
         //let tls_ref = self.tls_engine.create_reference(); 
 
-        let mut session = Session::new(&mut self.socket, client_config)
+        let mut session = Session::new(client_config, &mut self.socket)
             .map_err(|_| WebSocketError::TlsError)?;
 
 
