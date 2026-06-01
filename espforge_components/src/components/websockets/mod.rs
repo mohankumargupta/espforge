@@ -463,10 +463,10 @@ pub async fn connect_tls(
         let (host, _port, path, _is_wss) = self.parse_uri()?;
 
 // FIX: Point to the correct nested module locations in esp-mbedtls
-        let mut session_config = mbedtls_rs::ssl::Config::new(
-            mbedtls_rs::ssl::Endpoint::Client,
-            mbedtls_rs::ssl::Transport::Stream,
-            mbedtls_rs::ssl::Preset::Default,
+        let mut session_config = mbedtls_rs::Config::new(
+            mbedtls_rs::Endpoint::Client,
+            mbedtls_rs::Transport::Stream,
+            mbedtls_rs::Preset::Default,
         );
 
         // let mut session_config = mbedtls_rs::Config::new(
