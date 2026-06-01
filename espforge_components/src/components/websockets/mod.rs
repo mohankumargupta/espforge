@@ -352,7 +352,7 @@ where
     resources:   WebSocketResources,
 }
 
-impl<T> WebSocketClient<'_, T> 
+impl<'a, T> WebSocketClient<'a, T> 
 where
     T: Read<Error = NetError> + Write<Error = NetError> + 'a,
 {
