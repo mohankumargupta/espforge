@@ -438,7 +438,7 @@ impl WebSocketClient {
         port: u16,
         path: String<64>,
     ) -> Result<(), WebSocketError> {
-        use esp_mbedtls::{asynch::Session, Certificates, Mode, TlsVersion};
+        use mbedtls_rs::{asynch::Session, Certificates, Mode, TlsVersion};
 
         let rx = self.resources.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
         let tx = self.resources.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
