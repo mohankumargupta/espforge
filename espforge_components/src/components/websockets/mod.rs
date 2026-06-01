@@ -465,8 +465,8 @@ pub async fn connect_tls(
 // FIX: Point to the correct nested module locations in esp-mbedtls
         let mut session_config = mbedtls_rs::Config::new(
             mbedtls_rs::Client,
-            mbedtls_rs::Transport::Stream,
-            mbedtls_rs::Preset::Default,
+            mbedtls_rs::Stream,
+            mbedtls_rs::Default,
         );
 
         // let mut session_config = mbedtls_rs::Config::new(
