@@ -330,21 +330,17 @@ fn is_upgrade_accepted<'a>(
 
 // ── WebSocketClient ─────────────────────────────────────────────────────────────
 
-pub struct WebSocketClient<'a, T>
-where
-    T: Read + Write,
+pub struct WebSocketClient<'a>
 {
     stack:       Stack<'static>,
     uri:         String<128>,
     socket:      Option<MyTcpSocket>,
-    tls_socket:  Option<alloc::boxed::Box<mbedtls_rs::Session<'a, T>>>, 
+    tls_socket:  Option<alloc::boxed::Box<mbedtls_rs::Session<'a>>>, 
     resources:   WebSocketResources,
     _lifetime: core::marker::PhantomData<&'a ()>,
 }
 
-impl<'a, T> WebSocketClient<'a, T> 
-where
-    T: Read + Write + 'a,
+impl<'a> WebSocketClient<'a>
 {
     pub fn new(
         stack: Stack<'static>,
