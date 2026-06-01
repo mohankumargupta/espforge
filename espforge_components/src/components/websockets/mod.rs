@@ -481,16 +481,16 @@ async fn connect_tls(
         // on the initialized mutable instance using `session.set_server_name(...)` below!
         client_config.server_name = None; 
 
-        let session_config = SessionConfig::Client(client_config);
+        //let session_config = SessionConfig::Client(client_config);
 
         // 2. Initialize using your explicit TlsReference parameter structure
         // Assuming `self.tls_engine` is where you store your global `Tls` reference instance.
         //let tls_ref = self.tls_engine.create_reference(); 
 
-        let mut session = Session::new(tls_ref, tcp_socket, &session_config)
+        let mut session = Session::new(&mut self.socket, client_config)
             .map_err(|_| WebSocketError::TlsError)?;
 
-        
+
 
         // 3. Dynamically set the hostname on the session using a temporary C-String safe wrapper
         let mut host_c_str = heapless::Vec::<u8, 65>::new();
