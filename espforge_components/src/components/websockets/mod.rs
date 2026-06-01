@@ -415,18 +415,41 @@ where
         Ok((host, port, path, is_wss))
     }
 
-    pub async fn connect(&mut self) -> Result<(), WebSocketError> {
+pub async fn connect(&mut self) -> Result<(), WebSocketError> {
+        // 1. Parse your target destination parameters out of your URI string
         let (host, port, path, is_wss) = self.parse_uri()?;
+
+        // 2. Temporarily extract your operational working buffers to create a network adapter context
+        let rx = self.resources.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
+        let tx = self.resources.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
+        let adapter = NetworkAdapter::new(self.stack, rx, tx);
+
+        // 3. Perform DNS resolution to map your target host string onto a numeric IP address
+        let ip = edge_nal::Dns::get_host_by_name(&adapter, host.as_str(), AddrType::IPv4)
+            .await
+            .map_err(|_| WebSocketError::DnsResolutionFailed)?;
+
+        // 4. Assemble the complete final socket target endpoint structure 
+        let addr = core::net::SocketAddr::new(ip, port);
+
+        // 5. Route your pipeline initialization to the proper connection sub-routine
         if is_wss {
-            let addr = core::net::SocketAddr::new(ip, port);
-            self.connect_tls(&self.stack, addr).await;
-            //self.connect_tls(host, port, path).await
+            // Put your buffers back into the structure before proceeding so connect_tls can borrow them if needed
+            self.resources.rx_buf = Some(rx);
+            self.resources.tx_buf = Some(tx);
+            
+            // Invoke connect_tls using your connector adapter context!
+            self.connect_tls(&adapter, addr).await
         } else {
-            let addr = core::net::SocketAddr::new(ip, port);
-            //self.connect_plain(host, port, path).await
+            // Re-store your buffers back inside your client instance
+            self.resources.rx_buf = Some(rx);
+            self.resources.tx_buf = Some(tx);
+
+            // Execute plain fallback connection strategy
+            self.connect_plain(host, port, path).await
         }
     }
-
+    
     async fn connect_plain(
         &mut self,
         host: String<64>,
