@@ -1,3 +1,6 @@
+#![no_std] // If this is your main/lib file, otherwise just add the line below:
+extern crate alloc;
+
 use core::fmt;
 use core::cell::RefCell;
 
