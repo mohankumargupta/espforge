@@ -251,33 +251,44 @@ impl TcpConnect for NetworkAdapter {
     type Error = NetError;
     type Socket<'m> = MyTcpSocket where Self: 'm;
 
-    async fn connect(
-        &self,
-        remote: core::net::SocketAddr,
-    ) -> Result<Self::Socket<'_>, Self::Error> {
-        use core::net::IpAddr;
+pub async fn connect(&mut self) -> Result<(), WebSocketError> {
+        // 1. Parse target destination parameters out of your URI string
+        let (host, port, path, is_wss) = self.parse_uri()?;
 
-        let mut rx = self.rx_buf.borrow_mut();
-        let mut tx = self.tx_buf.borrow_mut();
+        // 2. Temporarily take ownership of your working buffers to spin up a network adapter context
+        let rx = self.resources.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
+        let tx = self.resources.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
+        
+        // This instantiates your local adapter mapping to embassy-net
+        let adapter = NetworkAdapter::new(self.stack, rx, tx);
 
-        let ip = match remote.ip() {
-            IpAddr::V4(v4) =>
-                espforge_platform::embassy_net::Ipv4Address::from_octets(v4.octets()),
-            IpAddr::V6(_) => return Err(NetError),
-        };
+        // 3. Query the DNS stack to map your host name string to an IP address
+        let ip = edge_nal::Dns::get_host_by_name(&adapter, host.as_str(), AddrType::IPv4)
+            .await
+            .map_err(|_| WebSocketError::DnsResolutionFailed)?;
 
-        let endpoint = (ip, remote.port());
+        // 4. Consolidate your resolved IP and target port into a network SocketAddr
+        let addr = core::net::SocketAddr::new(ip, port);
 
-        // FIX: Pointed directly to embassy_net::tcp::TcpSocket::new
-        let mut socket = espforge_platform::embassy_net::tcp::TcpSocket::new(
-            self.stack,
-            unsafe { core::slice::from_raw_parts_mut(rx.as_mut_ptr(), rx.len()) },
-            unsafe { core::slice::from_raw_parts_mut(tx.as_mut_ptr(), tx.len()) },
-        );
+        // 5. Restore the borrowed buffers back inside your client instance 
+        //    so they are available for downstream IO operations
+        self.resources.rx_buf = Some(rx);
+        self.resources.tx_buf = Some(tx);
 
-        socket.connect(endpoint).await.map_err(|_| NetError)?;
-        Ok(MyTcpSocket { socket })
+        // 6. Route execution to the proper helper depending on the URL protocol scheme
+        if is_wss {
+            // Because NetworkAdapter doesn't store a `tls` field itself, we grab the 
+            // TlsReference lifetime handle directly from your class state or context.
+            // If your struct stores a `tls` handle context, use `self.tls`.
+            // Otherwise, if it's bundled on your struct initialization, pass it here.
+            let tls_handle = self.tls; 
+
+            self.connect_tls(&adapter, addr, tls_handle).await
+        } else {
+            self.connect_plain(host, port, path).await
+        }
     }
+
 }
 
 // ── WebSocket upgrade helpers ───────────────────────────────────────────────────
