@@ -34,6 +34,7 @@ pub enum WebSocketError {
 impl fmt::Display for WebSocketError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::DnsFailed           => write!(f, "DNS lookup failed"),
             Self::DnsResolutionFailed => write!(f, "DNS resolution failed"),
             Self::ConnectionFailed    => write!(f, "Connection failed"),
             Self::HandshakeFailed     => write!(f, "WebSocket handshake failed"),
