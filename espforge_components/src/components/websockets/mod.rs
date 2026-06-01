@@ -255,15 +255,20 @@ impl TcpConnect for NetworkAdapter {
             tx_local.copy_from_slice(&*tx_guard);
         }
 
+        // Extract a concrete, unwrapped IPv4 layout to satisfy smoltcp
+        let ipv4_addr = match remote.ip() {
+            core::net::IpAddr::V4(v4) => v4,
+            core::net::IpAddr::V6(_)  => return Err(NetError), // Reject unsupported layouts
+        };
+
         let mut emb_socket = espforge_platform::embassy_net::tcp::TcpSocket::new(self.stack, &mut rx_local, &mut tx_local);
         
-        // FIX: Extract IP and Port as a primitive tuple pair to feed smoltcp's From trait layout safely
-        emb_socket.connect((remote.ip(), remote.port())).await.map_err(|_| NetError)?;
+        // FIX: Passing (Ipv4Addr, u16) matches smoltcp's trait conversion perfectly
+        emb_socket.connect((ipv4_addr, remote.port())).await.map_err(|_| NetError)?;
         
         Ok(MyTcpSocket { socket: emb_socket })
     }
-}
-// ── WebSocket upgrade helpers ───────────────────────────────────────────────────
+}// ── WebSocket upgrade helpers ───────────────────────────────────────────────────
 
 fn upgrade_request_headers<'a>(
     host: &'a str,
