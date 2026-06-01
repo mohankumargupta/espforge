@@ -478,33 +478,49 @@ pub async fn connect(&mut self) -> Result<(), WebSocketError> {
 
 pub async fn connect_tls<C>(
         &mut self,
-        connector: &C,              // Your edge-nal network connector instance
-        addr: core::net::SocketAddr, // Target address endpoint
+        connector: &C,              
+        addr: core::net::SocketAddr, 
     ) -> Result<(), WebSocketError>
     where
-        C: TcpConnect<Socket<'a> = MyTcpSocket> + 'a, // Ensure it yields the type our client stores
+        C: TcpConnect<Socket<'a> = MyTcpSocket> + 'a,
     {
-        // 1. TlsConnector automatically establishes the TCP connection 
-        //    AND completes the entire TLS handshake under the hood!
-        let tls_stream = connector
+        // 1. Extract the host and path by parsing your raw URI string first!
+        let (host, _port, path, _is_wss) = self.parse_uri()?;
+
+        // 2. Establish your raw network connection channel
+        let raw_socket = connector
             .connect(addr)
             .await
-            .map_err(|_| WebSocketError::TlsError)?;
+            .map_err(|_| WebSocketError::ConnectionFailed)?;
 
-        // 2. Perform your websocket handshake upgrade on top of this secure stream
+        // 3. Build your session configuration layout
+        let client_config = mbedtls_rs::ClientSessionConfig::new(); 
+        let session_config = mbedtls_rs::SessionConfig::Client(client_config);
+        let tls_reference = mbedtls_rs::TlsReference::new();
+
+        // 4. Bind the socket into the transparent TLS wrapper session context
+        let mut session = mbedtls_rs::Session::new(
+            tls_reference,
+            raw_socket,
+            &session_config,
+        )
+        .map_err(|_| WebSocketError::TlsError)?;
+
+        // 5. Generate validation parameters
         let mut nonce = [0u8; 16];
         unsafe { espforge_platform::rng::Rng::new() }.fill_bytes(&mut nonce);
 
-        // Your upgrade function treats the secure stream just like a normal socket
-        self.do_ws_upgrade_tls(&mut tls_stream, &self.uri.host, &self.uri.path, &nonce)
+        // 6. FIX: Use your freshly parsed string slice references here!
+        self.do_ws_upgrade_tls(&mut session, host.as_str(), path.as_str(), &nonce)
             .await?;
 
-        // 3. Save the stream straight into your active socket field
-        self.socket = Some(tls_stream);
+        // 7. Retain the working session wrapper inside your client state context
+        self.tls_socket = Some(alloc::boxed::Box::new(session));
 
         Ok(())
-    }    // ── upgrade helpers ─────────────────────────────────────────────────────────
+    }
 
+    
     async fn do_ws_upgrade_plain(
         &mut self,
         socket: &mut MyTcpSocket,
