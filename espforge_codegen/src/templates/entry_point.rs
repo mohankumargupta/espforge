@@ -117,11 +117,12 @@ impl EntryPointGenerator for EmbassyEntryPoint {
         // `init_components` (WebSocketClient::new uses the TLS context).
         let tls_init: TokenStream = if needs_tls {
             quote! {
-                let tls = mbedtls_rs::Tls::new(&peripherals.SHA)
-                    .expect("Failed to initialise esp-mbedtls");
-                // Prevent Drop running — the context must live for the whole program.
-                let tls = ::core::mem::ManuallyDrop::new(tls);
-                let _ = &tls;
+                // static TLS_RNG_CELL: StaticCell<espforge_components::components::websockets::TlsRng> = StaticCell::new();
+                // let tls_rng = TLS_RNG_CELL.init(espforge_components::components::websockets::TlsRng(
+                //     unsafe { espforge_platform::rng::Rng::new() }
+                // ));
+                // let tls = espforge_components::mbedtls_rs::Tls::new(tls_rng).unwrap();
+                // Some(&tls)
             }
         } else {
             quote! {}
