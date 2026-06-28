@@ -1,6 +1,6 @@
 use super::common::format_generated_source;
 use super::constants::origins;
-use crate::registry::find_plugin;
+//use crate::registry::find_plugin;
 use super::wifi::{generate_wifi_init, generate_wifi_tasks};
 use crate::allocators::AllocatorGenerator;
 use anyhow::{Context, Result};

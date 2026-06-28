@@ -58,7 +58,7 @@ impl WebSocketClientPlugin {
         };
 
         let field: TokenStream = quote! {
-            pub #field_ident: espforge_components::components::websockets::WebSocketClient
+            pub #field_ident: espforge_components::components::websockets::WebSocketClient<'static>
         };
 
         // For wss:// URIs, esp-mbedtls is initialised globally by the generated entry
@@ -81,7 +81,7 @@ impl WebSocketClientPlugin {
         let init: TokenStream = quote! {
             #static_decl
             let #field_ident = espforge_components::components::websockets::WebSocketClient::new(
-                registry.stack,
+                stack,
                 #uri,
                 #resources_init,
             );

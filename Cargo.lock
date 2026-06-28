@@ -2226,21 +2226,22 @@ dependencies = [
 [[package]]
 name = "mbedtls-rs"
 version = "0.1.0"
-source = "git+https://github.com/esp-rs/esp-mbedtls#177721027aae6e014e1cf922608eb9955d70d85b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f164d9b6133a4a07ffdd96416c0898d728009df55a86456378f21b78d36c98c"
 dependencies = [
  "critical-section",
- "edge-nal",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "enumset",
  "mbedtls-rs-sys",
- "rand_core 0.9.5",
+ "rand_core 0.10.1",
 ]
 
 [[package]]
 name = "mbedtls-rs-sys"
 version = "0.1.0"
-source = "git+https://github.com/esp-rs/esp-mbedtls#177721027aae6e014e1cf922608eb9955d70d85b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa97e4c01acb74882ae3376921dc76f695d5e0820646a1a09dc23c141e904a72"
 dependencies = [
  "anyhow",
  "bindgen 0.72.1",
@@ -2608,6 +2609,12 @@ name = "rand_core"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
+
+[[package]]
+name = "rand_core"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
 name = "regex"
