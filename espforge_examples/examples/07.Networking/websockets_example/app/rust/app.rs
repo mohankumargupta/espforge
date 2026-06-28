@@ -21,7 +21,7 @@ pub async fn forever(ctx: &mut Context) {
         match msg {
             Message::Text(s) => ctx.logger.info(s),
             Message::Binary(d) => { /* handle binary */ },
-            Message::Close(_) => { /* handle close */ },
+            Message::Close => { /* handle close */ },
             _ => {}
         }
     }

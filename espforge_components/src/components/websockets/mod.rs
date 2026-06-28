@@ -259,6 +259,8 @@ pub struct WebSocketClient<'a>
     tls_socket:  Option<alloc::boxed::Box<mbedtls_rs::Session<'a, TcpSocket>>>, 
     rx_buf:      Option<&'static mut [u8; 1536]>,
     tx_buf:      Option<&'static mut [u8; 1536]>,
+    tls:         Option<mbedtls_rs::TlsReference<'a>>,
+
 }
 
 impl<'a> WebSocketClient<'a>
@@ -267,6 +269,7 @@ impl<'a> WebSocketClient<'a>
         stack: Stack<'static>,
         uri: &str,
         resources: &'static mut WebSocketResources,
+        tls: Option<mbedtls_rs::TlsReference<'a>>,
     ) -> Self {
         let mut s: String<128> = String::new();
         let _ = s.push_str(uri);
@@ -277,6 +280,7 @@ impl<'a> WebSocketClient<'a>
             tls_socket: None,
             rx_buf: resources.rx_buf.as_mut().map(|b| b as &'static mut _),
             tx_buf: resources.tx_buf.as_mut().map(|b| b as &'static mut _),
+            tls,
         }
     }
 
@@ -316,11 +320,11 @@ impl<'a> WebSocketClient<'a>
         Ok((host, port, path, is_wss))
     }
 
-pub async fn connect(&mut self, tls_ctx: Option<mbedtls_rs::TlsReference<'a>>) -> Result<(), WebSocketError> {
+pub async fn connect(&mut self) -> Result<(), WebSocketError> {
         // 1. Parse the host domain and target port out of the client URI configuration
         let (host, port, path, is_wss) = self.parse_uri()?;
         
-         if is_wss && tls_ctx.is_none() {
+         if is_wss && self.tls.is_none() {
             return Err(WebSocketError::TlsError);
         }
         
