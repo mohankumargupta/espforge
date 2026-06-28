@@ -78,10 +78,13 @@ impl WebSocketClientPlugin {
         let tls_init: TokenStream = if needs_tls {
             quote! {
                 {
-                    static RNG_CELL: static_cell::StaticCell<espforge_platform::esp_hal::rng::Rng> = static_cell::StaticCell::new();
-                    static TLS_CELL: static_cell::StaticCell<mbedtls_rs::Tls<'static>> = static_cell::StaticCell::new();
-                    let rng = RNG_CELL.init(espforge_platform::esp_hal::rng::Rng::new());
-                    let tls = TLS_CELL.init(mbedtls_rs::Tls::new(rng).expect("Failed to initialize mbedtls"));
+                    static RNG_CELL: static_cell::StaticCell<espforge_components::components::websockets::TlsRng> = static_cell::StaticCell::new();
+                    static TLS_CELL: static_cell::StaticCell<espforge_components::mbedtls_rs::Tls<'static>> = static_cell::StaticCell::new();
+                    
+                    // We use `unsafe` because `Rng::new()` takes hardware ownership. 
+                    // This is safe here because it runs exactly once during initialization.
+                    let rng = RNG_CELL.init(espforge_components::components::websockets::TlsRng(unsafe { espforge_platform::rng::Rng::new() }));
+                    let tls = TLS_CELL.init(espforge_components::mbedtls_rs::Tls::new(rng).expect("Failed to initialize mbedtls"));
                     Some(tls.reference())
                 }
             }

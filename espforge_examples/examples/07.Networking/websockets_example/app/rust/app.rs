@@ -20,7 +20,7 @@ pub async fn forever(ctx: &mut Context) {
     if let Some(msg) = ws.receive(&mut buf).await.unwrap() {
         match msg {
             Message::Text(s) => ctx.logger.info(s),
-            Message::Binary(d) => { /* handle binary */ },
+            Message::Binary(_d) => { /* handle binary */ },
             Message::Close => { /* handle close */ },
             _ => {}
         }

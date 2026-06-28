@@ -50,6 +50,28 @@ impl fmt::Display for WebSocketError {
     }
 }
 
+// ── TLS RNG Wrapper ────────────────────────────────────────────────────────────
+
+pub struct TlsRng(pub espforge_platform::rng::Rng);
+
+impl rand_core::RngCore for TlsRng {
+    fn next_u32(&mut self) -> u32 {
+        self.0.random_u32()
+    }
+    fn next_u64(&mut self) -> u64 {
+        ((self.next_u32() as u64) << 32) | (self.next_u32() as u64)
+    }
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.0.fill_bytes(dest)
+    }
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+impl rand_core::CryptoRng for TlsRng {}
+
+
 // ── WebSocketResources ─────────────────────────────────────────────────────────
 
 pub struct WebSocketResources {
