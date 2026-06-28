@@ -1,9 +1,8 @@
-#![no_std] 
 extern crate alloc;
 
-use embedded_io_async::{Read, Write};
+//use embedded_io_async::{Read, Write};
 use core::fmt;
-use core::cell::RefCell;
+//use core::cell::RefCell;
 use espforge_platform::embassy_net::Stack;
 use heapless::String;
 use embedded_io_async::{ErrorType, Read as AsyncRead, Write as AsyncWrite};
@@ -81,21 +80,21 @@ impl Default for WebSocketResources {
 
 // ── Internal network helpers ────────────────────────────────────────────────────
 
-struct DnsError;
+// struct DnsError;
 
-impl fmt::Display for DnsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "DNS error") }
-}
+// impl fmt::Display for DnsError {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "DNS error") }
+// }
 
-impl fmt::Debug for DnsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "DnsError") }
-}
+// impl fmt::Debug for DnsError {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "DnsError") }
+// }
 
-impl core::error::Error for DnsError {}
+// impl core::error::Error for DnsError {}
 
-impl embedded_io_async::Error for DnsError {
-    fn kind(&self) -> embedded_io_async::ErrorKind { embedded_io_async::ErrorKind::Other }
-}
+// impl embedded_io_async::Error for DnsError {
+//     fn kind(&self) -> embedded_io_async::ErrorKind { embedded_io_async::ErrorKind::Other }
+// }
 
 #[derive(Debug)]
 pub struct NetError;
@@ -267,6 +266,7 @@ impl<'a> WebSocketClient<'a>
     pub fn new(
         stack: Stack<'static>,
         uri: &str,
+        resources: &'static mut WebSocketResources,
     ) -> Self {
         let mut s: String<128> = String::new();
         let _ = s.push_str(uri);
@@ -316,7 +316,7 @@ impl<'a> WebSocketClient<'a>
         Ok((host, port, path, is_wss))
     }
 
-pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result<(), WebSocketError> {
+pub async fn connect(&mut self, tls_ctx: Option<mbedtls_rs::TlsReference<'a>>) -> Result<(), WebSocketError> {
         // 1. Parse the host domain and target port out of the client URI configuration
         let (host, port, path, is_wss) = self.parse_uri()?;
         
@@ -345,10 +345,10 @@ pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result
         );
         
         emb_socket.connect(endpoint).await.map_err(|_| WebSocketError::ConnectionFailed)?;
-        let mut raw_socket = MyTcpSocket { socket: emb_socket };
+        let mut raw_socket = TcpSocket { socket: emb_socket };
 
         // 4. Generate upgrade nonce
-         let mut nonce = [0u8; 16];
+         let nonce = [0u8; 16];
 
         // 5. Multiplex WSS vs WS
         if is_wss {
@@ -463,7 +463,6 @@ pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result
     where
         S: embedded_io_async::Write,
     {
-        use embedded_io_async::Write;
         let mut line: heapless::String<128> = heapless::String::new();
         core::fmt::write(&mut line, format_args!("GET {} HTTP/1.1\r\n", path))
             .map_err(|_| WebSocketError::SendFailed)?;
@@ -490,7 +489,6 @@ pub async fn connect(&mut self, tls_ctx: mbedtls_rs::TlsReference<'a>) -> Result
     where
         S: embedded_io_async::Read,
     {
-        use embedded_io_async::Read;
         let mut resp_buf = [0u8; 1024];
         let mut total = 0usize;
 
