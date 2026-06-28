@@ -10,7 +10,13 @@ pub async fn forever(ctx: &mut Context) {
     let ws = component!(ws_client);
     
     // Connect
-    ws.connect().await.unwrap();
+    match ws.connect().await {
+        Ok(_) => ctx.logger.info("WebSocket connected!"),
+        Err(e) => {
+                    ctx.logger.info(format_args!("WebSocket error: {:?}", e));
+        panic!("connect failed");
+        }
+    }
     
     // Send message
     ws.send_text("Hello, WebSocket!").await.unwrap();
