@@ -8,6 +8,8 @@ pub async fn setup(ctx: &mut Context,  _spawner: Spawner) {
 
 pub async fn forever(ctx: &mut Context) {
     let ws = component!(ws_client);
+
+     ctx.logger.info(format_args!("has_tls: {}", ws.has_tls()));
     
     // Connect
     match ws.connect().await {

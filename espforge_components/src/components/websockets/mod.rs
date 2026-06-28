@@ -308,6 +308,10 @@ impl<'a> WebSocketClient<'a>
         }
     }
 
+    pub fn has_tls(&self) -> bool {
+        self.tls.is_some()
+    }
+
     pub fn is_connected(&self) -> bool {
         self.stack.is_link_up() && self.stack.config_v4().is_some()
     }
