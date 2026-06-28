@@ -1,11 +1,14 @@
 use anyhow::Result;
-
 use espforge_macros::ComponentPlugin;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 #[derive(ComponentPlugin)]
-#[plugin(name = "WebSocketClient", features = "websockets")]
+#[plugin(
+    name = "WebSocketClient", 
+    features = "websockets", 
+    pub_use = "espforge_components::Message"
+)]
 pub struct WebSocketClientPlugin;
 
 impl WebSocketClientPlugin {
@@ -46,9 +49,7 @@ impl WebSocketClientPlugin {
 
         let needs_tls = uri.starts_with("wss://");
 
-        // Static cell for WebSocketResources.
-        // esp-mbedtls manages TLS buffers internally, so WebSocketResources::new_with_tls()
-        // is now identical to WebSocketResources::new() — no separate TlsBuffers static needed.
+        // Statically bound cells ensuring safe lifetime extension when the struct connects
         let resources_cell = format_ident!("{}_WS_RESOURCES", instance_name.to_uppercase());
 
         let static_decl: TokenStream = quote! {
@@ -57,13 +58,11 @@ impl WebSocketClientPlugin {
             > = static_cell::StaticCell::new();
         };
 
+        // Explicit 'static bound added
         let field: TokenStream = quote! {
             pub #field_ident: espforge_components::components::websockets::WebSocketClient<'static>
         };
 
-        // For wss:// URIs, esp-mbedtls is initialised globally by the generated entry
-        // point (entry_point.rs) before Components::new() is called.  We do not need to
-        // pass any TLS handle here — esp-mbedtls uses a process-global context.
         let resources_init: TokenStream = if needs_tls {
             quote! {
                 #resources_cell.init(
