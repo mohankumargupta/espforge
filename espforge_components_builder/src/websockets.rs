@@ -7,7 +7,7 @@ use quote::{format_ident, quote};
 #[plugin(
     name = "WebSocketClient", 
     features = "websockets", 
-    pub_use = "espforge_components::Message"
+    pub_use = "espforge_components::Message" 
 )]
 pub struct WebSocketClientPlugin;
 
@@ -49,7 +49,6 @@ impl WebSocketClientPlugin {
 
         let needs_tls = uri.starts_with("wss://");
 
-        // Statically bound cells ensuring safe lifetime extension when the struct connects
         let resources_cell = format_ident!("{}_WS_RESOURCES", instance_name.to_uppercase());
 
         let static_decl: TokenStream = quote! {
@@ -58,7 +57,6 @@ impl WebSocketClientPlugin {
             > = static_cell::StaticCell::new();
         };
 
-        // Explicit 'static bound added
         let field: TokenStream = quote! {
             pub #field_ident: espforge_components::components::websockets::WebSocketClient<'static>
         };
@@ -77,12 +75,27 @@ impl WebSocketClientPlugin {
             }
         };
 
+        let tls_init: TokenStream = if needs_tls {
+            quote! {
+                {
+                    static RNG_CELL: static_cell::StaticCell<espforge_platform::esp_hal::rng::Rng> = static_cell::StaticCell::new();
+                    static TLS_CELL: static_cell::StaticCell<mbedtls_rs::Tls<'static>> = static_cell::StaticCell::new();
+                    let rng = RNG_CELL.init(espforge_platform::esp_hal::rng::Rng::new());
+                    let tls = TLS_CELL.init(mbedtls_rs::Tls::new(rng).expect("Failed to initialize mbedtls"));
+                    Some(tls.reference())
+                }
+            }
+        } else {
+            quote! { None }
+        };
+
         let init: TokenStream = quote! {
             #static_decl
             let #field_ident = espforge_components::components::websockets::WebSocketClient::new(
                 stack,
                 #uri,
                 #resources_init,
+                #tls_init
             );
         };
 

@@ -17,7 +17,7 @@ pub enum Message<'a> {
 }
 
 // ── Error type ─────────────────────────────────────────────────────────────────
-
+#[derive(Debug)]
 pub enum WebSocketError {
     DnsResolutionFailed,
     ConnectionFailed,
@@ -356,7 +356,7 @@ pub async fn connect(&mut self) -> Result<(), WebSocketError> {
 
         // 5. Multiplex WSS vs WS
         if is_wss {
-            let ctx = tls_ctx.ok_or(WebSocketError::TlsError)?;
+            let ctx = self.tls.ok_or(WebSocketError::TlsError)?;
             let session_config = mbedtls_rs::SessionConfig::Client(Default::default()); 
             
             let session = mbedtls_rs::Session::new(ctx, raw_socket, &session_config)
