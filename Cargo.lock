@@ -1548,7 +1548,7 @@ dependencies = [
  "espforge_platform",
  "heapless 0.9.3",
  "mbedtls-rs",
- "rand_core 0.6.4",
+ "rand_core 0.10.1",
  "reqwless",
  "sha1",
 ]
