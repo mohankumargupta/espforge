@@ -2,6 +2,8 @@
 pub mod button;
 #[cfg(feature = "http")]
 pub mod http;
+#[cfg(feature = "https")]
+pub mod https;
 #[cfg(feature = "i2c")]
 pub mod i2c;
 #[cfg(feature = "led")]

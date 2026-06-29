@@ -5,9 +5,9 @@ use quote::{format_ident, quote};
 
 #[derive(ComponentPlugin)]
 #[plugin(
-    name = "WebSocketClient", 
-    features = "websockets", 
-    pub_use = "espforge_components::Message" 
+    name = "WebSocketClient",
+    features = "websockets",
+    pub_use = "espforge_components::Message"
 )]
 pub struct WebSocketClientPlugin;
 
@@ -80,8 +80,8 @@ impl WebSocketClientPlugin {
                 {
                     static RNG_CELL: static_cell::StaticCell<espforge_components::components::websockets::TlsRng> = static_cell::StaticCell::new();
                     static TLS_CELL: static_cell::StaticCell<espforge_components::mbedtls_rs::Tls<'static>> = static_cell::StaticCell::new();
-                    
-                    // We use `unsafe` because `Rng::new()` takes hardware ownership. 
+
+                    // We use `unsafe` because `Rng::new()` takes hardware ownership.
                     // This is safe here because it runs exactly once during initialization.
                     let rng = RNG_CELL.init(espforge_components::components::websockets::TlsRng(unsafe { espforge_platform::rng::Rng::new() }));
                     let tls = TLS_CELL.init(espforge_components::mbedtls_rs::Tls::new(rng).expect("Failed to initialize mbedtls"));
@@ -109,4 +109,3 @@ impl WebSocketClientPlugin {
         })
     }
 }
-

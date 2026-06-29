@@ -25,8 +25,11 @@ pub fn generate_component_code(src_dir: &Path, model: &EspforgeConfiguration) ->
 }
 
 /// Creates the lib.rs file that exports the project structure
-pub fn setup_library_structure(src_dir: &Path, additional_modules: &[String], model: &EspforgeConfiguration) -> Result<()> {
-    
+pub fn setup_library_structure(
+    src_dir: &Path,
+    additional_modules: &[String],
+    model: &EspforgeConfiguration,
+) -> Result<()> {
     let content = generate_lib_source(additional_modules, model)?;
     fs::write(src_dir.join("lib.rs"), content).context("Failed to write src/lib.rs")?;
     Ok(())

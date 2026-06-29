@@ -103,7 +103,6 @@ impl EntryPointGenerator for EmbassyEntryPoint {
         let wifi_tasks = generate_wifi_tasks(model);
         let wifi_init = generate_wifi_init(model);
 
-
         // ── esp-mbedtls: detect whether any component uses wss:// ─────────────
         let needs_tls = model.components.values().any(|spec| {
             spec.properties
@@ -128,7 +127,6 @@ impl EntryPointGenerator for EmbassyEntryPoint {
             quote! {}
         };
         // ─────────────────────────────────────────────────────────────────────
-        
 
         let tokens = quote! {
             #![no_std]
@@ -223,7 +221,11 @@ impl CommonEntryPointCode {
 
         let needs_stack = model.components.values().any(|spec| {
             crate::registry::find_plugin(&spec.driver)
-                .map(|p| p.required_features().iter().any(|f| f == "http" || f == "websockets"))
+                .map(|p| {
+                    p.required_features()
+                        .iter()
+                        .any(|f| f == "http" || f == "https" || f == "websockets")
+                })
                 .unwrap_or(false)
         });
 

@@ -1,5 +1,6 @@
 pub mod button;
 pub mod http;
+pub mod https;
 pub mod i2c;
 pub mod led;
 pub mod spi;

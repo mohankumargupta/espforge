@@ -4,12 +4,12 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 pub mod gpio;
+pub mod heap;
 pub mod i2c;
 pub mod psram;
 pub mod spi;
 pub mod uart;
 pub mod wifi;
-pub mod heap;
 
 use heap::HeapConfig;
 

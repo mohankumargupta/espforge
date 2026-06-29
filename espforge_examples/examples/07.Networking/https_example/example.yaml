@@ -1,5 +1,5 @@
 espforge:
-  name: wifi_example
+  name: https_example
   platform: esp32c3
   runtime: embassy
   alloc: true
@@ -7,15 +7,16 @@ espforge:
 esp32:
   # Explicit heap configuration required for TLS buffers
   heap:
-    size: 60000 # 72KB - enough for stack + TLS overhead
+    size: 66320 # 72KB - enough for stack + TLS overhead
   wifi:
     ssid: Wokwi-GUEST
     password: ""
     auth: open
 
 components:
-  ws_client:
-    using: WebSocketClient
-    with:
-      uri: "wss://ws.postman-echo.com/raw"
+  https:
+    using: HttpsClient
+    with: {}
+
+
 

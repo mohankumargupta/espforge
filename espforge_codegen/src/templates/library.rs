@@ -1,13 +1,18 @@
+use crate::registry::find_plugin;
 use anyhow::{Context, Result};
+use espforge_configuration::EspforgeConfiguration;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use espforge_configuration::EspforgeConfiguration;
-use crate::registry::find_plugin;
 
 use crate::templates::{common::format_generated_source, constants::origins};
 
-pub fn generate_lib_source(additional_modules: &[String],  model: &EspforgeConfiguration) -> Result<String> {
-    let extra_uses: Vec<&'static str> = model.components.values()
+pub fn generate_lib_source(
+    additional_modules: &[String],
+    model: &EspforgeConfiguration,
+) -> Result<String> {
+    let extra_uses: Vec<&'static str> = model
+        .components
+        .values()
         .filter_map(|spec| find_plugin(&spec.driver))
         .flat_map(|p| p.pub_use())
         .collect();
@@ -22,18 +27,21 @@ pub fn generate_lib_source(additional_modules: &[String],  model: &EspforgeConfi
 
 struct LibraryBuilder<'a> {
     additional_modules: &'a [String],
-    extra_uses: &'a [&'static str], 
+    extra_uses: &'a [&'static str],
 }
 
 impl<'a> LibraryBuilder<'a> {
     fn new(additional_modules: &'a [String], extra_uses: &'a [&'static str]) -> Self {
-        Self { additional_modules, extra_uses }
+        Self {
+            additional_modules,
+            extra_uses,
+        }
     }
 
     fn build(self) -> TokenStream {
         let mod_declarations = self.module_declarations();
         let macros = self.access_macros();
-        let pub_uses = self.pub_uses(); 
+        let pub_uses = self.pub_uses();
 
         quote! {
             #![no_std]
@@ -104,9 +112,12 @@ impl<'a> LibraryBuilder<'a> {
     }
 
     fn pub_uses(&self) -> TokenStream {
-        self.extra_uses.iter().map(|path| {
-            let ts: proc_macro2::TokenStream = path.parse().unwrap();
-            quote! { pub use #ts; }
-        }).collect()
+        self.extra_uses
+            .iter()
+            .map(|path| {
+                let ts: proc_macro2::TokenStream = path.parse().unwrap();
+                quote! { pub use #ts; }
+            })
+            .collect()
     }
 }

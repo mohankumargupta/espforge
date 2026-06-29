@@ -21,7 +21,9 @@ impl Rng {
     /// immediately after.
     pub unsafe fn new() -> Self {
         // esp-hal 1.1: Rng::new() takes no arguments
-        Self { inner: HalRng::new() }
+        Self {
+            inner: HalRng::new(),
+        }
     }
 
     /// Return a random `u32`.
@@ -46,4 +48,3 @@ impl Rng {
         }
     }
 }
-

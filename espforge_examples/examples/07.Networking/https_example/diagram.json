@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "author": "Gayathry V",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "PLACEHOLDER_WOKWI_BOARD",
+      "id": "esp",
+      "top": 7.34,
+      "left": -82.67,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    ["esp:TX", "$serialMonitor:RX", "", []],
+    ["esp:RX", "$serialMonitor:TX", "", []]
+  ],
+  "dependencies": {}
+}

@@ -5,4 +5,3 @@ pub struct HeapConfig {
     /// Heap size in bytes. Overrides the chip-database default when set.
     pub size: usize,
 }
-

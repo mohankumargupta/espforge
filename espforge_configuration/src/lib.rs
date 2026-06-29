@@ -73,9 +73,13 @@ impl EspforgeConfiguration {
         //     .get("alloc")
         //     .map(|s| s == "true")
         //     .unwrap_or(false)
-    let explicit = self.espforge.get("alloc").map(|s| s == "true").unwrap_or(false);
-    let has_heap_block = self.esp32.as_ref().and_then(|e| e.heap.as_ref()).is_some();
-    explicit || has_heap_block
+        let explicit = self
+            .espforge
+            .get("alloc")
+            .map(|s| s == "true")
+            .unwrap_or(false);
+        let has_heap_block = self.esp32.as_ref().and_then(|e| e.heap.as_ref()).is_some();
+        explicit || has_heap_block
     }
 
     /// Get heap size for the configured chip
@@ -85,14 +89,15 @@ impl EspforgeConfiguration {
             return None;
         }
 
-    // 1. Explicit YAML override
-    if let Some(size) = self.esp32.as_ref()
-        .and_then(|e| e.heap.as_ref())
-        .map(|h| h.size)
-    {
-        return Some(size);
-    }
-
+        // 1. Explicit YAML override
+        if let Some(size) = self
+            .esp32
+            .as_ref()
+            .and_then(|e| e.heap.as_ref())
+            .map(|h| h.size)
+        {
+            return Some(size);
+        }
 
         // Load chip database and get heap size for the configured chip
         let db = espforge_esp32metadata::BoardDatabase::load();
