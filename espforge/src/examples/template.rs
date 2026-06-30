@@ -85,7 +85,9 @@ impl ExampleTemplate {
     }
 
     pub fn read_chip_from_yaml(&self) -> Option<String> {
-        let yaml_file = self.dir.get_file("example.yaml")?;
+        let yaml_file = self.dir.files().find(|f| {
+            f.path().file_name().and_then(|n| n.to_str()) == Some("example.yaml")
+        })?;
         let content = std::str::from_utf8(yaml_file.contents()).ok()?;
         let doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(content).ok()?;
         doc.get("espforge")
