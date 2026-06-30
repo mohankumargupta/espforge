@@ -1,12 +1,17 @@
 extern crate alloc;
 
-//use embedded_io_async::{Read, Write};
 use core::fmt;
-//use core::cell::RefCell;
-use edge_nal::{TcpShutdown, TcpSplit};
-use embedded_io_async::{ErrorType, Read as AsyncRead, Write as AsyncWrite};
 use espforge_platform::embassy_net::Stack;
 use heapless::String;
+use core::net::SocketAddr;
+use edge_http::io::client::Connection;
+use edge_http::ws::{MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
+use edge_nal::{AddrType, Dns, TcpConnect};
+use edge_nal_embassy::{Dns as EmbassyDns, Tcp, TcpBuffers, TcpConnection};
+use edge_nal_tls::mbedtls::{AuthMode, ClientSessionConfig, TlsConnection};
+use edge_nal_tls::TlsConnector;
+use edge_ws::{FrameHeader, FrameType};
+use embedded_io_async::{Read, Write};
 
 pub enum Message<'a> {
     Text(&'a str),
@@ -30,6 +35,7 @@ pub enum WebSocketError {
     UnexpectedFrame,
     NotConnected,
     DnsFailed,
+    HostTooLong,
 }
 
 impl fmt::Display for WebSocketError {
@@ -46,6 +52,7 @@ impl fmt::Display for WebSocketError {
             Self::ProtocolError => write!(f, "WebSocket protocol error"),
             Self::UnexpectedFrame => write!(f, "Unexpected WebSocket frame type"),
             Self::NotConnected => write!(f, "Client is not connected"),
+            Self::HostTooLong => write!(f, "Host name too long"),
         }
     }
 }
@@ -77,17 +84,17 @@ impl rand_core::TryCryptoRng for TlsRng {}
 // ── WebSocketResources ─────────────────────────────────────────────────────────
 
 pub struct WebSocketResources {
-    pub rx_buf: Option<[u8; 1536]>,
-    pub tx_buf: Option<[u8; 1536]>,
-    pub payload_buf: Option<[u8; 1536]>,
+    pub io_buf: [u8; 1536],
+    pub tcp_buffers: TcpBuffers<1, 1536, 1536>,
+    pub server_name_buf: [u8; 129],
 }
 
 impl WebSocketResources {
     pub const fn new() -> Self {
         Self {
-            rx_buf: Some([0u8; 1536]),
-            tx_buf: Some([0u8; 1536]),
-            payload_buf: Some([0u8; 1536]),
+            io_buf: [0u8; 1536],
+            tcp_buffers: TcpBuffers::new(),
+            server_name_buf: [0u8; 129],
         }
     }
 
@@ -102,229 +109,20 @@ impl Default for WebSocketResources {
     }
 }
 
-// ── Internal network helpers ────────────────────────────────────────────────────
-
-// struct DnsError;
-
-// impl fmt::Display for DnsError {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "DNS error") }
-// }
-
-// impl fmt::Debug for DnsError {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "DnsError") }
-// }
-
-// impl core::error::Error for DnsError {}
-
-// impl embedded_io_async::Error for DnsError {
-//     fn kind(&self) -> embedded_io_async::ErrorKind { embedded_io_async::ErrorKind::Other }
-// }
-
-#[derive(Debug)]
-pub struct NetError;
-
-impl fmt::Display for NetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Network error")
+fn server_name_cstr<'a>(host: &str, buf: &'a mut [u8; 129]) -> Result<&'a core::ffi::CStr, WebSocketError> {
+    if host.len() >= buf.len() {
+        return Err(WebSocketError::HostTooLong);
     }
+    buf.fill(0);
+    buf[..host.len()].copy_from_slice(host.as_bytes());
+    core::ffi::CStr::from_bytes_until_nul(buf).map_err(|_| WebSocketError::InvalidUri)
 }
-
-impl core::error::Error for NetError {}
-
-impl embedded_io_async::Error for NetError {
-    fn kind(&self) -> embedded_io_async::ErrorKind {
-        embedded_io_async::ErrorKind::Other
-    }
-}
-
-pub struct TcpSocket {
-    socket: espforge_platform::embassy_net::tcp::TcpSocket<'static>,
-}
-
-impl ErrorType for TcpSocket {
-    type Error = NetError;
-}
-
-impl edge_nal::Readable for TcpSocket {
-    async fn readable(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-pub struct TcpSocketRead<'a> {
-    socket: *mut espforge_platform::embassy_net::tcp::TcpSocket<'static>,
-    _phantom: core::marker::PhantomData<&'a ()>,
-}
-
-pub struct TcpSocketWrite<'a> {
-    socket: *mut espforge_platform::embassy_net::tcp::TcpSocket<'static>,
-    _phantom: core::marker::PhantomData<&'a ()>,
-}
-
-impl ErrorType for TcpSocketRead<'_> {
-    type Error = NetError;
-}
-impl AsyncRead for TcpSocketRead<'_> {
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        unsafe { &mut *self.socket }
-            .read(buf)
-            .await
-            .map_err(|_| NetError)
-    }
-}
-
-impl edge_nal::Readable for TcpSocketRead<'_> {
-    async fn readable(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-impl ErrorType for TcpSocketWrite<'_> {
-    type Error = NetError;
-}
-impl AsyncWrite for TcpSocketWrite<'_> {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        unsafe { &mut *self.socket }
-            .write(buf)
-            .await
-            .map_err(|_| NetError)
-    }
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        unsafe { &mut *self.socket }
-            .flush()
-            .await
-            .map_err(|_| NetError)
-    }
-}
-
-impl TcpSplit for TcpSocket {
-    type Read<'a>
-        = TcpSocketRead<'a>
-    where
-        Self: 'a;
-    type Write<'a>
-        = TcpSocketWrite<'a>
-    where
-        Self: 'a;
-
-    fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) {
-        let ptr = &mut self.socket as *mut _;
-        (
-            TcpSocketRead {
-                socket: ptr,
-                _phantom: core::marker::PhantomData,
-            },
-            TcpSocketWrite {
-                socket: ptr,
-                _phantom: core::marker::PhantomData,
-            },
-        )
-    }
-}
-
-impl AsyncRead for TcpSocket {
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        self.socket.read(buf).await.map_err(|_| NetError)
-    }
-}
-
-impl AsyncWrite for TcpSocket {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.socket.write(buf).await.map_err(|_| NetError)
-    }
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.socket.flush().await.map_err(|_| NetError)
-    }
-}
-
-impl TcpShutdown for TcpSocket {
-    async fn close(&mut self, _behavior: edge_nal::Close) -> Result<(), Self::Error> {
-        self.socket.close();
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<(), Self::Error> {
-        self.socket.abort();
-        Ok(())
-    }
-}
-
-// ── WebSocket upgrade helpers ───────────────────────────────────────────────────
-
-fn upgrade_request_headers<'a>(
-    host: &'a str,
-    _path: &'a str,
-    nonce: &'a [u8],
-) -> heapless::Vec<(&'static str, heapless::String<64>), 8> {
-    use base64::Engine;
-    let mut key_buf = [0u8; 28];
-    let mut v: heapless::Vec<(&'static str, heapless::String<64>), 8> = heapless::Vec::new();
-
-    let _ = base64::engine::general_purpose::STANDARD
-        .encode_slice(nonce, &mut key_buf)
-        .ok();
-    let key_str = core::str::from_utf8(&key_buf).unwrap_or("");
-    let mut key_heapless: heapless::String<64> = heapless::String::new();
-    let _ = key_heapless.push_str(key_str);
-
-    let mut host_heapless: heapless::String<64> = heapless::String::new();
-    let _ = host_heapless.push_str(host);
-
-    let _ = v.push(("Host", host_heapless));
-    let _ = v.push(("Upgrade", {
-        let mut s = heapless::String::new();
-        let _ = s.push_str("websocket");
-        s
-    }));
-    let _ = v.push(("Connection", {
-        let mut s = heapless::String::new();
-        let _ = s.push_str("Upgrade");
-        s
-    }));
-    let _ = v.push(("Sec-WebSocket-Key", key_heapless));
-    let _ = v.push(("Sec-WebSocket-Version", {
-        let mut s = heapless::String::new();
-        let _ = s.push_str("13");
-        s
-    }));
-    v
-}
-
-fn is_upgrade_accepted<'a>(
-    nonce: &[u8],
-    headers: impl Iterator<Item = (&'a str, &'a str)>,
-) -> bool {
-    use base64::Engine;
-    use sha1::{Digest, Sha1};
-
-    let mut key_b64 = [0u8; 28];
-    let _ = base64::engine::general_purpose::STANDARD.encode_slice(nonce, &mut key_b64);
-
-    let mut hasher = Sha1::new();
-    hasher.update(&key_b64);
-    hasher.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-    let expected = hasher.finalize();
-
-    let mut expected_b64 = [0u8; 28];
-    let _ = base64::engine::general_purpose::STANDARD.encode_slice(&expected, &mut expected_b64);
-
-    for (name, value) in headers {
-        if name.eq_ignore_ascii_case("sec-websocket-accept") {
-            return value.as_bytes() == &expected_b64[..];
-        }
-    }
-    false
-}
-
 // ── WebSocketClient ─────────────────────────────────────────────────────────────
 
 pub struct WebSocketClient<'a> {
-    stack: Stack<'static>,
-    uri: String<128>,
-    socket: Option<TcpSocket>,
-    tls_socket: Option<alloc::boxed::Box<mbedtls_rs::Session<'a, TcpSocket>>>,
-    rx_buf: Option<&'static mut [u8; 1536]>,
-    tx_buf: Option<&'static mut [u8; 1536]>,
+    socket: Option<TcpConnection<'static, 1, 1536, 1536>>,
+    tls_socket: Option<TlsConnection<'a, TcpConnection<'static, 1, 1536, 1536>>>,
+    resources: &'static mut WebSocketResources,
     tls: Option<mbedtls_rs::TlsReference<'a>>,
 }
 
@@ -342,8 +140,7 @@ impl<'a> WebSocketClient<'a> {
             uri: s,
             socket: None,
             tls_socket: None,
-            rx_buf: resources.rx_buf.as_mut().map(|b| b as &'static mut _),
-            tx_buf: resources.tx_buf.as_mut().map(|b| b as &'static mut _),
+            resources,
             tls,
         }
     }
@@ -393,252 +190,213 @@ impl<'a> WebSocketClient<'a> {
     }
 
     pub async fn connect(&mut self) -> Result<(), WebSocketError> {
-        // 1. Parse the host domain and target port out of the client URI configuration
+        self.socket = None;
+        self.tls_socket = None;
+
         let (host, port, path, is_wss) = self.parse_uri()?;
 
         if is_wss && self.tls.is_none() {
             return Err(WebSocketError::TlsError);
         }
 
-        // 1. Resolve DNS natively with Embassy
-        let addrs = self
-            .stack
-            .dns_query(&host, espforge_platform::embassy_net::dns::DnsQueryType::A)
+        let dns = EmbassyDns::new(self.stack);
+        let ip = dns
+            .get_host_by_name(host.as_str(), AddrType::IPv4)
             .await
             .map_err(|_| WebSocketError::DnsFailed)?;
 
-        let remote_ip = *addrs.first().ok_or(WebSocketError::DnsFailed)?;
-        let endpoint = espforge_platform::embassy_net::IpEndpoint::new(remote_ip, port);
+        let addr = SocketAddr::new(ip, port);
+        let tcp = Tcp::new(self.stack, &self.resources.tcp_buffers);
 
-        // 2. Extract static buffers safely
-        let rx_buf = self.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
-        let tx_buf = self.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
+        let mut nonce = [0_u8; NONCE_LEN];        
 
-        // 3. Establish the raw TCP socket
-        let mut emb_socket =
-            espforge_platform::embassy_net::tcp::TcpSocket::new(self.stack, rx_buf, tx_buf);
-
-        emb_socket
-            .connect(endpoint)
-            .await
-            .map_err(|_| WebSocketError::ConnectionFailed)?;
-        let mut raw_socket = TcpSocket { socket: emb_socket };
-
-        // 4. Generate upgrade nonce
-        let mut nonce = [0u8; 16];
         unsafe { espforge_platform::rng::Rng::new() }.fill_bytes(&mut nonce);
 
-        // 5. Multiplex WSS vs WS
+        let host_str = host.as_str();
+        let path_str = path.as_str();
+
         if is_wss {
-            let ctx = self.tls.ok_or(WebSocketError::TlsError)?;
-            let session_config = mbedtls_rs::SessionConfig::Client(Default::default());
+            let tls_ref = self.tls.ok_or(WebSocketError::TlsError)?;
+            let server_name = server_name_cstr(host_str, &mut self.resources.server_name_buf)?;
+            let config = ClientSessionConfig {
+                server_name: Some(server_name),
+                auth_mode: AuthMode::None,
+                ..ClientSessionConfig::new()
+            };
+            let connector = TlsConnector::new(tls_ref, tcp, &config);
 
-            let session = mbedtls_rs::Session::new(ctx, raw_socket, &session_config)
-                .map_err(|_| WebSocketError::TlsError)?;
+            let mut conn = Connection::<_, 16>::new(&mut self.resources.io_buf, &connector, addr);
 
-            let mut boxed_session = alloc::boxed::Box::new(session);
-            boxed_session
-                .connect()
-                .await
-                .map_err(|_| WebSocketError::TlsError)?;
+            let mut buf = [0_u8; MAX_BASE64_KEY_LEN];
+            conn.initiate_ws_upgrade_request(Some(host_str), Some("foo.com"), path_str, None, &nonce, &mut buf)
+                .await.map_err(|_| WebSocketError::HandshakeFailed)?;
+            
+            conn.initiate_response().await.map_err(|_| WebSocketError::HandshakeFailed)?;
 
-            self.do_ws_upgrade_tls(&mut *boxed_session, &host, &path, &nonce)
-                .await?;
-            self.tls_socket = Some(boxed_session);
+            let mut buf2 = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
+            if !conn.is_ws_upgrade_accepted(&nonce, &mut buf2).map_err(|_| WebSocketError::HandshakeFailed)? {
+                return Err(WebSocketError::HandshakeFailed);
+            }
+
+            conn.complete().await.map_err(|_| WebSocketError::HandshakeFailed)?;
+
+            let (socket, _) = conn.release();
+            self.tls_socket = Some(socket);
         } else {
-            self.do_ws_upgrade_plain(&mut raw_socket, &host, &path, &nonce)
-                .await?;
-            self.socket = Some(raw_socket);
+            let mut conn = Connection::<_, 16>::new(&mut self.resources.io_buf, &tcp, addr);
+
+            let mut buf = [0_u8; MAX_BASE64_KEY_LEN];
+            conn.initiate_ws_upgrade_request(Some(host_str), Some("foo.com"), path_str, None, &nonce, &mut buf)
+                .await.map_err(|_| WebSocketError::HandshakeFailed)?;
+            
+            conn.initiate_response().await.map_err(|_| WebSocketError::HandshakeFailed)?;
+
+            let mut buf2 = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
+            if !conn.is_ws_upgrade_accepted(&nonce, &mut buf2).map_err(|_| WebSocketError::HandshakeFailed)? {
+                return Err(WebSocketError::HandshakeFailed);
+            }
+
+            conn.complete().await.map_err(|_| WebSocketError::HandshakeFailed)?;
+
+            let (socket, _) = conn.release();
+            self.socket = Some(socket);
+
         }
         Ok(())
     }
 
-    //     async fn connect_plain(
-    //         &mut self,
-    //         host: String<64>,
-    //         port: u16,
-    //         path: String<64>,
-    //     ) -> Result<(), WebSocketError> {
-    //         let rx = self.resources.rx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
-    //         let tx = self.resources.tx_buf.take().ok_or(WebSocketError::ConnectionFailed)?;
 
-    //         let adapter = NetworkAdapter::new(self.stack, rx, tx);
+    // async fn do_ws_upgrade_plain(
+    //     &mut self,
+    //     socket: &mut TcpSocket,
+    //     host: &str,
+    //     path: &str,
+    //     nonce: &[u8],
+    // ) -> Result<(), WebSocketError> {
+    //     self.send_upgrade_request(socket, host, path, nonce).await?;
+    //     self.read_upgrade_response(socket, nonce).await
+    // }
 
-    //         let ip = edge_nal::Dns::get_host_by_name(&adapter, host.as_str(), AddrType::IPv4)
+    // async fn do_ws_upgrade_tls<S>(
+    //     &mut self,
+    //     session: &mut S,
+    //     host: &str,
+    //     path: &str,
+    //     nonce: &[u8],
+    // ) -> Result<(), WebSocketError>
+    // where
+    //     S: embedded_io_async::Read + embedded_io_async::Write,
+    // {
+    //     self.send_upgrade_request(session, host, path, nonce)
+    //         .await?;
+    //     self.read_upgrade_response(session, nonce).await
+    // }
+
+    // async fn send_upgrade_request<S>(
+    //     &self,
+    //     stream: &mut S,
+    //     host: &str,
+    //     path: &str,
+    //     nonce: &[u8],
+    // ) -> Result<(), WebSocketError>
+    // where
+    //     S: embedded_io_async::Write,
+    // {
+    //     let mut line: heapless::String<128> = heapless::String::new();
+    //     core::fmt::write(&mut line, format_args!("GET {} HTTP/1.1\r\n", path))
+    //         .map_err(|_| WebSocketError::SendFailed)?;
+    //     let logger = espforge_platform::logger::Logger::new();
+    //     logger.info("Sending:");
+    //     logger.info(line.as_str());
+    //     stream
+    //         .write_all(line.as_bytes())
+    //         .await
+    //         .map_err(|_| WebSocketError::SendFailed)?;
+
+    //     let headers = upgrade_request_headers(host, path, nonce);
+    //     for (name, value) in headers.iter() {
+    //         let mut hdr: heapless::String<128> = heapless::String::new();
+    //         core::fmt::write(&mut hdr, format_args!("{}: {}\r\n", name, value))
+    //             .map_err(|_| WebSocketError::SendFailed)?;
+    //         logger.info("Headers:");
+    //         logger.info(hdr.as_str());
+
+    //         stream
+    //             .write_all(hdr.as_bytes())
     //             .await
-    //             .map_err(|_| WebSocketError::DnsResolutionFailed)?;
-
-    //         let remote: core::net::SocketAddr = core::net::SocketAddr::new(ip, port);
-    //         let mut socket = adapter.connect(remote).await.map_err(|_| WebSocketError::ConnectionFailed)?;
-
-    //         let mut nonce = [0u8; 16];
-    //         unsafe { espforge_platform::rng::Rng::new() }.fill_bytes(&mut nonce);
-
-    //         self.do_ws_upgrade_plain(&mut socket, &host, &path, &nonce).await?;
-    //         self.socket = Some(socket);
-    //         Ok(())
+    //             .map_err(|_| WebSocketError::SendFailed)?;
     //     }
 
-    // // FIX: Remove the generic type parameter <T> and accept TcpSocket directly
-    //     pub async fn connect_tls(
-    //         &mut self,
-    //         raw_socket: TcpSocket,
-    //         tls_ctx: mbedtls_rs::TlsReference<'a>,
-    //     ) -> Result<(), WebSocketError> {
-    //         // FIX: Construct the variant using its default inner configuration
-    //         let session_config = mbedtls_rs::SessionConfig::Client(Default::default());
+    //     stream
+    //         .write_all(b"\r\n")
+    //         .await
+    //         .map_err(|_| WebSocketError::SendFailed)?;
+    //     stream
+    //         .flush()
+    //         .await
+    //         .map_err(|_| WebSocketError::SendFailed)?;
+    //     Ok(())
+    // }
 
-    //         // Instantiate the session
-    //         let session = mbedtls_rs::Session::new(
-    //             tls_ctx,
-    //             raw_socket,
-    //             &session_config,
-    //         )
-    //         .map_err(|_| WebSocketError::TlsError)?;
+    // async fn read_upgrade_response<S>(
+    //     &self,
+    //     stream: &mut S,
+    //     nonce: &[u8],
+    // ) -> Result<(), WebSocketError>
+    // where
+    //     S: embedded_io_async::Read,
+    // {
+    //     let mut resp_buf = [0u8; 1024];
+    //     let mut total = 0usize;
 
-    //         // Wrap the session object up inside our target Box type
-    //         let mut boxed_session = alloc::boxed::Box::new(session);
-
-    //         // Establish the encrypted TLS session handshake
-    //         boxed_session.connect().await.map_err(|_| WebSocketError::TlsError)?;
-
-    //         // Safely store the active session inside the client state context
-    //         // This will now match Box<Session<'_, TcpSocket>> perfectly!
-    //         self.tls_socket = Some(boxed_session);
-    //         Ok(())
+    //     loop {
+    //         let n = stream
+    //             .read(&mut resp_buf[total..])
+    //             .await
+    //             .map_err(|_| WebSocketError::HandshakeFailed)?;
+    //         total += n;
+    //         if resp_buf[..total].windows(4).any(|w| w == b"\r\n\r\n") {
+    //             break;
+    //         }
+    //         if total >= resp_buf.len() {
+    //             break;
+    //         }
     //     }
 
-    async fn do_ws_upgrade_plain(
-        &mut self,
-        socket: &mut TcpSocket,
-        host: &str,
-        path: &str,
-        nonce: &[u8],
-    ) -> Result<(), WebSocketError> {
-        self.send_upgrade_request(socket, host, path, nonce).await?;
-        self.read_upgrade_response(socket, nonce).await
-    }
+    //     let response = core::str::from_utf8(&resp_buf[..total])
+    //         .map_err(|_| WebSocketError::HandshakeFailed)?;
 
-    async fn do_ws_upgrade_tls<S>(
-        &mut self,
-        session: &mut S,
-        host: &str,
-        path: &str,
-        nonce: &[u8],
-    ) -> Result<(), WebSocketError>
-    where
-        S: embedded_io_async::Read + embedded_io_async::Write,
-    {
-        self.send_upgrade_request(session, host, path, nonce)
-            .await?;
-        self.read_upgrade_response(session, nonce).await
-    }
+    //     let logger = espforge_platform::logger::Logger::new();
+    //     logger.info("Server response:");
+    //     logger.info(response);
 
-    async fn send_upgrade_request<S>(
-        &self,
-        stream: &mut S,
-        host: &str,
-        path: &str,
-        nonce: &[u8],
-    ) -> Result<(), WebSocketError>
-    where
-        S: embedded_io_async::Write,
-    {
-        let mut line: heapless::String<128> = heapless::String::new();
-        core::fmt::write(&mut line, format_args!("GET {} HTTP/1.1\r\n", path))
-            .map_err(|_| WebSocketError::SendFailed)?;
-        let logger = espforge_platform::logger::Logger::new();
-        logger.info("Sending:");
-        logger.info(line.as_str());
-        stream
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|_| WebSocketError::SendFailed)?;
+    //     let status: u16 = response
+    //         .lines()
+    //         .next()
+    //         .and_then(|l| l.split_whitespace().nth(1))
+    //         .and_then(|s| s.parse::<u16>().ok())
+    //         .ok_or(WebSocketError::HandshakeFailed)?;
 
-        let headers = upgrade_request_headers(host, path, nonce);
-        for (name, value) in headers.iter() {
-            let mut hdr: heapless::String<128> = heapless::String::new();
-            core::fmt::write(&mut hdr, format_args!("{}: {}\r\n", name, value))
-                .map_err(|_| WebSocketError::SendFailed)?;
-            logger.info("Headers:");
-            logger.info(hdr.as_str());
+    //     if status != 101 {
+    //         return Err(WebSocketError::HandshakeFailed);
+    //     }
 
-            stream
-                .write_all(hdr.as_bytes())
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
-        }
+    //     let resp_headers: heapless::Vec<(&str, &str), 16> = response
+    //         .lines()
+    //         .skip(1)
+    //         .filter_map(|line| {
+    //             let mut parts = line.splitn(2, ':');
+    //             let name = parts.next()?.trim();
+    //             let value = parts.next()?.trim();
+    //             Some((name, value))
+    //         })
+    //         .collect();
 
-        stream
-            .write_all(b"\r\n")
-            .await
-            .map_err(|_| WebSocketError::SendFailed)?;
-        stream
-            .flush()
-            .await
-            .map_err(|_| WebSocketError::SendFailed)?;
-        Ok(())
-    }
-
-    async fn read_upgrade_response<S>(
-        &self,
-        stream: &mut S,
-        nonce: &[u8],
-    ) -> Result<(), WebSocketError>
-    where
-        S: embedded_io_async::Read,
-    {
-        let mut resp_buf = [0u8; 1024];
-        let mut total = 0usize;
-
-        loop {
-            let n = stream
-                .read(&mut resp_buf[total..])
-                .await
-                .map_err(|_| WebSocketError::HandshakeFailed)?;
-            total += n;
-            if resp_buf[..total].windows(4).any(|w| w == b"\r\n\r\n") {
-                break;
-            }
-            if total >= resp_buf.len() {
-                break;
-            }
-        }
-
-        let response = core::str::from_utf8(&resp_buf[..total])
-            .map_err(|_| WebSocketError::HandshakeFailed)?;
-
-        let logger = espforge_platform::logger::Logger::new();
-        logger.info("Server response:");
-        logger.info(response);
-
-        let status: u16 = response
-            .lines()
-            .next()
-            .and_then(|l| l.split_whitespace().nth(1))
-            .and_then(|s| s.parse::<u16>().ok())
-            .ok_or(WebSocketError::HandshakeFailed)?;
-
-        if status != 101 {
-            return Err(WebSocketError::HandshakeFailed);
-        }
-
-        let resp_headers: heapless::Vec<(&str, &str), 16> = response
-            .lines()
-            .skip(1)
-            .filter_map(|line| {
-                let mut parts = line.splitn(2, ':');
-                let name = parts.next()?.trim();
-                let value = parts.next()?.trim();
-                Some((name, value))
-            })
-            .collect();
-
-        if !is_upgrade_accepted(nonce, resp_headers.iter().copied()) {
-            return Err(WebSocketError::HandshakeFailed);
-        }
-        Ok(())
-    }
+    //     if !is_upgrade_accepted(nonce, resp_headers.iter().copied()) {
+    //         return Err(WebSocketError::HandshakeFailed);
+    //     }
+    //     Ok(())
+    // }
 
     // ── send / receive ──────────────────────────────────────────────────────────
 
@@ -646,78 +404,42 @@ impl<'a> WebSocketClient<'a> {
 
     pub async fn send_text(&mut self, text: &str) -> Result<(), WebSocketError> {
         let mask_key = unsafe { espforge_platform::rng::Rng::new() }.random_u32();
-        use edge_ws::{FrameHeader, FrameType};
 
         let header = FrameHeader {
             frame_type: FrameType::Text(false),
             payload_len: text.len() as u64,
-            mask_key: Some(mask_key),
+            mask_key: Some(mask_key.into()),
         };
 
         if let Some(session) = self.tls_socket.as_mut() {
-            header
-                .send(&mut **session)
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
-            header
-                .send_payload(&mut **session, text.as_bytes())
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
-            (**session)
-                .flush()
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
+            header.send(session).await.map_err(|_| WebSocketError::SendFailed)?;
+            header.send_payload(session, text.as_bytes()).await.map_err(|_| WebSocketError::SendFailed)?;
         } else if let Some(socket) = self.socket.as_mut() {
-            // FIX: Reborrow via &mut *socket so ownership doesn't permanently move on step 1
-            header
-                .send(&mut *socket)
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
-            header
-                .send_payload(&mut *socket, text.as_bytes())
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
-            socket
-                .flush()
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
+            header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
+            header.send_payload(socket, text.as_bytes()).await.map_err(|_| WebSocketError::SendFailed)?;
         } else {
-            return Err(WebSocketError::SendFailed);
+            return Err(WebSocketError::NotConnected);
         }
         Ok(())
     }
 
     pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WebSocketError> {
         let mask_key = unsafe { espforge_platform::rng::Rng::new() }.random_u32();
-        use edge_ws::{FrameHeader, FrameType};
-
+        
         let header = FrameHeader {
             frame_type: FrameType::Binary(false),
             payload_len: data.len() as u64,
-            mask_key: Some(mask_key),
+            mask_key: Some(mask_key.into()),
         };
 
         if let Some(session) = self.tls_socket.as_mut() {
-            header
-                .send(&mut **session)
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
-            header
-                .send_payload(&mut **session, data)
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
+            header.send(session).await.map_err(|_| WebSocketError::SendFailed)?;
+            header.send_payload(session, data).await.map_err(|_| WebSocketError::SendFailed)?;
         } else if let Some(socket) = self.socket.as_mut() {
-            // FIX: Reborrow via &mut *socket here as well
-            header
-                .send(&mut *socket)
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
-            header
-                .send_payload(&mut *socket, data)
-                .await
-                .map_err(|_| WebSocketError::SendFailed)?;
+            header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
+            header.send_payload(socket, data).await.map_err(|_| WebSocketError::SendFailed)?;
         } else {
-            return Err(WebSocketError::SendFailed);
+            return Err(WebSocketError::NotConnected);
         }
         Ok(())
     }
@@ -726,7 +448,6 @@ impl<'a> WebSocketClient<'a> {
         &mut self,
         buf: &'b mut [u8],
     ) -> Result<Option<Message<'b>>, WebSocketError> {
-        use edge_ws::{FrameHeader, FrameType};
 
         macro_rules! recv_from {
             ($stream:expr) => {{
@@ -757,12 +478,37 @@ impl<'a> WebSocketClient<'a> {
         }
 
         if let Some(session) = self.tls_socket.as_mut() {
-            recv_from!(&mut **session)
+            recv_from!(session)
         } else if let Some(socket) = self.socket.as_mut() {
             // FIX: Reborrow the raw socket into the macro call expansion
-            recv_from!(&mut *socket)
+            recv_from!(socket)
         } else {
-            Err(WebSocketError::ReceiveFailed)
+            Err(WebSocketError::NotConnected)
         }
     }
+
+    pub async fn close(&mut self) -> Result<(), WebSocketError> {
+        let mask_key = unsafe { espforge_platform::rng::Rng::new() }.random_u32();
+
+        let header = FrameHeader {
+            frame_type: FrameType::Close,
+            payload_len: 0,
+            mask_key: Some(mask_key.into()),
+        };
+
+        if let Some(session) = self.tls_socket.as_mut() {
+            header.send(session).await.map_err(|_| WebSocketError::SendFailed)?;
+        } else if let Some(socket) = self.socket.as_mut() {
+            header.send(socket).await.map_err(|_| WebSocketError::SendFailed)?;
+        } else {
+            return Err(WebSocketError::NotConnected);
+        }
+
+        self.socket = None;
+        self.tls_socket = None;
+
+        Ok(())
+     }
 }
+
+

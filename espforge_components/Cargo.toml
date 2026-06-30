@@ -23,10 +23,10 @@ edge-nal-embassy = { version = "0.9", optional = true, default-features = false,
 mbedtls-rs = { version = "0.1.0", optional = true }
 # Keep rand_core for nonce generation in the plain WebSocket path
 rand_core = { version = "0.10.1", optional = true, default-features = false }
-# SHA-1 for Sec-WebSocket-Accept header verification
-sha1 = { version = "0.11", optional = true, default-features = false }
-# base64 for Sec-WebSocket-Key encoding
-base64 = { version = "0.22", optional = true, default-features = false, features = ["alloc"] }
+# # SHA-1 for Sec-WebSocket-Accept header verification
+# sha1 = { version = "0.11", optional = true, default-features = false }
+# # base64 for Sec-WebSocket-Key encoding
+# base64 = { version = "0.22", optional = true, default-features = false, features = ["alloc"] }
 espforge_common = { version = "0.1.7", path = "../espforge_common", default-features = false }
 espforge_platform = { version = "0.1.14", path = "../espforge_platform" }
 embedded-hal = "1.0.0"
@@ -68,9 +68,8 @@ websockets = [
     "dep:edge-http",
     "dep:edge-net",
     "dep:rand_core",
-    "dep:sha1",
-    "dep:base64",
-    # esp-mbedtls with its async feature for Embassy
+    "dep:edge-nal-tls",
+    "dep:edge-nal-embassy",
     "dep:mbedtls-rs"]
 
 [package.metadata.dist]
