@@ -83,6 +83,19 @@ impl ExampleTemplate {
         extract_recursive(self.dir, target, self.dir.path())
             .context("Failed to extract example files to disk")
     }
+
+    pub fn read_chip_from_yaml(&self) -> Option<String> {
+        let yaml_file = self.dir.get_file("example.yaml")?;
+        let content = std::str::from_utf8(yaml_file.contents()).ok()?;
+        let doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(content).ok()?;
+        doc.get("espforge")
+            .and_then(|e| {
+                e.get("platform")
+                    .or_else(|| e.get("chip"))
+            })
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    }
 }
 
 fn extract_recursive(
