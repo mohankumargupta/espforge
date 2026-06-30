@@ -12,8 +12,8 @@ impl AllocatorGenerator {
         let psram = Self::psram_allocator(model);
 
         quote! {
-            #heap
             #psram
+            #heap
         }
     }
 
