@@ -11,6 +11,6 @@ pub fn generate_psram_init(config: &PsramConfig) -> Result<TokenStream> {
     };
 
     Ok(quote! {
-        esp_hal::psram::init_psram(p.PSRAM, #mode);
+        esp_hal::psram::init_psram(unsafe { esp_hal::peripherals::PSRAM::steal() }, #mode);
     })
 }
