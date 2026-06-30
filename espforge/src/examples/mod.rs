@@ -27,7 +27,7 @@ pub fn execute_noninteractive(args: ExamplesArgs) -> Result<()> {
     let template_name = args.name.clone();
     let project_name = args.project_name.unwrap_or_else(|| args.name.clone());
 
-    // Resolve chip: --chip arg → read from example.yaml → default esp32c3
+    // Resolve chip: use --chip arg > read from example.yaml > default to esp32c3
     let chip = if let Some(chip) = args.chip {
         chip
     } else {
@@ -47,13 +47,19 @@ pub fn execute_noninteractive(args: ExamplesArgs) -> Result<()> {
     ExampleTemplate::find(&config.template_name)
         .map_err(|_| anyhow::anyhow!("Example '{}' not found", config.template_name))?;
 
+    // 2. Prepare Output Directory (Check existence, fail if exists)
     let output = OutputDirectory::prepare_noninteractive(&config)?;
+
+    // 3. Export the Template and Update Config
     let exporter = ExampleExporter::new();
     let result = exporter.export(&config, &output)?;
+
+    // 4. Display Success
     ResultPrinter::display_success(&result);
 
     Ok(())
 }
+
 
 fn execute_with_prompter(args: ExamplesArgs, prompter: &dyn Prompter) -> Result<()> {
     // 1. Resolve Configuration (Args + User Input)
