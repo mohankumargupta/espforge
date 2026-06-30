@@ -30,7 +30,7 @@ default = []
 spi = ["dep:embedded-hal-bus"]
 i2c = ["dep:embedded-hal-bus"]
 uart = ["dep:embedded-io"]
-psram = []
+#psram = []
 wifi = ["dep:embassy-net"]
 # 'tls' now pulls in esp-mbedtls with its async Embassy support
 tls = ["dep:mbedtls-rs", "dep:embassy-net"]
