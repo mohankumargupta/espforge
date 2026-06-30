@@ -1,13 +1,14 @@
 espforge:
-  name: wifi_example
-  platform: esp32c3
+  name: websockets_example
+  platform: esp32s3
   runtime: embassy
   alloc: true
 
 esp32:
-  # Explicit heap configuration required for TLS buffers
+  psram:
+    mode: octal
   heap:
-    size: 60000 # 72KB - enough for stack + TLS overhead
+    size: 70000
   wifi:
     ssid: Wokwi-GUEST
     password: ""
