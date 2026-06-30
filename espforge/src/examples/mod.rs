@@ -24,10 +24,18 @@ pub fn execute(args: ExamplesArgs) -> Result<()> {
 }
 
 pub fn execute_noninteractive(args: ExamplesArgs) -> Result<()> {
-    // 1. Resolve Configuration directly from args
     let template_name = args.name.clone();
     let project_name = args.project_name.unwrap_or_else(|| args.name.clone());
-    let chip = args.chip.unwrap_or_else(|| "esp32c3".to_string());
+
+    // Resolve chip: --chip arg → read from example.yaml → default esp32c3
+    let chip = if let Some(chip) = args.chip {
+        chip
+    } else {
+        ExampleTemplate::find(&template_name)
+            .ok()
+            .and_then(|t| t.read_chip_from_yaml())
+            .unwrap_or_else(|| "esp32c3".to_string())
+    };
 
     let config = ExampleConfig {
         template_name,
@@ -39,14 +47,9 @@ pub fn execute_noninteractive(args: ExamplesArgs) -> Result<()> {
     ExampleTemplate::find(&config.template_name)
         .map_err(|_| anyhow::anyhow!("Example '{}' not found", config.template_name))?;
 
-    // 2. Prepare Output Directory (Check existence, fail if exists)
     let output = OutputDirectory::prepare_noninteractive(&config)?;
-
-    // 3. Export the Template and Update Config
     let exporter = ExampleExporter::new();
     let result = exporter.export(&config, &output)?;
-
-    // 4. Display Success
     ResultPrinter::display_success(&result);
 
     Ok(())
