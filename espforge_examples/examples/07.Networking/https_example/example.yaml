@@ -5,8 +5,8 @@ espforge:
   alloc: true
 
 esp32:
-  heap:
-    size: 73744
+  psram:
+    mode: octal
   wifi:
     ssid: Wokwi-GUEST
     password: ""
