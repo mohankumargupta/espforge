@@ -16,7 +16,7 @@ pub async fn forever(ctx: &mut Context) {
     let mut connector = component!(ws_client);
 
     // Determine if we are using TLS (just for logging)
-    let uri = "ws://echo.websocket.org"; // change to your server
+    let uri = "wss://echo.websocket.org"; // change to your server
     let uses_tls = uri.starts_with("wss://");
     ctx.logger.info(format_args!("Using TLS: {}", uses_tls));
 
