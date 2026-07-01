@@ -429,7 +429,7 @@ espforge_platform::logger::Logger::new().info("ENTERED perform_handshake - build
 
     conn.initiate_ws_upgrade_request(
         Some(uri.host.as_str()),
-        None,
+        Some(uri.host.as_str()), 
         uri.path.as_str(),
         None,
         &nonce,
@@ -451,15 +451,21 @@ espforge_platform::logger::Logger::new().info("ENTERED perform_handshake - build
         })?;
 
     let mut resp_buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
-    if !conn
+    let accepted = conn
         .is_ws_upgrade_accepted(&nonce, &mut resp_buf)
         .map_err(|e| {
             espforge_platform::logger::Logger::new()
             .info(format_args!("is_ws_upgrade_accepted error: {:?}", e));        
             WebSocketError::InvalidResponse
-        })?
-    {
-        return Err(WebSocketError::HandshakeFailed);
+        })?;
+    if !accepted {
+            espforge_platform::logger::Logger::new()
+        .info("ws upgrade rejected by server");
+    if let Ok(headers) = conn.headers() {
+        espforge_platform::logger::Logger::new()
+            .info(format_args!("response status code: {}", headers.code));
+    }
+    return Err(WebSocketError::HandshakeFailed);
     }
 
     conn.complete()
