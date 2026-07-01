@@ -371,9 +371,9 @@ impl WebSocketConnector {
                 ca_chain: None,
                 server_name: Some(server_name),
                 auth_mode: AuthMode::None,
-                ..ClientSessionConfig::new()
+                ..Default::default()
             };
-            //could try ..Default::default()
+            //could try  ..ClientSessionConfig::new()
 
             let tcp = Tcp::new(self.stack, &self.resources.tcp_buffers);
             let tls_connector = TlsConnector::new(tls, tcp, &config);
@@ -418,6 +418,8 @@ async fn perform_handshake<B>(uri: &Uri, conn: &mut Connection<'_, B>) -> Result
 where
     B: edge_nal::TcpConnect,
 {
+espforge_platform::logger::Logger::new().info("ENTERED perform_handshake - build v2");
+
     let mut rng = TlsRng::new(unsafe { espforge_platform::rng::Rng::new() });
     let mut nonce = [0u8; NONCE_LEN];
     rng.try_fill_bytes(&mut nonce)
