@@ -29,7 +29,8 @@ pub use components::http::HttpResponse;
 #[cfg(feature = "websockets")]
 pub use components::websockets::Message;
 #[cfg(feature = "websockets")]
-pub use components::websockets::WebSocketClient;
+pub use components::websockets::WebSocketConnector;
+pub use components::websockets::WebSocketSession;
 #[cfg(feature = "websockets")]
 pub use components::websockets::WebSocketError;
 #[cfg(feature = "websockets")]

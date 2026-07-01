@@ -1,111 +1,47 @@
 use anyhow::Result;
+use espforge_configuration::plugin::{Dependency, GeneratedCode, GenerationContext};
 use espforge_macros::ComponentPlugin;
-use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 #[derive(ComponentPlugin)]
-#[plugin(
-    name = "WebSocketClient",
-    features = "websockets",
-    pub_use = "espforge_components::Message"
-)]
+#[plugin(name = "WebSocketClient", features = "websockets,embassy")]
 pub struct WebSocketClientPlugin;
 
 impl WebSocketClientPlugin {
-    fn validate_properties(&self, properties: &serde_yaml_ng::Value) -> Result<()> {
-        if let Some(uri) = properties.get("uri").and_then(|v| v.as_str()) {
-            if !uri.starts_with("ws://") && !uri.starts_with("wss://") {
-                return Err(anyhow::anyhow!(
-                    "WebSocket 'uri' must start with ws:// or wss://"
-                ));
-            }
-        } else {
-            return Err(anyhow::anyhow!("WebSocket 'uri' property is required"));
-        }
+    fn validate_properties(&self, _properties: &serde_yaml_ng::Value) -> Result<()> {
+        // No required properties — the connector is endpoint-agnostic.
+        // The URI (and, for wss://, a TLS reference) are passed to
+        // `connect()` at runtime from app code, not baked in at codegen time.
         Ok(())
     }
 
-    fn resolve_dependencies(
-        &self,
-        _properties: &serde_yaml_ng::Value,
-    ) -> Result<Vec<espforge_configuration::plugin::Dependency>> {
+    fn resolve_dependencies(&self, _properties: &serde_yaml_ng::Value) -> Result<Vec<Dependency>> {
+        // Relies on `stack`, which the entry-point template injects whenever
+        // any component needs networking (see `needs_stack` in
+        // espforge_codegen/src/templates/entry_point.rs).
         Ok(vec![])
     }
 
-    fn generate_code(
-        &self,
-        ctx: &espforge_configuration::plugin::GenerationContext,
-    ) -> Result<espforge_configuration::plugin::GeneratedCode> {
-        use espforge_configuration::plugin::GeneratedCode;
-
-        let instance_name = ctx.instance_name;
-        let field_ident = format_ident!("{}", instance_name);
-
-        let uri = ctx
-            .properties
-            .get("uri")
-            .and_then(|v| v.as_str())
-            .unwrap_or("ws://localhost:8080");
-
-        let needs_tls = uri.starts_with("wss://");
-
-        let resources_cell = format_ident!("{}_WS_RESOURCES", instance_name.to_uppercase());
-
-        let static_decl: TokenStream = quote! {
-            static #resources_cell: static_cell::StaticCell<
-                espforge_components::components::websockets::WebSocketResources
-            > = static_cell::StaticCell::new();
-        };
-
-        let field: TokenStream = quote! {
-            pub #field_ident: espforge_components::components::websockets::WebSocketClient<'static>
-        };
-
-        let resources_init: TokenStream = if needs_tls {
-            quote! {
-                #resources_cell.init(
-                    espforge_components::components::websockets::WebSocketResources::new_with_tls()
-                )
-            }
-        } else {
-            quote! {
-                #resources_cell.init(
-                    espforge_components::components::websockets::WebSocketResources::new()
-                )
-            }
-        };
-
-        let tls_init: TokenStream = if needs_tls {
-            quote! {
-                {
-                    static RNG_CELL: static_cell::StaticCell<espforge_components::components::websockets::TlsRng> = static_cell::StaticCell::new();
-                    static TLS_CELL: static_cell::StaticCell<espforge_components::mbedtls_rs::Tls<'static>> = static_cell::StaticCell::new();
-
-                    // We use `unsafe` because `Rng::new()` takes hardware ownership.
-                    // This is safe here because it runs exactly once during initialization.
-                    let rng = RNG_CELL.init(espforge_components::components::websockets::TlsRng(unsafe { espforge_platform::rng::Rng::new() }));
-                    let tls = TLS_CELL.init(espforge_components::mbedtls_rs::Tls::new(rng).expect("Failed to initialize mbedtls"));
-                    Some(tls.reference())
-                }
-            }
-        } else {
-            quote! { None }
-        };
-
-        let init: TokenStream = quote! {
-            #static_decl
-            let #field_ident = espforge_components::components::websockets::WebSocketClient::new(
-                stack,
-                #uri,
-                #resources_init,
-                #tls_init
-            );
-        };
+    fn generate_code(&self, ctx: &GenerationContext) -> Result<GeneratedCode> {
+        let field_ident = format_ident!("{}", ctx.instance_name);
+        let resources_static = format_ident!("{}_WS_RESOURCES", ctx.instance_name.to_uppercase());
 
         Ok(GeneratedCode {
-            field,
-            init,
-            struct_init: quote! { #field_ident },
+            field: quote! {
+                pub #field_ident: espforge_components::components::websockets::WebSocketConnector
+            },
+            init: quote! {
+                static #resources_static: static_cell::StaticCell<espforge_components::components::websockets::WebSocketResources> = static_cell::StaticCell::new();
+
+                let #field_ident = espforge_components::components::websockets::WebSocketConnector::new(
+                    stack,
+                    #resources_static.init(
+                        espforge_components::components::websockets::WebSocketResources::new()
+                    )
+                );
+            },
+            struct_init: quote! { #field_ident }
         })
     }
 }
+
