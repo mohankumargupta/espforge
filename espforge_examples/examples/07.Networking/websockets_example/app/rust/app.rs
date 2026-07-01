@@ -11,7 +11,7 @@ pub async fn setup(ctx: &mut Context, _spawner: Spawner) {
 
 pub async fn forever(ctx: &mut Context) {
     let mut connector = component!(ws_client);
-    let uri = "wss://echo.websocket.org";
+    let uri = "wss://ws.postman-echo.com/raw";
     let uses_tls = uri.starts_with("wss://");
     ctx.logger.info(format_args!("Using TLS: {}", uses_tls));
 

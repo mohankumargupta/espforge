@@ -18,5 +18,5 @@ components:
   ws_client:
     using: WebSocketClient
     with:
-      uri: "wss://echo.websocket.org"
+      uri: "wss://ws.postman-echo.com/raw"
 

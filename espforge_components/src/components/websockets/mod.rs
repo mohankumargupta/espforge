@@ -8,7 +8,7 @@ use edge_http::io::client::Connection;
 use edge_http::ws::{MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
 use edge_nal::{AddrType, Dns};
 use edge_nal_embassy::{Dns as EmbassyDns, Tcp, TcpBuffers, TcpSocket};
-use edge_nal_tls::mbedtls::{ClientSessionConfig, TlsReference};
+use edge_nal_tls::mbedtls::{AuthMode, ClientSessionConfig, TlsReference};
 use edge_nal_tls::{TlsConnector, TlsSocket};
 use edge_ws::{FrameHeader, FrameType};
 
@@ -22,7 +22,7 @@ use rand_core::{TryCryptoRng, TryRng};
 // -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------
-const IO_BUFFER_SIZE: usize = 2048;
+const IO_BUFFER_SIZE: usize = 4096;
 const FRAME_BUFFER_SIZE: usize = 2048;
 const HOSTNAME_SIZE: usize = 128;
 
@@ -368,9 +368,12 @@ impl WebSocketConnector {
             // hostname buffer is only borrowed for this block
             let server_name = server_name_cstr(uri.host.as_str(), &mut self.resources.hostname)?;
             let config = ClientSessionConfig {
+                ca_chain: None,
                 server_name: Some(server_name),
-                ..Default::default()
+                auth_mode: AuthMode::None,
+                ..ClientSessionConfig::new()
             };
+            //could try ..Default::default()
 
             let tcp = Tcp::new(self.stack, &self.resources.tcp_buffers);
             let tls_connector = TlsConnector::new(tls, tcp, &config);
@@ -431,16 +434,28 @@ where
         &mut key_buf,
     )
     .await
-    .map_err(|_| WebSocketError::HandshakeFailed)?;
+    .map_err(|e| {
+        espforge_platform::logger::Logger::new()
+        .info(format_args!("ws upgrade request error: {:?}", e));    
+        WebSocketError::HandshakeFailed
+    })?;
 
     conn.initiate_response()
         .await
-        .map_err(|_| WebSocketError::HandshakeFailed)?;
+        .map_err(|e| {
+        espforge_platform::logger::Logger::new()
+            .info(format_args!("initiate_response error: {:?}", e));        
+            WebSocketError::HandshakeFailed
+        })?;
 
     let mut resp_buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
     if !conn
         .is_ws_upgrade_accepted(&nonce, &mut resp_buf)
-        .map_err(|_| WebSocketError::InvalidResponse)?
+        .map_err(|e| {
+            espforge_platform::logger::Logger::new()
+            .info(format_args!("is_ws_upgrade_accepted error: {:?}", e));        
+            WebSocketError::InvalidResponse
+        })?
     {
         return Err(WebSocketError::HandshakeFailed);
     }
