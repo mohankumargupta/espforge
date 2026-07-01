@@ -1,40 +1,36 @@
-// Correct imports
 use crate::{Context, component};
 use embassy_executor::Spawner;
-use espforge_components::Message; // as suggested by the compiler
+use espforge_components::Message;
 use espforge_components::components::websockets::{
-    SessionContext, WebSocketConnector, WebSocketError,
+    SessionContext, Tls, TlsRng, WebSocketConnector, WebSocketError,
 };
 
 pub async fn setup(ctx: &mut Context, _spawner: Spawner) {
-    let logger = ctx.logger;
-    logger.info("Starting WebSocket example");
+    ctx.logger.info("Starting WebSocket example");
 }
 
 pub async fn forever(ctx: &mut Context) {
-    // Get the connector component (it's a factory)
     let mut connector = component!(ws_client);
-
-    // Determine if we are using TLS (just for logging)
-    let uri = "wss://echo.websocket.org"; // change to your server
+    let uri = "wss://echo.websocket.org";
     let uses_tls = uri.starts_with("wss://");
     ctx.logger.info(format_args!("Using TLS: {}", uses_tls));
 
-    // Create a session context – this will own the TCP/TLS transport
-    // and must live as long as the session.
+    // RNG must outlive `tls`, which must outlive `tls_ref`/`session_ctx`/`session`.
+    let mut rng = TlsRng::new(unsafe { espforge_platform::rng::Rng::new() });
+    let tls = unsafe { Tls::new_local_borrows(&mut rng) }
+        .map_err(|_| WebSocketError::TlsError)
+        .expect("tls init failed");
+
+    let tls_ref = if uses_tls { Some(tls.reference()) } else { None };
+
     let mut session_ctx = SessionContext {
-        tls: None, // set to Some(TlsReference) if using wss://
+        tls: None,
         plain_tcp: None,
     };
 
-    // For plain WS, pass `None` for TLS reference.
-    let tls_ref = None;
-
-    // Connect – this yields a WebSocketSession
     match connector.connect(uri, tls_ref, &mut session_ctx).await {
         Ok(mut session) => {
             ctx.logger.info("WebSocket connected!");
-
             for payload in ["Hello world!", "How are you?", "I'm fine, thanks!"] {
                 ctx.logger.info(format_args!("Sending: {}", payload));
                 session.send_text(payload).await.unwrap();
@@ -53,7 +49,6 @@ pub async fn forever(ctx: &mut Context) {
                     }
                 }
             }
-
             ctx.logger.info("Closing connection");
             session.close().await.unwrap();
         }
@@ -65,3 +60,4 @@ pub async fn forever(ctx: &mut Context) {
 
     ctx.delay.delay_ms(10000).await;
 }
+

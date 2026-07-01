@@ -1,3 +1,5 @@
+pub use edge_nal_tls::mbedtls::Tls;
+
 use core::ffi::CStr;
 use core::fmt;
 use core::net::SocketAddr;
