@@ -60,7 +60,6 @@ pub fn execute_noninteractive(args: ExamplesArgs) -> Result<()> {
     Ok(())
 }
 
-
 fn execute_with_prompter(args: ExamplesArgs, prompter: &dyn Prompter) -> Result<()> {
     // 1. Resolve Configuration (Args + User Input)
     let config = ConfigBuilder::from_args(args, prompter)?.build()?;

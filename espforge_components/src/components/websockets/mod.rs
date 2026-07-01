@@ -131,7 +131,10 @@ struct Uri {
     path: String<128>,
 }
 
-fn server_name_cstr<'b>(host: &str, buf: &'b mut [u8; HOSTNAME_SIZE]) -> Result<&'b CStr, WebSocketError> {
+fn server_name_cstr<'b>(
+    host: &str,
+    buf: &'b mut [u8; HOSTNAME_SIZE],
+) -> Result<&'b CStr, WebSocketError> {
     if host.len() >= buf.len() {
         return Err(WebSocketError::InvalidUri);
     }
@@ -156,7 +159,10 @@ async fn send_frame_on<W: Write>(
     header: &FrameHeader,
     payload: &[u8],
 ) -> Result<(), WebSocketError> {
-    header.send(&mut *socket).await.map_err(|_| WebSocketError::Io)?;
+    header
+        .send(&mut *socket)
+        .await
+        .map_err(|_| WebSocketError::Io)?;
     header
         .send_payload(&mut *socket, payload)
         .await
@@ -168,7 +174,9 @@ async fn recv_frame_on<'b, R: Read>(
     socket: &mut R,
     buffer: &'b mut [u8],
 ) -> Result<(FrameType, &'b [u8]), WebSocketError> {
-    let header = FrameHeader::recv(&mut *socket).await.map_err(|_| WebSocketError::Io)?;
+    let header = FrameHeader::recv(&mut *socket)
+        .await
+        .map_err(|_| WebSocketError::Io)?;
     let payload = header
         .recv_payload(&mut *socket, buffer)
         .await
@@ -187,14 +195,19 @@ pub struct WebSocketSession<'a> {
 
 impl<'a> WebSocketSession<'a> {
     pub async fn send_text(&mut self, text: &str) -> Result<(), WebSocketError> {
-        self.send_frame(FrameType::Text(true), text.as_bytes()).await
+        self.send_frame(FrameType::Text(true), text.as_bytes())
+            .await
     }
 
     pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WebSocketError> {
         self.send_frame(FrameType::Binary(true), data).await
     }
 
-    async fn send_frame(&mut self, frame_type: FrameType, payload: &[u8]) -> Result<(), WebSocketError> {
+    async fn send_frame(
+        &mut self,
+        frame_type: FrameType,
+        payload: &[u8],
+    ) -> Result<(), WebSocketError> {
         // Client-to-server frames MUST be masked per RFC 6455 §5.1.
         let header = FrameHeader {
             frame_type,
@@ -212,7 +225,10 @@ impl<'a> WebSocketSession<'a> {
     ///
     /// Note: this does not yet auto-reply to Ping frames or reassemble
     /// fragmented (`Continue`) frames.
-    pub async fn receive<'b>(&mut self, buffer: &'b mut [u8]) -> Result<Message<'b>, WebSocketError> {
+    pub async fn receive<'b>(
+        &mut self,
+        buffer: &'b mut [u8],
+    ) -> Result<Message<'b>, WebSocketError> {
         let (frame_type, payload) = self.recv_frame(buffer).await?;
         match frame_type {
             FrameType::Text(_) => {
@@ -227,7 +243,10 @@ impl<'a> WebSocketSession<'a> {
         }
     }
 
-    async fn recv_frame<'b>(&mut self, buffer: &'b mut [u8]) -> Result<(FrameType, &'b [u8]), WebSocketError> {
+    async fn recv_frame<'b>(
+        &mut self,
+        buffer: &'b mut [u8],
+    ) -> Result<(FrameType, &'b [u8]), WebSocketError> {
         match &mut self.transport {
             Transport::Plain(socket) => recv_frame_on(socket, buffer).await,
             Transport::Tls(socket) => recv_frame_on(socket, buffer).await,
@@ -247,6 +266,14 @@ impl<'a> WebSocketSession<'a> {
 
         Ok(())
     }
+}
+
+// -----------------------------------------------------------------------------
+// SessionContext – owns the transports for the duration of a session.
+// -----------------------------------------------------------------------------
+pub struct SessionContext<'a> {
+    pub tls: Option<TlsConnector<'a, Tcp<'a>>>,
+    pub plain_tcp: Option<Tcp<'a>>,
 }
 
 // -----------------------------------------------------------------------------
@@ -287,25 +314,40 @@ impl WebSocketConnector {
         let (host_raw, port) = match host_port.rfind(':') {
             Some(idx) => {
                 let port_str = &host_port[idx + 1..];
-                let port = port_str.parse::<u16>().map_err(|_| WebSocketError::InvalidUri)?;
+                let port = port_str
+                    .parse::<u16>()
+                    .map_err(|_| WebSocketError::InvalidUri)?;
                 (&host_port[..idx], port)
             }
             None => (host_port, if secure { 443 } else { 80 }),
         };
 
         let mut host = String::new();
-        host.push_str(host_raw).map_err(|_| WebSocketError::InvalidUri)?;
+        host.push_str(host_raw)
+            .map_err(|_| WebSocketError::InvalidUri)?;
 
         let mut path = String::new();
-        path.push_str(path_raw).map_err(|_| WebSocketError::InvalidUri)?;
+        path.push_str(path_raw)
+            .map_err(|_| WebSocketError::InvalidUri)?;
 
-        Ok(Uri { secure, host, port, path })
+        Ok(Uri {
+            secure,
+            host,
+            port,
+            path,
+        })
     }
 
+    /// Open a WebSocket connection.
+    ///
+    /// The caller must provide a `SessionContext` that will own the transport(s)
+    /// for the whole lifetime of the returned `WebSocketSession`.  Both the
+    /// session and the context share the same lifetime `'a`.
     pub async fn connect<'a>(
         &'a mut self,
         uri_str: &str,
         tls_ref: Option<TlsReference<'a>>,
+        ctx: &'a mut SessionContext<'a>,
     ) -> Result<WebSocketSession<'a>, WebSocketError> {
         let uri = self.parse_uri(uri_str)?;
 
@@ -321,6 +363,7 @@ impl WebSocketConnector {
         if uri.secure {
             let tls = tls_ref.ok_or(WebSocketError::TlsError)?;
 
+            // hostname buffer is only borrowed for this block
             let server_name = server_name_cstr(uri.host.as_str(), &mut self.resources.hostname)?;
             let config = ClientSessionConfig {
                 server_name: Some(server_name),
@@ -330,8 +373,12 @@ impl WebSocketConnector {
             let tcp = Tcp::new(self.stack, &self.resources.tcp_buffers);
             let tls_connector = TlsConnector::new(tls, tcp, &config);
 
-            let mut conn = Connection::new(&mut self.resources.io_buffer, &tls_connector, addr);
-            self.perform_handshake(&uri, &mut conn).await?;
+            // Store the connector in the caller‑provided context – it lives for 'a
+            ctx.tls = Some(tls_connector);
+            let tls_conn = ctx.tls.as_ref().unwrap();
+
+            let mut conn = Connection::new(&mut self.resources.io_buffer, tls_conn, addr);
+            perform_handshake(&uri, &mut conn).await?;
 
             let (socket, _) = conn.release();
             Ok(WebSocketSession {
@@ -341,8 +388,13 @@ impl WebSocketConnector {
             })
         } else {
             let tcp = Tcp::new(self.stack, &self.resources.tcp_buffers);
-            let mut conn = Connection::new(&mut self.resources.io_buffer, &tcp, addr);
-            self.perform_handshake(&uri, &mut conn).await?;
+
+            // Store the plain Tcp in the context
+            ctx.plain_tcp = Some(tcp);
+            let tcp_ref = ctx.plain_tcp.as_ref().unwrap();
+
+            let mut conn = Connection::new(&mut self.resources.io_buffer, tcp_ref, addr);
+            perform_handshake(&uri, &mut conn).await?;
 
             let (socket, _) = conn.release();
             Ok(WebSocketSession {
@@ -352,45 +404,47 @@ impl WebSocketConnector {
             })
         }
     }
+}
 
-    async fn perform_handshake<B>(
-        &self,
-        uri: &Uri,
-        conn: &mut Connection<'_, B>,
-    ) -> Result<(), WebSocketError>
-    where
-        B: edge_nal::TcpConnect,
-    {
-        let mut rng = TlsRng::new(unsafe { espforge_platform::rng::Rng::new() });
-        let mut nonce = [0u8; NONCE_LEN];
-        rng.try_fill_bytes(&mut nonce)
-            .map_err(|_| WebSocketError::HandshakeFailed)?;
+// -----------------------------------------------------------------------------
+// Free function – no borrow on self, eliminates E0502.
+// -----------------------------------------------------------------------------
+async fn perform_handshake<B>(uri: &Uri, conn: &mut Connection<'_, B>) -> Result<(), WebSocketError>
+where
+    B: edge_nal::TcpConnect,
+{
+    let mut rng = TlsRng::new(unsafe { espforge_platform::rng::Rng::new() });
+    let mut nonce = [0u8; NONCE_LEN];
+    rng.try_fill_bytes(&mut nonce)
+        .map_err(|_| WebSocketError::HandshakeFailed)?;
 
-        let mut key_buf = [0_u8; MAX_BASE64_KEY_LEN];
+    let mut key_buf = [0_u8; MAX_BASE64_KEY_LEN];
 
-        conn.initiate_ws_upgrade_request(
-            Some(uri.host.as_str()),
-            None,
-            uri.path.as_str(),
-            None,
-            &nonce,
-            &mut key_buf,
-        )
+    conn.initiate_ws_upgrade_request(
+        Some(uri.host.as_str()),
+        None,
+        uri.path.as_str(),
+        None,
+        &nonce,
+        &mut key_buf,
+    )
+    .await
+    .map_err(|_| WebSocketError::HandshakeFailed)?;
+
+    conn.initiate_response()
         .await
         .map_err(|_| WebSocketError::HandshakeFailed)?;
 
-        conn.initiate_response().await.map_err(|_| WebSocketError::HandshakeFailed)?;
-
-        let mut resp_buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
-        if !conn
-            .is_ws_upgrade_accepted(&nonce, &mut resp_buf)
-            .map_err(|_| WebSocketError::InvalidResponse)?
-        {
-            return Err(WebSocketError::HandshakeFailed);
-        }
-
-        conn.complete().await.map_err(|_| WebSocketError::HandshakeFailed)?;
-        Ok(())
+    let mut resp_buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
+    if !conn
+        .is_ws_upgrade_accepted(&nonce, &mut resp_buf)
+        .map_err(|_| WebSocketError::InvalidResponse)?
+    {
+        return Err(WebSocketError::HandshakeFailed);
     }
-}
 
+    conn.complete()
+        .await
+        .map_err(|_| WebSocketError::HandshakeFailed)?;
+    Ok(())
+}

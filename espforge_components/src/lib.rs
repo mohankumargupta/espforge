@@ -30,10 +30,10 @@ pub use components::http::HttpResponse;
 pub use components::websockets::Message;
 #[cfg(feature = "websockets")]
 pub use components::websockets::WebSocketConnector;
-pub use components::websockets::WebSocketSession;
 #[cfg(feature = "websockets")]
 pub use components::websockets::WebSocketError;
 #[cfg(feature = "websockets")]
 pub use components::websockets::WebSocketResources;
+pub use components::websockets::WebSocketSession;
 #[cfg(feature = "websockets")]
 pub use mbedtls_rs;

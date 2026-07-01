@@ -212,13 +212,13 @@ impl HttpsClient {
 
         let mut conn = Connection::<_, 16>::new(&mut self.resources.io_buf, &connector, addr);
 
-conn.initiate_request(false, Method::Get, path, &[("Host", host)])
-    .await
-    .map_err(|e| {
-        espforge_platform::logger::Logger::new()
-            .info(format_args!("initiate_request error: {:?}", e));
-        HttpsError::RequestFailed
-    })?;
+        conn.initiate_request(false, Method::Get, path, &[("Host", host)])
+            .await
+            .map_err(|e| {
+                espforge_platform::logger::Logger::new()
+                    .info(format_args!("initiate_request error: {:?}", e));
+                HttpsError::RequestFailed
+            })?;
 
         conn.initiate_response()
             .await
