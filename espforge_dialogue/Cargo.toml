@@ -1,6 +1,6 @@
 [package]
 name = "espforge_dialogue"
-version = "0.1.6"
+version = "0.1.7"
 description = "Macros for dialoguer"
 edition.workspace = true
 license.workspace = true

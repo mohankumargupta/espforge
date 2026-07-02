@@ -1,6 +1,6 @@
 [package]
 name = "espforge_components"
-version = "0.1.12"
+version = "0.1.13"
 description = "Components for espforge"
 edition.workspace = true
 license.workspace = true
@@ -27,8 +27,8 @@ rand_core = { version = "0.10.1", optional = true, default-features = false }
 # sha1 = { version = "0.11", optional = true, default-features = false }
 # # base64 for Sec-WebSocket-Key encoding
 # base64 = { version = "0.22", optional = true, default-features = false, features = ["alloc"] }
-espforge_common = { version = "0.1.7", path = "../espforge_common", default-features = false }
-espforge_platform = { version = "0.1.14", path = "../espforge_platform" }
+espforge_common = { version = "0.1.8", path = "../espforge_common", default-features = false }
+espforge_platform = { version = "0.1.15", path = "../espforge_platform" }
 embedded-hal = "1.0.0"
 embedded-io = { version = "0.7.1", optional = true, default-features = false }
 embedded-io-async = { version = "0.7", optional = true, default-features = false }

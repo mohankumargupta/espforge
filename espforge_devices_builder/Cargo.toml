@@ -1,6 +1,6 @@
 [package]
 name = "espforge_devices_builder"
-version = "0.1.9"
+version = "0.1.10"
 description = "Component registration for espforge"
 edition.workspace = true
 license.workspace = true
@@ -12,9 +12,9 @@ homepage.workspace = true
 documentation.workspace = true
 
 [dependencies]
-espforge_common = { version = "0.1.7", path = "../espforge_common" }
-espforge_configuration = { path = "../espforge_configuration", version = "0.3.4" }
-espforge_macros = { path = "../espforge_macros", version = "0.1.8" }
+espforge_common = { version = "0.1.8", path = "../espforge_common" }
+espforge_configuration = { path = "../espforge_configuration", version = "0.4.0" }
+espforge_macros = { path = "../espforge_macros", version = "0.1.9" }
 anyhow = "1.0"
 quote = "1.0"
 proc-macro2 = "1.0"
