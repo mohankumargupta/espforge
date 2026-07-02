@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "author": "Gayathry V",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "PLACEHOLDER_WOKWI_BOARD",
+      "id": "esp",
+      "top": 7.34,
+      "left": -82.67,
+      "attrs": {
+        "flashSize": "16",
+        "psramSize": "8",
+        "psramType": "octal"
+      }
+    }
+  ],
+  "connections": [
+    ["esp:TX", "$serialMonitor:RX", "", []],
+    ["esp:RX", "$serialMonitor:TX", "", []]
+  ],
+  "dependencies": {}
+}

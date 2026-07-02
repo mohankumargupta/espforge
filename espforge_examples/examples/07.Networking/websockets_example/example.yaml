@@ -1,0 +1,22 @@
+espforge:
+  name: websockets_example
+  platform: esp32s3
+  runtime: embassy
+  alloc: true
+
+esp32:
+  psram:
+    mode: octal
+  heap:
+    size: 70000
+  wifi:
+    ssid: Wokwi-GUEST
+    password: ""
+    auth: open
+
+components:
+  ws_client:
+    using: WebSocketClient
+    with: {}
+
+    

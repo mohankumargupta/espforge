@@ -163,6 +163,9 @@ pub trait Plugin: Sync + Send {
         Ok(vec![])
     }
     fn generate(&self, ctx: &GenerationContext) -> Result<GeneratedCode>;
+    fn pub_use(&self) -> Vec<&'static str> {
+        vec![]
+    }
 }
 
 pub struct PluginRegistration(pub &'static dyn Plugin);

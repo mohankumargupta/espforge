@@ -1,9 +1,11 @@
 pub mod button;
 pub mod http;
+pub mod https;
 pub mod i2c;
 pub mod led;
 pub mod spi;
 pub mod uart;
+pub mod websockets;
 
 pub fn init() {
     // Force the MSVC linker to retain these modules by referencing them

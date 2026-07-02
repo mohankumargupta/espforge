@@ -1,5 +1,6 @@
 use super::common::format_generated_source;
 use super::constants::origins;
+//use crate::registry::find_plugin;
 use super::wifi::{generate_wifi_init, generate_wifi_tasks};
 use crate::allocators::AllocatorGenerator;
 use anyhow::{Context, Result};
@@ -102,6 +103,31 @@ impl EntryPointGenerator for EmbassyEntryPoint {
         let wifi_tasks = generate_wifi_tasks(model);
         let wifi_init = generate_wifi_init(model);
 
+        // ── esp-mbedtls: detect whether any component uses wss:// ─────────────
+        let needs_tls = model.components.values().any(|spec| {
+            spec.properties
+                .get("uri")
+                .and_then(|v| v.as_str())
+                .map(|u| u.starts_with("wss://"))
+                .unwrap_or(false)
+        });
+
+        // Emitted after `init_registry` (needs `peripherals.SHA`) and before
+        // `init_components` (WebSocketClient::new uses the TLS context).
+        let tls_init: TokenStream = if needs_tls {
+            quote! {
+                // static TLS_RNG_CELL: StaticCell<espforge_components::components::websockets::TlsRng> = StaticCell::new();
+                // let tls_rng = TLS_RNG_CELL.init(espforge_components::components::websockets::TlsRng(
+                //     unsafe { espforge_platform::rng::Rng::new() }
+                // ));
+                // let tls = espforge_components::mbedtls_rs::Tls::new(tls_rng).unwrap();
+                // Some(&tls)
+            }
+        } else {
+            quote! {}
+        };
+        // ─────────────────────────────────────────────────────────────────────
+
         let tokens = quote! {
             #![no_std]
             #![no_main]
@@ -131,6 +157,7 @@ impl EntryPointGenerator for EmbassyEntryPoint {
                 #init_registry
                 #init_embassy_runtime
                 #wifi_init
+                #tls_init
                 #init_components
                 #init_devices
                 #init_context
@@ -194,7 +221,11 @@ impl CommonEntryPointCode {
 
         let needs_stack = model.components.values().any(|spec| {
             crate::registry::find_plugin(&spec.driver)
-                .map(|p| p.required_features().iter().any(|f| f == "http"))
+                .map(|p| {
+                    p.required_features()
+                        .iter()
+                        .any(|f| f == "http" || f == "https" || f == "websockets")
+                })
                 .unwrap_or(false)
         });
 

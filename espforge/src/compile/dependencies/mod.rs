@@ -36,7 +36,7 @@ pub fn add_dependencies(project_dir: &Path, model: &EspforgeConfiguration) -> Re
 
     ExternalDependencies::merge_external(&mut doc, project_dir)?;
 
-    FeatureManager::handle_psram(&mut doc, model)?;
+    //FeatureManager::handle_psram(&mut doc, model)?;
 
     fs::write(cargo_path, doc.to_string()).context("Failed to write Cargo.toml")?;
 

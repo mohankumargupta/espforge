@@ -24,10 +24,18 @@ pub fn execute(args: ExamplesArgs) -> Result<()> {
 }
 
 pub fn execute_noninteractive(args: ExamplesArgs) -> Result<()> {
-    // 1. Resolve Configuration directly from args
     let template_name = args.name.clone();
     let project_name = args.project_name.unwrap_or_else(|| args.name.clone());
-    let chip = args.chip.unwrap_or_else(|| "esp32c3".to_string());
+
+    // Resolve chip: use --chip arg > read from example.yaml > default to esp32c3
+    let chip = if let Some(chip) = args.chip {
+        chip
+    } else {
+        ExampleTemplate::find(&template_name)
+            .ok()
+            .and_then(|t| t.read_chip_from_yaml())
+            .unwrap_or_else(|| "esp32c3".to_string())
+    };
 
     let config = ExampleConfig {
         template_name,

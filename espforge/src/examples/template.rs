@@ -35,10 +35,11 @@ impl ExampleExporter {
                 let entry = entry?;
                 let path = entry.path();
                 if path.is_file()
-                    && let Some(file_name) = path.file_name() {
-                        let dest = src_dir.join(file_name);
-                        fs::rename(&path, &dest).context("Failed to move file to src")?;
-                    }
+                    && let Some(file_name) = path.file_name()
+                {
+                    let dest = src_dir.join(file_name);
+                    fs::rename(&path, &dest).context("Failed to move file to src")?;
+                }
             }
 
             let app_dir = output.path().join("app");
@@ -81,6 +82,19 @@ impl ExampleTemplate {
     fn extract_to(&self, target: &Path) -> Result<()> {
         extract_recursive(self.dir, target, self.dir.path())
             .context("Failed to extract example files to disk")
+    }
+
+    pub fn read_chip_from_yaml(&self) -> Option<String> {
+        let yaml_file = self
+            .dir
+            .files()
+            .find(|f| f.path().file_name().and_then(|n| n.to_str()) == Some("example.yaml"))?;
+        let content = std::str::from_utf8(yaml_file.contents()).ok()?;
+        let doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(content).ok()?;
+        doc.get("espforge")
+            .and_then(|e| e.get("platform").or_else(|| e.get("chip")))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
     }
 }
 

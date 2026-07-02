@@ -1,6 +1,7 @@
 use super::ExamplesArgs;
 use crate::cli::interactive::Prompter;
 use crate::cli::model::ExampleConfig;
+use crate::examples::template::ExampleTemplate;
 use anyhow::Result;
 
 pub struct ConfigBuilder<'a> {
@@ -16,7 +17,7 @@ impl<'a> ConfigBuilder<'a> {
     pub fn build(self) -> Result<ExampleConfig> {
         let name = self.resolve_example_name()?;
         let project_name = self.resolve_project_name(&name)?;
-        let chip = self.resolve_chip()?;
+        let chip = self.resolve_chip(&name)?;
 
         Ok(ExampleConfig {
             template_name: name,
@@ -40,10 +41,17 @@ impl<'a> ConfigBuilder<'a> {
         }
     }
 
-    fn resolve_chip(&self) -> Result<String> {
-        match &self.args.chip {
-            Some(chip) => Ok(chip.clone()),
-            None => self.prompter.select_chip(),
+    fn resolve_chip(&self, example_name: &str) -> Result<String> {
+        if let Some(chip) = &self.args.chip {
+            return Ok(chip.clone());
         }
+
+        if let Ok(template) = ExampleTemplate::find(example_name) {
+            if let Some(chip) = template.read_chip_from_yaml() {
+                return Ok(chip);
+            }
+        }
+
+        self.prompter.select_chip()
     }
 }

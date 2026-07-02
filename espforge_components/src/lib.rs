@@ -1,5 +1,7 @@
 #![no_std]
 
+extern crate alloc;
+
 pub mod components;
 
 #[cfg(feature = "button")]
@@ -25,3 +27,15 @@ pub use components::http::HttpError;
 pub use components::http::HttpResources;
 #[cfg(feature = "http")]
 pub use components::http::HttpResponse;
+
+#[cfg(feature = "websockets")]
+pub use components::websockets::Message;
+#[cfg(feature = "websockets")]
+pub use components::websockets::WebSocketConnector;
+#[cfg(feature = "websockets")]
+pub use components::websockets::WebSocketError;
+#[cfg(feature = "websockets")]
+pub use components::websockets::WebSocketResources;
+pub use components::websockets::WebSocketSession;
+#[cfg(feature = "websockets")]
+pub use mbedtls_rs;

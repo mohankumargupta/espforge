@@ -14,22 +14,26 @@ documentation.workspace = true
 [dependencies]
 embedded-hal.workspace = true
 embedded-hal-bus = { workspace = true, optional = true }
-embedded-io = { workspace = true, optional = true }
+embedded-io = { workspace = true, optional = true, default-features = false }
 esp-hal = "1.1"
 log.workspace = true
 embassy-sync = { workspace = true, optional = true }
 embassy-time = { workspace = true, optional = true }
-embassy-net = { workspace = true,  optional = true, features = ["proto-ipv4", "medium-ethernet", "tcp", "dns", "dhcpv4"] }
-#reqwless = { workspace = true, optional = true, default-features = false, features = ["alloc"] }
-#heapless = { workspace = true, optional = true }
+embassy-net = { workspace = true, optional = true, features = ["proto-ipv4", "medium-ethernet", "tcp", "dns", "dhcpv4"] }
+
+# esp-mbedtls is the TLS backend for ESP32 bare-metal (replaces embedded-tls).
+# Only needed when the 'tls' feature is active (e.g. websockets over wss://).
+mbedtls-rs = { version = "0.1.0", optional = true }
 
 [features]
 default = []
 spi = ["dep:embedded-hal-bus"]
 i2c = ["dep:embedded-hal-bus"]
 uart = ["dep:embedded-io"]
-psram = []
+#psram = []
 wifi = ["dep:embassy-net"]
+# 'tls' now pulls in esp-mbedtls with its async Embassy support
+tls = ["dep:mbedtls-rs", "dep:embassy-net"]
 embassy = ["dep:embassy-sync", "dep:embassy-time"]
 esp32 = ["esp-hal/esp32"]
 esp32c3 = ["esp-hal/esp32c3"]

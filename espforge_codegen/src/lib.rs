@@ -22,7 +22,7 @@ pub fn generate_all(
     model: &EspforgeConfiguration,
     additional_modules: &[String],
 ) -> Result<(String, String, String)> {
-    let lib_source = generate_lib_source(additional_modules)?;
+    let lib_source = generate_lib_source(additional_modules, model)?;
     let entry_point = generate_entry_point_source(model)?;
     let components = generate_components_source(model)?;
 

@@ -33,9 +33,11 @@ impl FeatureManager {
             platform_features.push("uart".to_string());
         }
 
-        if esp32.psram.is_some() {
-            platform_features.push("psram".to_string());
-        }
+        // No longer a feature flag in esphal v1.1
+
+        // if esp32.psram.is_some() {
+        //     platform_features.push("psram".to_string());
+        // }
 
         if model.is_embassy() {
             platform_features.push("embassy".to_string());
@@ -151,53 +153,53 @@ impl FeatureManager {
         Ok(())
     }
 
-    pub fn handle_psram(doc: &mut DocumentMut, model: &EspforgeConfiguration) -> Result<()> {
-        if model
-            .esp32
-            .as_ref()
-            .and_then(|e| e.psram.as_ref())
-            .is_none()
-        {
-            return Ok(());
-        }
+    // pub fn handle_psram(doc: &mut DocumentMut, model: &EspforgeConfiguration) -> Result<()> {
+    //     if model
+    //         .esp32
+    //         .as_ref()
+    //         .and_then(|e| e.psram.as_ref())
+    //         .is_none()
+    //     {
+    //         return Ok(());
+    //     }
 
-        println!("   Detected PSRAM configuration - adding 'psram' feature to esp-hal");
+    //     println!("   Detected PSRAM configuration - adding 'psram' feature to esp-hal");
 
-        let deps_table = doc
-            .get_mut("dependencies")
-            .and_then(|d| d.as_table_mut())
-            .context("Failed to get dependencies table")?;
+    //     let deps_table = doc
+    //         .get_mut("dependencies")
+    //         .and_then(|d| d.as_table_mut())
+    //         .context("Failed to get dependencies table")?;
 
-        if let Some(esp_hal_item) = deps_table.get_mut("esp-hal") {
-            Self::add_psram_feature(esp_hal_item);
-        }
+    //     if let Some(esp_hal_item) = deps_table.get_mut("esp-hal") {
+    //         Self::add_psram_feature(esp_hal_item);
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
-    fn add_psram_feature(esp_hal_item: &mut Item) {
-        if let Some(inline_table) = esp_hal_item.as_inline_table_mut() {
-            if let Some(features_value) = inline_table.get_mut("features")
-                && let Some(features_array) = features_value.as_array_mut()
-            {
-                let has_psram = features_array.iter().any(|v| v.as_str() == Some("psram"));
+    // fn add_psram_feature(esp_hal_item: &mut Item) {
+    //     if let Some(inline_table) = esp_hal_item.as_inline_table_mut() {
+    //         if let Some(features_value) = inline_table.get_mut("features")
+    //             && let Some(features_array) = features_value.as_array_mut()
+    //         {
+    //             let has_psram = features_array.iter().any(|v| v.as_str() == Some("psram"));
 
-                if !has_psram {
-                    features_array.push("psram");
-                }
-            }
-        } else if let Some(table) = esp_hal_item.as_table_mut()
-            && let Some(features_item) = table.get_mut("features")
-            && let Some(features_value) = features_item.as_value_mut()
-            && let Some(arr) = features_value.as_array_mut()
-        {
-            let has_psram = arr.iter().any(|v| v.as_str() == Some("psram"));
+    //             if !has_psram {
+    //                 features_array.push("psram");
+    //             }
+    //         }
+    //     } else if let Some(table) = esp_hal_item.as_table_mut()
+    //         && let Some(features_item) = table.get_mut("features")
+    //         && let Some(features_value) = features_item.as_value_mut()
+    //         && let Some(arr) = features_value.as_array_mut()
+    //     {
+    //         let has_psram = arr.iter().any(|v| v.as_str() == Some("psram"));
 
-            if !has_psram {
-                arr.push("psram");
-            }
-        }
-    }
+    //         if !has_psram {
+    //             arr.push("psram");
+    //         }
+    //     }
+    // }
 
     // pub fn add_wifi_features(doc: &mut DocumentMut, model: &EspforgeConfiguration) -> Result<()> {
     //     if model.esp32.as_ref().and_then(|e| e.wifi.as_ref()).is_none() {

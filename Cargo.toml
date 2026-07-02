@@ -70,25 +70,26 @@ toml_edit = "0.23.9"
 
 embedded-hal = "1.0.0"
 embedded-hal-bus = "0.3.0"
-embedded-io = "0.7.1"
+embedded-io = { version = "0.7.1", default-features = false }
 embedded-graphics = "0.8.1"
+embedded-tls = { version = "0.18.0", default-features = false}
 
 #esp-hal = "1.0.0"
-esp-backtrace = "0.18.1"
-esp-println = "0.16.1"
+esp-backtrace = "0.19.0"
+esp-println = "0.17.0"
 
 quote = "1.0"
 syn = { version = "2.0", features = ["full", "parsing"] }
 proc-macro2 = "1.0"
 prettyplease = "0.2"
 
-embassy-executor = "0.9.1"
+embassy-executor = "0.10.0"
 embassy-time = "0.5.0"
-embassy-sync = "0.7"
+embassy-sync = "0.8"
 
-embassy-net = "0.8.0"
+embassy-net = "0.9.1"
 reqwless = { version = "0.14", default-features = false }
-heapless = "0.9.2"
+heapless = "0.9.3"
 
 inventory = "0.3"
 static_cell = "2.1"
@@ -118,3 +119,24 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
+
+# Speed up compilation and execution of crypto dependencies
+# [profile.dev.package.p384]
+# opt-level = 3
+# debug = false
+
+# [profile.dev.package.p256]
+# opt-level = 3
+# debug = false
+
+# [profile.dev.package.elliptic-curve]
+# opt-level = 3
+# debug = false
+
+# [profile.dev.package.sha2]
+# opt-level = 3
+# debug = false
+
+# [profile.dev.package.aes-gcm]
+# opt-level = 3
+# debug = false

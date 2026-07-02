@@ -1,0 +1,23 @@
+espforge:
+  name: https_example
+  platform: esp32s3
+  runtime: embassy
+  alloc: true
+
+esp32:
+  psram:
+    mode: octal
+  heap:
+    size: 73000
+  wifi:
+    ssid: Wokwi-GUEST
+    password: ""
+    auth: open
+
+components:
+  https:
+    using: HttpsClient
+    with: {}
+
+
+

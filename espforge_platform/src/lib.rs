@@ -18,6 +18,8 @@ pub use embassy_net;
 #[cfg(feature = "embassy")]
 pub mod signal;
 
+pub mod rng;
+
 pub use esp_hal;
 
 pub struct Context {

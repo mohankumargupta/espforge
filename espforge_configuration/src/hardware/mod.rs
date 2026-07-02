@@ -4,11 +4,14 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 pub mod gpio;
+pub mod heap;
 pub mod i2c;
 pub mod psram;
 pub mod spi;
 pub mod uart;
 pub mod wifi;
+
+use heap::HeapConfig;
 
 #[derive(Error, Debug)]
 pub enum ResolutionError {
@@ -38,6 +41,8 @@ pub struct Esp32Config {
     pub psram: Option<psram::PsramConfig>,
     #[serde(default)]
     pub wifi: Option<wifi::WifiConfig>,
+    /// Optional heap size override.
+    pub heap: Option<HeapConfig>,
 }
 
 pub trait ResolvePeripheral<'a>: AsRef<str> {

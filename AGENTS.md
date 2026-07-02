@@ -1,8 +1,12 @@
+## Compiling espforge
 
-## Instructions for codex
+MUST use this to compile espforge.
 
-- Never delete files
-- Only provide answer in git diff format to any code changes or features requested
+```sh
+cargo build -p espforge
+```
+
+
 
 ## Espforge concepts
 
@@ -14,12 +18,6 @@ Distinction between peripherals, components and devices.
 3. Devices are specified in YAML under devices key.
    They primarily only use components, although they can refer to pins directly.
 
-## Similar projects to compare how they approach things
-
--  espresif iot solution https://github.com/espressif/esp-iot-solution
--  esphome
--  zephyr
--  circuitpython
 
 
 

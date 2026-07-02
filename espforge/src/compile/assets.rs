@@ -142,12 +142,12 @@ pub fn inject_app_code(src_dir: &Path) -> Result<Vec<String>> {
                 let file_name_str = path.file_name().unwrap().to_string_lossy().to_string();
                 if let Some(module_name) = file_name_str.strip_suffix(".rs")
                     && module_name != "lib"
-                        && module_name != "generated"
-                        && module_name != "main"
-                        && !module_name.starts_with("bin")
-                    {
-                        module_names.push(module_name.to_string());
-                    }
+                    && module_name != "generated"
+                    && module_name != "main"
+                    && !module_name.starts_with("bin")
+                {
+                    module_names.push(module_name.to_string());
+                }
             }
         }
     }

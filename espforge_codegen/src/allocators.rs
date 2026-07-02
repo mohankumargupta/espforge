@@ -12,8 +12,8 @@ impl AllocatorGenerator {
         let psram = Self::psram_allocator(model);
 
         quote! {
-            #heap
             #psram
+            #heap
         }
     }
 
@@ -33,7 +33,7 @@ impl AllocatorGenerator {
     fn psram_allocator(model: &EspforgeConfiguration) -> TokenStream {
         if model.has_psram() == Some(true) {
             quote! {
-                esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+                esp_alloc::psram_allocator!(unsafe { esp_hal::peripherals::PSRAM::steal() }, esp_hal::psram);
             }
         } else {
             TokenStream::new()
