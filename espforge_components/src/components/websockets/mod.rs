@@ -1,7 +1,9 @@
 pub use edge_nal_tls::mbedtls::Tls;
 
+use core::cell::UnsafeCell;
 use core::ffi::CStr;
 use core::fmt;
+use core::mem::MaybeUninit;
 use core::net::SocketAddr;
 
 use edge_http::io::client::Connection;
@@ -412,6 +414,110 @@ impl WebSocketConnector {
 }
 
 // -----------------------------------------------------------------------------
+// WebSocketClient — ergonomic wrapper that owns the connector plus the
+// TLS / RNG state needed for `wss://`. Hides the unsafe construction and
+// the SessionContext lifetime plumbing from app code.
+//
+// One session at a time: `connect()` borrows `&mut self`, so drop the
+// returned `WebSocketSession` before opening another.
+// -----------------------------------------------------------------------------
+pub struct WebSocketClient {
+    connector: WebSocketConnector,
+
+    // Self-referential storage. `inner` is boxed so its address is stable;
+    // `rng` is owned by `inner`; `tls` borrows from `rng`. We lie about the
+    // lifetime on `tls` (`'static`) so we can put both in the same struct,
+    // then re-establish the real `&self` lifetime in `connect()` via a
+    // transmute.
+    //
+    // SAFETY invariants:
+    //   1. `inner` lives on the heap inside a `Box` — its address never moves.
+    //   2. `rng` is constructed first, then `tls` is constructed from
+    //      `&mut *inner.rng.get()`, so the TLS borrow points inside `inner`.
+    //   3. `inner.session_ctx` lives alongside and is similarly stable.
+    //   4. `WebSocketClientInner::drop` drops `tls` before `rng`, preserving
+    //      the borrow ordering on teardown.
+    //   5. `connect()` is the only way to extract a `TlsReference`; it
+    //      shortens the lifetime to `&'a self` via transmute, which is sound
+    //      because the pointee is pinned inside `self`.
+    inner: Box<WebSocketClientInner>,
+}
+
+struct WebSocketClientInner {
+    rng: UnsafeCell<espforge_platform::rng::Rng>,
+    tls: UnsafeCell<MaybeUninit<Tls<'static>>>,
+    session_ctx: UnsafeCell<SessionContext<'static>>,
+}
+
+impl WebSocketClient {
+    /// Build a client around an existing connector. Performs the one-time
+    /// RNG + TLS initialisation.
+    pub fn new(connector: WebSocketConnector) -> Self {
+        let inner = Box::new(WebSocketClientInner {
+            rng: UnsafeCell::new(unsafe { espforge_platform::rng::Rng::new() }),
+            tls: UnsafeCell::new(MaybeUninit::uninit()),
+            session_ctx: UnsafeCell::new(SessionContext {
+                tls: None,
+                plain_tcp: None,
+            }),
+        });
+
+        unsafe {
+            let rng_ref = &mut *inner.rng.get();
+            let tls = Tls::new_local_borrows(rng_ref).expect("TLS init failed");
+            inner.tls.get().write(MaybeUninit::new(tls));
+        }
+
+        Self { connector, inner }
+    }
+
+    /// Open a WebSocket connection. For `wss://` URIs the internal TLS stack
+    /// is used automatically; for `ws://` the connection is plain TCP.
+    pub async fn connect<'a>(
+        &'a mut self,
+        uri_str: &str,
+    ) -> Result<WebSocketSession<'a>, WebSocketError> {
+        // Decide whether we need TLS up front, without holding any borrow of
+        // `self.inner` while we later mutably borrow `self.connector`.
+        let uri = self.connector.parse_uri(uri_str)?;
+
+        let tls_ref: Option<TlsReference<'a>> = if uri.secure {
+            // SAFETY: see invariants on `WebSocketClient`. `inner` is heap-pinned,
+            // `tls` borrows from `inner.rng`, both live for `'a`. We coerce the
+            // short-lived reference returned by `tls.reference()` to `'a`.
+            let short_ref: TlsReference<'_> = unsafe {
+                (*self.inner.tls.get())
+                    .assume_init_ref()
+                    .reference()
+            };
+            Some(unsafe { core::mem::transmute(short_ref) })
+        } else {
+            None
+        };
+
+        // SAFETY: see invariants on `WebSocketClient`. The session context lives
+        // inside the pinned `inner`; reborrowing it for `'a` is sound because
+        // `connect()` is the only consumer and the returned session borrows
+        // from `&'a mut self`.
+        let session_ctx: &mut SessionContext<'a> = unsafe {
+            &mut *self.inner.session_ctx.get()
+        };
+
+        self.connector.connect(uri_str, tls_ref, session_ctx).await
+    }
+}
+
+impl Drop for WebSocketClientInner {
+    fn drop(&mut self) {
+        // SAFETY: `tls` was initialised in `WebSocketClient::new` and has not
+        // been moved out. Drop it before `rng`, since `tls` borrows from `rng`.
+        unsafe {
+            self.tls.get_mut().assume_init_drop();
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Free function – no borrow on self, eliminates E0502.
 // -----------------------------------------------------------------------------
 async fn perform_handshake<B>(uri: &Uri, conn: &mut Connection<'_, B>) -> Result<(), WebSocketError>
@@ -473,3 +579,4 @@ espforge_platform::logger::Logger::new().info("ENTERED perform_handshake - build
         .map_err(|_| WebSocketError::HandshakeFailed)?;
     Ok(())
 }
+

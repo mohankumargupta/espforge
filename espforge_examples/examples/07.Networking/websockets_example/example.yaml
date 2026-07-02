@@ -17,6 +17,6 @@ esp32:
 components:
   ws_client:
     using: WebSocketClient
-    with:
-      uri: "wss://echo.websocket.org"
+    with: {}
 
+    
