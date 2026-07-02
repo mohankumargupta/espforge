@@ -172,6 +172,7 @@ async fn send_frame_on<W: Write>(
         .send_payload(&mut *socket, payload)
         .await
         .map_err(|_| WebSocketError::Io)?;
+    socket.flush().await.map_err(|_| WebSocketError::Io)?;
     Ok(())
 }
 
@@ -200,12 +201,12 @@ pub struct WebSocketSession<'a> {
 
 impl<'a> WebSocketSession<'a> {
     pub async fn send_text(&mut self, text: &str) -> Result<(), WebSocketError> {
-        self.send_frame(FrameType::Text(true), text.as_bytes())
+        self.send_frame(FrameType::Text(false), text.as_bytes())
             .await
     }
 
     pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WebSocketError> {
-        self.send_frame(FrameType::Binary(true), data).await
+        self.send_frame(FrameType::Binary(false), data).await
     }
 
     async fn send_frame(
