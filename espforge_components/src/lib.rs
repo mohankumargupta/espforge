@@ -36,6 +36,7 @@ pub use components::websockets::WebSocketConnector;
 pub use components::websockets::WebSocketError;
 #[cfg(feature = "websockets")]
 pub use components::websockets::WebSocketResources;
+#[cfg(feature = "websockets")] 
 pub use components::websockets::WebSocketSession;
 #[cfg(feature = "websockets")]
 pub use mbedtls_rs;
