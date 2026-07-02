@@ -47,7 +47,7 @@ categories = ["embedded", "hardware-support", "no-std"]
 [workspace.dependencies]
 espforge_common = { version = "0.1.8", path = "espforge_common" }
 espforge_platform = { version = "0.1.15", path = "espforge_platform" }
-espforge_components = { version = "0.1.13", path = "espforge_components" }
+espforge_components = { version = "0.1.14", path = "espforge_components" }
 espforge_devices = { version = "0.1.15", path = "espforge_devices" }
 espforge_configuration = { version = "0.4.0", path = "espforge_configuration" }
 espforge_codegen = { version = "0.5.0", path = "espforge_codegen" }

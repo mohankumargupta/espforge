@@ -1,6 +1,6 @@
 [package]
 name = "espforge_components"
-version = "0.1.13"
+version = "0.1.14"
 description = "Components for espforge"
 edition.workspace = true
 license.workspace = true
