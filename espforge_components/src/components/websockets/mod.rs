@@ -1,5 +1,6 @@
 pub use edge_nal_tls::mbedtls::Tls;
 
+use alloc::boxed::Box;
 use core::cell::UnsafeCell;
 use core::ffi::CStr;
 use core::fmt;
@@ -444,7 +445,7 @@ pub struct WebSocketClient {
 }
 
 struct WebSocketClientInner {
-    rng: UnsafeCell<espforge_platform::rng::Rng>,
+    rng: UnsafeCell<TlsRng>,
     tls: UnsafeCell<MaybeUninit<Tls<'static>>>,
     session_ctx: UnsafeCell<SessionContext<'static>>,
 }
@@ -454,7 +455,7 @@ impl WebSocketClient {
     /// RNG + TLS initialisation.
     pub fn new(connector: WebSocketConnector) -> Self {
         let inner = Box::new(WebSocketClientInner {
-            rng: UnsafeCell::new(unsafe { espforge_platform::rng::Rng::new() }),
+            rng: UnsafeCell::new(TlsRng::new(unsafe { espforge_platform::rng::Rng::new() })),
             tls: UnsafeCell::new(MaybeUninit::uninit()),
             session_ctx: UnsafeCell::new(SessionContext {
                 tls: None,
@@ -500,7 +501,9 @@ impl WebSocketClient {
         // `connect()` is the only consumer and the returned session borrows
         // from `&'a mut self`.
         let session_ctx: &mut SessionContext<'a> = unsafe {
-            &mut *self.inner.session_ctx.get()
+            core::mem::transmute::<&mut SessionContext<'static>, &mut SessionContext<'a>>(
+                &mut *self.inner.session_ctx.get(),
+            )
         };
 
         self.connector.connect(uri_str, tls_ref, session_ctx).await
