@@ -5,42 +5,52 @@
 //!
 //! This is a target-only crate: the types are concrete `esp-hal` types, so the
 //! generated project wires instances move-by-value (ADR-008) with no generics.
-//! It depends only on `esp-hal` (+ `embedded-hal` re-exported traits), satisfying
-//! the ADR-007 leaf rule.
+//! `Logger` and `Delay` are espforge's own types (mirroring v1's
+//! `espforge_platform`), not thin esp-hal re-exports.
 
 #![no_std]
-
-use embedded_hal::delay::DelayNs;
 
 pub mod components;
 pub mod devices;
 
-/// Minimal logging handle stored on the `Context` (ADR-008 stable API). The
-/// generated project initializes the real logger (e.g. `esp_println`) at entry;
-/// this type is the app-facing handle.
-#[derive(Debug, Clone, Copy, Default)]
+/// Logging handle stored on the `Context` (ADR-008 stable API). Forwards to the
+//! `log` facade; the generated project installs the sink (e.g. `esp-println`).
+#[derive(Clone, Copy)]
 pub struct Logger;
 
 impl Logger {
     pub fn new() -> Self {
         Logger
     }
-    /// Emit a log line. The generated project wires the real sink (e.g.
-    /// `esp_println`); this handle is the app-facing API.
-    pub fn log(&self, _msg: &str) {}
+    pub fn info(&self, msg: impl core::fmt::Display) {
+        log::info!("{}", msg);
+    }
+    pub fn warn(&self, msg: impl core::fmt::Display) {
+        log::warn!("{}", msg);
+    }
+    pub fn error(&self, msg: impl core::fmt::Display) {
+        log::error!("{}", msg);
+    }
 }
 
-/// Delay handle stored on the `Context`, wrapping `esp_hal::delay::Delay`.
-#[derive(Debug, Clone)]
+/// Delay handle stored on the `Context`. Own type wrapping `esp_hal::delay::Delay`
+/// (v1 style), implementing `embedded-hal`'s `DelayNs`.
+#[derive(Clone, Copy)]
 pub struct Delay {
     inner: esp_hal::delay::Delay,
 }
 
 impl Delay {
-    pub fn new(inner: esp_hal::delay::Delay) -> Self {
-        Delay { inner }
+    pub fn new() -> Self {
+        Delay { inner: esp_hal::delay::Delay::new() }
     }
-    pub fn delay_ms(&mut self, ms: u32) {
-        self.inner.delay_ms(ms);
+    pub fn delay_ms(&self, ms: u32) {
+        self.inner.delay_millis(ms);
+    }
+}
+
+impl embedded_hal::delay::DelayNs for Delay {
+    fn delay_ns(&mut self, ns: u32) {
+        self.inner.delay_ns(ns);
     }
 }

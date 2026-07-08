@@ -1,6 +1,6 @@
 //! `led` component: a single GPIO output, wired move-by-value (ADR-008).
 
-use esp_hal::gpio::Output;
+use esp_hal::gpio::{Level, Output, OutputConfig};
 
 pub struct Led {
     pin: Output<'static>,
@@ -32,4 +32,10 @@ impl Led {
     pub fn toggle(&mut self) {
         self.pin.toggle();
     }
+}
+
+/// Build an `Output` from a moved-in GPIO peripheral (used by the codegen).
+pub fn output(pin: impl esp_hal::gpio::OutputPin + 'static, active_low: bool) -> Led {
+    let level = if active_low { Level::High } else { Level::Low };
+    Led::new(Output::new(pin, level, OutputConfig::default()), active_low)
 }

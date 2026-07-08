@@ -91,9 +91,21 @@ fn project_name(ir: &DeviceTree) -> String {
 
 fn emit_cargo_toml(ir: &DeviceTree) -> Result<String> {
     let name = project_name(ir);
+    let chip = ir
+        .meta
+        .target
+        .clone()
+        .unwrap_or_else(|| "esp32c3".to_string());
     let embassy = if ir.flags.is_embassy { "embassy-executor = \"*\"\n" } else { "" };
     let alloc = if ir.flags.has_alloc { "embedded-alloc = \"*\"\n" } else { "" };
     let runtime_dep = espforge_dep("espforge-runtime");
+    // esp-hal + friends need the chip feature enabled (e.g. "esp32c3"); esp-hal
+    // also needs "embassy" when using the async runtime (ADR-008 flags).
+    let mut hal_feats = vec![chip.clone()];
+    if ir.flags.is_embassy {
+        hal_feats.push("embassy".to_string());
+    }
+    let hal_feats = hal_feats.join("\", \"");
     Ok(format!(
         r#"[package]
 name = "{name}"
@@ -102,9 +114,9 @@ edition = "2021"
 
 [dependencies]
 {runtime_dep}
-esp-hal = "*"
-esp-backtrace = "*"
-esp-println = "*"
+esp-hal = {{ version = "*", features = ["{hal_feats}"] }}
+esp-backtrace = {{ version = "*", features = ["{chip}", "println"] }}
+esp-println = {{ version = "*", features = ["{chip}"] }}
 static_cell = "*"
 {embassy}{alloc}
 

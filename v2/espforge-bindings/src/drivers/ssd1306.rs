@@ -28,7 +28,8 @@ impl Driver for Ssd1306Driver {
 
     fn construct(&self, inst: &ResolvedInstance, _ctx: &GenContext) -> Construction {
         // with: { bus: $i2c_bus, reset: $GPIO16, dc: $GPIO5 }
-        // `bus` is a shared component -> borrow its field by reference.
+        // `bus` is a shared component -> borrow its field by reference; reset/dc
+        // are control pins moved in by value (wrapped as Output by the driver).
         let bus_field = inst
             .deps
             .iter()
@@ -37,10 +38,17 @@ impl Driver for Ssd1306Driver {
             .unwrap_or_else(|| "unreachable!()".to_string());
         let reset = pin_field(inst, "reset");
         let dc = pin_field(inst, "dc");
+        let out = |gpio: String| {
+            format!(
+                "esp_hal::gpio::Output::new(registry.peripherals.{gpio}, esp_hal::gpio::Level::Low, esp_hal::gpio::OutputConfig::default())"
+            )
+        };
         Construction {
             field: sanitize(&inst.id),
             expr: format!(
-                "espforge_runtime::devices::Ssd1306::new(components.{bus_field}.bus(), registry.peripherals.{reset}, registry.peripherals.{dc})"
+                "espforge_runtime::devices::Ssd1306::new(components.{bus_field}.bus(),\n                    {},\n                    {})",
+                out(reset),
+                out(dc)
             ),
         }
     }

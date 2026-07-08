@@ -1,6 +1,6 @@
 espforge:
   name: blink
-  target: esp32
+  target: esp32c3
   runtime: blocking
 
 esp32:

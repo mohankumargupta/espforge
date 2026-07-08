@@ -1,6 +1,6 @@
 espforge:
   name: display
-  target: esp32
+  target: esp32c3
   runtime: embassy
 
 esp32:

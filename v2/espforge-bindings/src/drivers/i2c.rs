@@ -27,15 +27,30 @@ impl Driver for I2cDriver {
 
     fn construct(&self, inst: &ResolvedInstance, ctx: &GenContext) -> Construction {
         // with: { bus: $i2c_master } -> claims the I2C peripheral by value.
-        // Resolve the claimed peripheral to its esp_hal field (ADR-008).
+        // Resolve the claimed peripheral to its esp_hal field (ADR-008) and pull
+        // the bus's sda/scl pin numbers from the IR.
         let field = inst
             .claims
             .first()
             .map(|name| peripheral_field(&ctx.peripherals, &name.name))
             .unwrap_or_else(|| "unreachable!()".to_string());
+        let (sda, scl) = inst
+            .claims
+            .first()
+            .and_then(|name| ctx.peripherals.iter().find(|p| p.name == name.name))
+            .and_then(|p| p.bus.as_ref())
+            .map(|b| {
+                (
+                    b.sda.unwrap_or(0).to_string(),
+                    b.scl.unwrap_or(0).to_string(),
+                )
+            })
+            .unwrap_or_else(|| ("0".to_string(), "0".to_string()));
         Construction {
             field: sanitize(&inst.id),
-            expr: format!("espforge_runtime::components::I2cBus::new(registry.peripherals.{field})"),
+            expr: format!(
+                "espforge_runtime::components::I2cBus::new(\n                    registry.peripherals.{field},\n                    registry.peripherals.GPIO{sda},\n                    registry.peripherals.GPIO{scl})"
+            ),
         }
     }
 }

@@ -38,10 +38,11 @@ impl Driver for LedDriver {
             .first()
             .map(|p| format!("registry.peripherals.GPIO{}", p.number))
             .unwrap_or_else(|| "unreachable!()".into());
+        // The driver builds the Output from the moved-in GPIO peripheral.
         Construction {
             field: sanitize(&inst.id),
             expr: format!(
-                "espforge_runtime::components::Led::new({pin}, {active_low})"
+                "espforge_runtime::components::Led::new(\n                    esp_hal::gpio::Output::new({pin}, esp_hal::gpio::Level::Low, esp_hal::gpio::OutputConfig::default()),\n                    {active_low})"
             ),
         }
     }
