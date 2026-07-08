@@ -53,25 +53,42 @@ fn run() -> anyhow::Result<()> {
             println!("espforge {VERSION}");
         }
         Command::Validate { project } => {
-            let proj = espforge::parse::parse_file(&project)?;
-            // Phase 2: shape-level parse only. Full semantic `validate` (ref
-            // resolution, double-claim, cycles) arrives in Phase 3 and will
-            // return structured `Diag`s here.
-            println!(
-                "parsed {}: {} component(s), {} device(s)",
-                project.display(),
-                proj.components.len(),
-                proj.devices.len()
-            );
-            println!("validate: OK (shape-level; semantic checks pending)");
+            let text = std::fs::read_to_string(&project)
+                .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", project.display()))?;
+            let proj = espforge::parse::parse_str(&text)?;
+            match espforge::pipeline::validate(&proj) {
+                Ok(()) => {
+                    println!(
+                        "validate: OK — {} component(s), {} device(s)",
+                        proj.components.len(),
+                        proj.devices.len()
+                    );
+                }
+                Err(diags) => {
+                    for d in &diags {
+                        eprintln!("{}", d.render(&text));
+                    }
+                    eprintln!("validate: {} error(s)", diags.len());
+                    std::process::exit(1);
+                }
+            }
         }
         Command::Build { project, out } => {
-            let _proj = espforge::parse::parse_file(&project)?;
+            let text = std::fs::read_to_string(&project)
+                .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", project.display()))?;
+            let proj = espforge::parse::parse_str(&text)?;
+            espforge::pipeline::validate(&proj)
+                .map_err(|diags| anyhow::anyhow!("validation failed: {} error(s)", diags.len()))?;
+            let ir = espforge::pipeline::resolve(&proj);
             println!(
-                "build: parsed {}; codegen pipeline lands in a later phase (out={})",
+                "build: resolved `{}` — {} instance(s), init_order {:?}, features {:?}",
                 project.display(),
-                out.display()
+                ir.instances.len(),
+                ir.init_order,
+                ir.required_features
             );
+            println!("  flags: {:?}", ir.flags);
+            println!("  (codegen emitters land in a later phase; out={})", out.display());
         }
     }
     Ok(())

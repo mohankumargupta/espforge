@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 espforge-model = { version = "0.1.0", path = "../espforge-model" }
+espforge-bindings = { version = "0.1.0", path = "../espforge-bindings" }
 anyhow.workspace = true
 clap.workspace = true
 serde_yaml_ng.workspace = true

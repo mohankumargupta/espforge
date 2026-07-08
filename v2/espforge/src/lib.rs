@@ -5,3 +5,4 @@
 //! streams — never as a Cargo dependency (ADR-007).
 
 pub mod parse;
+pub mod pipeline;

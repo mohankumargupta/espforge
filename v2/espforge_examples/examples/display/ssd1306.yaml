@@ -1,0 +1,29 @@
+espforge:
+  name: display
+  target: esp32
+  runtime: embassy
+
+esp32:
+  gpio:
+    - gpio: 5
+    - gpio: 16
+  i2c:
+    - name: i2c_master
+      peripheral: 0
+      sda: 21
+      scl: 22
+      frequency: 400
+
+components:
+  - id: i2c_bus
+    using: i2c
+    with:
+      bus: $i2c_master
+
+devices:
+  - id: screen
+    using: ssd1306
+    with:
+      bus: $i2c_bus
+      reset: $GPIO16
+      dc: $GPIO5

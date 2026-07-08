@@ -1,0 +1,48 @@
+//! In-tree driver catalog (ADR-006): the data-only metadata used to validate and
+//! resolve projects (ADR-009). Code-generation (`Driver` trait impls) is added in
+//! a later phase; this crate currently owns the *specs* so `validate`/`resolve`
+//! can reason about known kinds, tiers, and dependency shapes.
+
+use espforge_model::catalog::{DepSpec, DriverSpec, SpecFlags};
+use espforge_model::ir::{Access, DepKind, Tier};
+
+/// The set of built-in drivers, keyed by `kind`.
+///
+/// Validation metadata only:
+/// - `led`        — Component, claims one pin by value.
+/// - `i2c`        — Component, claims an I2C bus peripheral by value.
+/// - `ssd1306`    — Device, shares an `i2c` component by reference (bus sharing
+///                 lives at the component tier, ADR-003/008) and claims a few
+///                 control pins by value.
+pub fn catalog() -> Vec<DriverSpec> {
+    vec![
+        DriverSpec {
+            kind: "led".to_string(),
+            tier: Tier::Component,
+            deps: vec![],
+            pins: vec!["pin".to_string()],
+            peripherals: vec![],
+            flags: SpecFlags { needs_delay: true, ..Default::default() },
+        },
+        DriverSpec {
+            kind: "i2c".to_string(),
+            tier: Tier::Component,
+            deps: vec![],
+            pins: vec![],
+            peripherals: vec!["bus".to_string()],
+            flags: SpecFlags::default(),
+        },
+        DriverSpec {
+            kind: "ssd1306".to_string(),
+            tier: Tier::Device,
+            deps: vec![DepSpec {
+                key: "bus".to_string(),
+                kind: DepKind::Instance,
+                access: Access::Shared,
+            }],
+            pins: vec!["reset".to_string(), "dc".to_string()],
+            peripherals: vec![],
+            flags: SpecFlags::default(),
+        },
+    ]
+}

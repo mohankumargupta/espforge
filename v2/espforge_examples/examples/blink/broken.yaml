@@ -1,0 +1,28 @@
+espforge:
+  name: broken
+  target: esp32
+
+esp32:
+  gpio:
+    - gpio: 18
+    - gpio: 18
+
+components:
+  - id: led1
+    using: led
+    with:
+      pin: $GPIO18
+  - id: led2
+    using: led
+    with:
+      pin: $GPIO18
+  - id: ghost
+    using: i2c
+    with:
+      bus: $missing_bus
+
+devices:
+  - id: bad
+    using: nope
+    with:
+      pin: $GPIO18

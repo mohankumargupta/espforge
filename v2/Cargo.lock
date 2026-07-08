@@ -122,6 +122,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "espforge-bindings",
  "espforge-model",
  "serde_yaml_ng",
 ]
