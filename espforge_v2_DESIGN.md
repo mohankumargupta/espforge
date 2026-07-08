@@ -38,7 +38,7 @@ are terminal** (no device-on-device). Bus-sharing lives at the component tier
 | Project | the whole spec (metadata + peripherals + components + devices + app) |
 | IR / DeviceTree | validated intermediate representation all emitters read |
 | Binding | a driver's contract → codegen glue (in `espforge-bindings`) |
-| Driver | a capability's `no_std` runtime implementation (in `espforge-drivers`) |
+| Driver | a capability's `no_std` runtime implementation (in `espforge-runtime`, with distinct `components` and `devices` modules) |
 
 ## 4. Core entities / value objects
 - **Source-of-truth inputs:** project YAML, `app.rs`, `dependencies.toml`,
@@ -72,18 +72,21 @@ are terminal** (no device-on-device). Bus-sharing lives at the component tier
 | `espforge` | CLI binary + parse/resolve/emit orchestration | host / std |
 | `espforge-model` | `DeviceTree` IR, `Driver` trait, registry **types** | host / std; depends on neither host nor target |
 | `espforge-bindings` | in-tree `generate` impls + driver registry list | host / std |
-| `espforge-drivers` | `no_std` runtime impls of each capability | target / no_std (leaf) |
+| `espforge-runtime` | `no_std` runtime impls, split into distinct `components` and `devices` modules | target / no_std (leaf) |
 | `espforge-examples` | sample projects | CI integration gate |
 
 ## 7. Module boundaries & 8. dependency rules
-- `espforge-drivers` depends **only** on `esp-hal`/`embedded-hal` (leaf).
+- `espforge-runtime` depends **only** on `esp-hal`/`embedded-hal` (leaf).
 - `espforge-model` depends on neither host nor target.
-- `espforge` + `espforge-bindings` are host/std and reference `espforge-drivers`
+- `espforge` + `espforge-bindings` are host/std and reference `espforge-runtime`
   **only by name/path inside emitted token streams** — never link it into the
   host build.
 - **No cross-boundary cycles.**
+- `espforge-runtime` keeps **distinct `components` and `devices` modules** — the
+  runtime mirrors the three-tier domain spine (ADR-003) and deliberately preserves
+  the component/device distinction that esphome blurs.
 - Per driver: 2 files — generate-impl in `espforge-bindings`, runtime-impl in
-  `espforge-drivers`.
+  `espforge-runtime` (under its `components` or `devices` module as appropriate).
 
 ## 9. Extension / plugin model
 One module/file per driver via a derive macro (typed config + `using` name +
