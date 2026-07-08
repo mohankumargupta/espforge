@@ -76,15 +76,27 @@ pub struct Artifact {
     pub path: String,
     /// File contents.
     pub content: String,
-    /// Whether espforge owns this file (true) or it is an override the user may
-    /// replace (false, e.g. a layered override base is owned; user override is
-    /// not emitted by us at all).
-    pub owned: bool,
+    /// `Owned` — espforge regenerates it every build and tracks it in the
+    /// manifest (drift detection). `SeedOnce` — espforge writes it only if
+    /// absent (the user-owned `app.rs` skeleton); never tracked, never clobbered.
+    /// `NotOwned` — not written by espforge at all (e.g. a user override base we
+    /// do not emit).
+    pub ownership: Ownership,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ownership {
+    Owned,
+    SeedOnce,
+    NotOwned,
 }
 
 impl Artifact {
     pub fn owned(path: impl Into<String>, content: impl Into<String>) -> Self {
-        Self { path: path.into(), content: content.into(), owned: true }
+        Self { path: path.into(), content: content.into(), ownership: Ownership::Owned }
+    }
+    pub fn seed_once(path: impl Into<String>, content: impl Into<String>) -> Self {
+        Self { path: path.into(), content: content.into(), ownership: Ownership::SeedOnce }
     }
 }
 

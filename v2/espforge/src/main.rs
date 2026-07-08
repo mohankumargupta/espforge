@@ -80,15 +80,23 @@ fn run() -> anyhow::Result<()> {
             espforge::pipeline::validate(&proj)
                 .map_err(|diags| anyhow::anyhow!("validation failed: {} error(s)", diags.len()))?;
             let ir = espforge::pipeline::resolve(&proj);
+
+            // Layer 1: standard Espressif scaffold (esp-generate), merged without
+            // clobbering espforge's files.
+            espforge::emit::scaffold::scaffold(&ir, &out)
+                .map_err(|e| anyhow::anyhow!("scaffold failed: {e}"))?;
+
+            // Layer 2: espforge's wiring layers + manifest.
+            let artifacts = espforge::emit::generate(&ir)?;
+            espforge::emit::write(&out, &artifacts)?;
+
             println!(
-                "build: resolved `{}` — {} instance(s), init_order {:?}, features {:?}",
-                project.display(),
+                "build: wrote project to {} — {} instance(s), features {:?}",
+                out.display(),
                 ir.instances.len(),
-                ir.init_order,
                 ir.required_features
             );
-            println!("  flags: {:?}", ir.flags);
-            println!("  (codegen emitters land in a later phase; out={})", out.display());
+            println!("  (run `cargo build` in that dir with an esp toolchain to compile)");
         }
     }
     Ok(())

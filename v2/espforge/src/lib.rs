@@ -4,5 +4,6 @@
 //! → `emit*`. It references `espforge-runtime` only by name inside emitted token
 //! streams — never as a Cargo dependency (ADR-007).
 
+pub mod emit;
 pub mod parse;
 pub mod pipeline;

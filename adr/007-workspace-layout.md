@@ -31,6 +31,13 @@ runtime layout itself.
 **Per-driver file count:** 2 (generate-impl in `espforge-bindings`, runtime-impl in
 `espforge-runtime` under its `components` or `devices` module), down from today's 5.
 
+**Publishing & local override.** `espforge-model`, `espforge-bindings`, and
+`espforge-runtime` are published on crates.io (the `espforge` CLI is a published
+binary). The `ESPFORGE_USE_LOCAL` env var flips espforge crates to local path
+deps: a generated project's `Cargo.toml` uses `path` deps when the var is set
+(general over all `espforge-*` crates); the tool's own deps resolve locally when
+installed/published. This matches v1's publish + override behaviour.
+
 **Drivers.** The dominant constraint is the host/target (std/no_std) wall; a single
 mega-crate mixes them and leaks host deps into the target. Grouping by *role*
 (model / host-codegen / target-runtime) shrinks the surface and lands the D6

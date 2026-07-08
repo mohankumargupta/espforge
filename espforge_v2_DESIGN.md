@@ -88,6 +88,26 @@ are terminal** (no device-on-device). Bus-sharing lives at the component tier
 - Per driver: 2 files — generate-impl in `espforge-bindings`, runtime-impl in
   `espforge-runtime` (under its `components` or `devices` module as appropriate).
 
+## 8b. Crate publishing & local override
+
+All three non-example crates are **published on crates.io**: `espforge-model`,
+`espforge-bindings`, and `espforge-runtime` (the `espforge` CLI is published as a
+binary). This mirrors v1, which published its platform/component crates.
+
+The `ESPFORGE_USE_LOCAL` environment variable (set to a local espforge checkout)
+flips espforge crates to **local path dependencies** instead of the published
+versions. It applies at two levels:
+
+- **Generated project** `Cargo.toml` — `espforge build` reads `ESPFORGE_USE_LOCAL`
+  and emits `espforge-runtime = { path = "<local>/espforge-runtime" }` (and any
+  other `espforge-*` crate the project references) instead of `espforge-runtime =
+  "0.1"`. Resolution is general over all `espforge-*` crates (see `espforge_dep`
+  in `emit/rust.rs`).
+- **The tool itself** — when `espforge` is installed/published and `ESPFORGE_USE_LOCAL`
+  is set, its own `espforge-bindings` / `espforge-model` deps resolve to the local
+  checkout. Within the v2 workspace these are already path deps, so the override
+  only matters for an installed/published `espforge`.
+
 ## 9. Extension / plugin model
 One module/file per driver via a derive macro (typed config + `using` name +
 required features + dep graph + `generate` body). **Discovery = explicit registry
