@@ -331,6 +331,7 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
             name: format!("GPIO{}", p.gpio),
             kind: PeripheralKind::Pin,
             number: p.gpio,
+            field: format!("GPIO{}", p.gpio),
             bus: None,
             claimed_by: None,
         });
@@ -340,6 +341,7 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
             name: b.name.clone(),
             kind: PeripheralKind::I2c,
             number: b.peripheral,
+            field: format!("I2C{}", b.peripheral),
             bus: Some(espforge_model::ir::BusInit {
                 sda: b.sda,
                 scl: b.scl,
@@ -356,6 +358,7 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
             name: b.name.clone(),
             kind: PeripheralKind::Spi,
             number: b.peripheral,
+            field: format!("SPI{}", b.peripheral),
             bus: Some(espforge_model::ir::BusInit {
                 sda: b.sda,
                 scl: b.scl,
@@ -372,6 +375,7 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
             name: b.name.clone(),
             kind: PeripheralKind::Uart,
             number: b.peripheral,
+            field: format!("UART{}", b.peripheral),
             bus: Some(espforge_model::ir::BusInit {
                 sda: b.sda,
                 scl: b.scl,
@@ -388,6 +392,7 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
             name: "wifi".to_string(),
             kind: PeripheralKind::Wifi,
             number: 0,
+            field: "WiFi".to_string(),
             bus: None,
             claimed_by: None,
         });

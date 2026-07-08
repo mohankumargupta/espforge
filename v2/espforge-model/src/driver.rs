@@ -13,6 +13,23 @@ use crate::ir::ResolvedInstance;
 use crate::value::{Artifact, Diag};
 use std::fmt::Debug;
 
+/// Per-instance construction snippet a driver emits (ADR-005/008). The emitter
+/// collects these and assembles the `Components { .. }` / `Devices { .. }`
+/// struct literals in `main.rs` from them — this is what makes the emitter
+/// driver-driven (ADR-006): adding a driver is a one-file change, no central
+/// mapping to edit.
+#[derive(Debug, Clone)]
+pub struct Construction {
+    /// The sanitized field name in `Components`/`Devices` (matches the
+    /// `generated.rs` struct field).
+    pub field: String,
+    /// The full initializer expression, e.g.
+    /// `espforge_runtime::components::Led::new(registry.peripherals.GPIO18, false)`.
+    /// References `registry` (a `PeripheralRegistry`) and any shared components
+    /// by their field name.
+    pub expr: String,
+}
+
 /// A driver declaration. Implemented once per capability (e.g. `led`,
 /// `ssd1306`, `http`). Pure and host-side: it emits `Artifact`s from a resolved
 /// instance; it never touches hardware or `espforge-runtime` directly (the
@@ -23,6 +40,13 @@ pub trait Driver: Debug + Send + Sync {
 
     /// Which tier this driver belongs to (ADR-003). A `Device` is terminal.
     fn tier(&self) -> crate::ir::Tier;
+
+    /// The concrete runtime struct name this driver constructs, e.g. `I2cBus`
+    /// (not the YAML `kind`, which may differ). Used to type the generated
+    /// `Components`/`Devices` struct fields (ADR-008). Defaults to `kind`.
+    fn type_name(&self) -> &str {
+        self.kind()
+    }
 
     /// Cargo features this driver requires (e.g. `["embassy"]`, `["alloc"]`).
     fn required_features(&self) -> &[&str] {
@@ -40,6 +64,17 @@ pub trait Driver: Debug + Send + Sync {
     /// Returns the artifacts that make up this instance's contribution (e.g. a
     /// generated `impl` block appended to `generated.rs`).
     fn generate(&self, inst: &ResolvedInstance, ctx: &GenContext) -> Result<Vec<Artifact>, Diag>;
+
+    /// Emit the per-instance construction used to wire this instance into the
+    /// `Components`/`Devices` struct literal in `main.rs` (ADR-008, move-by-
+    /// value). Default panics so a driver must opt in; drivers that only emit
+    /// artifacts (no runtime wiring) can leave the default.
+    fn construct(&self, _inst: &ResolvedInstance, _ctx: &GenContext) -> Construction {
+        Construction {
+            field: String::new(),
+            expr: String::new(),
+        }
+    }
 }
 
 /// Flags a driver can assert about the whole project when it is present.
@@ -51,13 +86,16 @@ pub struct DriverFlags {
     pub needs_stack: bool,
 }
 
-/// Shared context passed to every driver's `generate`.
+/// Shared context passed to every driver's `generate` / `construct`.
 #[derive(Debug, Clone)]
 pub struct GenContext {
     /// Target chip, e.g. `esp32`.
     pub target: Option<String>,
     /// Embassy vs blocking.
     pub is_embassy: bool,
+    /// Resolved peripherals, so drivers can resolve a claimed peripheral to its
+    /// esp_hal field name (ADR-008 move-by-value wiring).
+    pub peripherals: Vec<crate::ir::Peripheral>,
 }
 
 /// An explicit, in-tree registry of drivers (ADR-006). The CLI holds one of
@@ -68,7 +106,7 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub fn new(drivers: &'static [&'static dyn Driver]) -> Self {
+    pub fn new(drivers: &[&'static dyn Driver]) -> Self {
         Self { drivers: drivers.to_vec() }
     }
 

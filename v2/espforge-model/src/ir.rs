@@ -54,6 +54,9 @@ pub struct Peripheral {
     pub kind: PeripheralKind,
     /// GPIO number for pins; peripheral index for buses.
     pub number: u32,
+    /// The esp_hal peripheral field name, e.g. `GPIO18`, `I2C0`. Used by drivers
+    /// to emit move-by-value wiring: `registry.peripherals.I2C0` (ADR-008).
+    pub field: String,
     /// Bus configuration when `kind` is a bus.
     pub bus: Option<BusInit>,
     /// The instance that claimed this peripheral, if any.

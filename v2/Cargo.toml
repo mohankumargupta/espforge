@@ -7,6 +7,15 @@ members = [
     "espforge-runtime",
     "espforge-examples",
 ]
+# `espforge-runtime` is target-only (depends on esp-hal); it builds only under
+# an esp target (e.g. via a generated project). Default host build skips it so
+# `cargo build` stays green without an embedded toolchain.
+default-members = [
+    "espforge-model",
+    "espforge",
+    "espforge-bindings",
+    "espforge-examples",
+]
 
 [workspace.package]
 edition = "2024"
