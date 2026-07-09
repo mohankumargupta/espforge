@@ -24,10 +24,36 @@ pub use include_dir::Dir;
 /// The embedded example tree: compiled from `examples/` next to this crate.
 pub static EXAMPLES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/examples");
 
-/// Statically known example names (the leaf folder names). Resolution is by leaf
-/// name regardless of category (see `find_example`). Excludes `broken`, which
-/// exists only to exercise the validation path.
-pub const EXAMPLE_NAMES: &[&str] = &["blink", "display"];
+/// Derive the list of example names from the embedded tree: every leaf
+/// directory that contains a project spec (a `.yaml` with `espforge:`), resolved
+/// by leaf folder name. Excludes `broken`, which exists only to exercise the
+/// validation path — its dir has no spec. This is derived rather than a hand
+/// maintained list so adding a template (e.g. `02.Digital/button`) needs no code
+/// change.
+pub fn example_names() -> Vec<&'static str> {
+    fn walk(dir: &Dir<'static>, out: &mut Vec<&'static str>) {
+        // A leaf example dir has a spec as an *immediate* child (a .yaml
+        // containing `espforge:`). We check immediate files only, so a parent
+        // category folder (e.g. `01.Basics`) is not mistaken for an example.
+        let is_example = dir.files().any(|f| {
+            f.path().extension().and_then(|e| e.to_str()) == Some("yaml")
+                && String::from_utf8_lossy(f.contents()).contains("espforge:")
+        });
+        if is_example {
+            if let Some(name) = dir.path().file_name().and_then(|n| n.to_str()) {
+                out.push(name);
+            }
+            return; // don't descend into an example leaf
+        }
+        for d in dir.dirs() {
+            walk(d, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(&EXAMPLES_DIR, &mut out);
+    out.sort_unstable();
+    out
+}
 
 /// Return the embedded leaf directory for a known example, resolved by **leaf
 /// folder name** anywhere in the tree (v1 behaviour). Returns `None` for an

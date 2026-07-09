@@ -184,7 +184,7 @@ fn run_create(
     if !espforge_examples::is_example(&example) {
         anyhow::bail!(
             "unknown example `{example}`\nknown examples: {}",
-            espforge_examples::EXAMPLE_NAMES.join(", ")
+            espforge_examples::example_names().join(", ")
         );
     }
 
@@ -235,10 +235,10 @@ fn run_create(
 /// Interactive picker (dialoguer). Triggered only when the example arg is
 /// omitted. No full-screen TUI — a flat select + name input (design §17.1).
 fn prompt_example() -> anyhow::Result<String> {
-    let names = espforge_examples::EXAMPLE_NAMES;
+    let names = espforge_examples::example_names();
     let choice = dialoguer::Select::new()
         .with_prompt("Choose an example template")
-        .items(names)
+        .items(&names)
         .default(0)
         .interact_opt()
         .map_err(|e| anyhow::anyhow!("prompt failed: {e}"))?
