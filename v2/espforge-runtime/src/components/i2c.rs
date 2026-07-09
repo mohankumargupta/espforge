@@ -14,8 +14,8 @@ impl I2cBus {
     /// on the same bus.
     pub fn new(
         i2c: esp_hal::peripherals::I2C0,
-        sda: impl OutputPin + 'static,
-        scl: impl OutputPin + 'static,
+        sda: impl OutputPin + 'static + esp_hal::gpio::InputPin,
+        scl: impl OutputPin + 'static + esp_hal::gpio::InputPin ,
     ) -> Self {
         let bus = I2c::new(i2c, Config::default())
             .unwrap()

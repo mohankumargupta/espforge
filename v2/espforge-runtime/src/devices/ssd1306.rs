@@ -3,7 +3,7 @@
 
 use esp_hal::gpio::Output;
 
-use crate::components::I2cBus;
+use crate::components::i2c::I2cBus;
 
 pub struct Ssd1306 {
     bus: I2cBus,

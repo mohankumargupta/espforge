@@ -14,7 +14,7 @@ pub mod components;
 pub mod devices;
 
 /// Logging handle stored on the `Context` (ADR-008 stable API). Forwards to the
-//! `log` facade; the generated project installs the sink (e.g. `esp-println`).
+/// `log` facade; the generated project installs the sink (e.g. `esp-println`).
 #[derive(Clone, Copy)]
 pub struct Logger;
 
