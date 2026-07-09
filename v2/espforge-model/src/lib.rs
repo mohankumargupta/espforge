@@ -14,7 +14,9 @@
 //! - **`value`** — value objects: `PinRef`, `ResourceRef`, `Diag`, `Artifact`.
 //! - **`project`** — the typed user-facing `Project` parsed from YAML (ADR-004).
 
+pub mod backend;
 pub mod catalog;
+pub mod codegen;
 pub mod driver;
 pub mod ir;
 pub mod project;

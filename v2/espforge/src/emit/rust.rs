@@ -51,6 +51,7 @@ pub fn emit(ir: &DeviceTree) -> Result<Vec<Artifact>> {
         target: ir.meta.target.clone(),
         is_embassy: ir.flags.is_embassy,
         peripherals: ir.peripherals.clone(),
+        backend: &espforge_model::backend::BLOCKING,
     };
 
     // Driver-driven construction: ask each instance's driver for its wiring

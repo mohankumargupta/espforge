@@ -1,8 +1,9 @@
 //! `i2c` component driver (ADR-006). Wires an I2C peripheral by value. Lives
 //! under `components/` alongside the other reusable capability drivers.
 
+use espforge_model::codegen;
 use espforge_model::driver::{Construction, Driver, GenContext};
-use espforge_model::ir::{Peripheral, ResolvedInstance, Tier};
+use espforge_model::ir::{ResolvedInstance, Tier};
 use espforge_model::value::{Artifact, Diag};
 
 #[derive(Debug)]
@@ -33,48 +34,18 @@ impl Driver for I2cDriver {
         let field = inst
             .claims
             .first()
-            .map(|name| peripheral_field(&ctx.peripherals, &name.name))
+            .map(|name| codegen::peripheral_field(&ctx.peripherals, &name.name))
             .unwrap_or_else(|| "unreachable!()".to_string());
         let (sda, scl) = inst
             .claims
             .first()
             .and_then(|name| ctx.peripherals.iter().find(|p| p.name == name.name))
             .and_then(|p| p.bus.as_ref())
-            .map(|b| {
-                (
-                    b.sda.unwrap_or(0).to_string(),
-                    b.scl.unwrap_or(0).to_string(),
-                )
-            })
+            .map(|b| (b.sda.unwrap_or(0).to_string(), b.scl.unwrap_or(0).to_string()))
             .unwrap_or_else(|| ("0".to_string(), "0".to_string()));
-        Construction {
-            field: sanitize(&inst.id),
-            expr: format!(
-                "espforge_runtime::components::I2cBus::new(\n                    registry.peripherals.{field},\n                    registry.peripherals.GPIO{sda},\n                    registry.peripherals.GPIO{scl})"
-            ),
-        }
+        Construction::for_instance(
+            inst,
+            ctx.backend.i2c_master(&field, &sda, &scl),
+        )
     }
-}
-
-fn peripheral_field(peripherals: &[Peripheral], name: &str) -> String {
-    peripherals
-        .iter()
-        .find(|p| p.name == name)
-        .map(|p| p.field.clone())
-        .unwrap_or_else(|| "unreachable!()".to_string())
-}
-
-fn sanitize(id: &str) -> String {
-    let mut out = String::new();
-    for (i, c) in id.chars().enumerate() {
-        if c.is_alphanumeric() && (i == 0 && c.is_alphabetic() || i > 0) {
-            out.push(c);
-        } else if i > 0 {
-            out.push('_');
-        }
-    }
-    if out.is_empty() {
-        out = "inst".into();
-    }
-    out
 }

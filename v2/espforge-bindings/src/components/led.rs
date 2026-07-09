@@ -1,6 +1,7 @@
 //! `led` component driver (ADR-006). Lives under `components/` alongside the
 //! other reusable capability drivers.
 
+use espforge_model::codegen;
 use espforge_model::driver::{Construction, Driver, GenContext};
 use espforge_model::ir::{ResolvedInstance, Tier};
 use espforge_model::value::{Artifact, Diag};
@@ -27,39 +28,20 @@ impl Driver for LedDriver {
         Ok(vec![])
     }
 
-    fn construct(&self, inst: &ResolvedInstance, _ctx: &GenContext) -> Construction {
+    fn construct(&self, inst: &ResolvedInstance, ctx: &GenContext) -> Construction {
         // with: { pin: $GPIO18, active_low: false }
-        let active_low = inst
-            .with
-            .get("active_low")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let active_low = codegen::bool_or(inst, "active_low", false);
         let pin = inst
             .pins
             .first()
-            .map(|p| format!("registry.peripherals.GPIO{}", p.number))
+            .map(|p| p.number.to_string())
             .unwrap_or_else(|| "unreachable!()".into());
-        // The driver builds the Output from the moved-in GPIO peripheral.
-        Construction {
-            field: sanitize(&inst.id),
-            expr: format!(
-                "espforge_runtime::components::Led::new(\n                    esp_hal::gpio::Output::new({pin}, esp_hal::gpio::Level::Low, esp_hal::gpio::OutputConfig::default()),\n                    {active_low})"
-            ),
-        }
+        // The backend builds the polarity-aware Output from the moved-in GPIO
+        // peripheral; we hand it the bare GPIO field number.
+        let output = ctx.backend.gpio_output(&pin, active_low);
+        Construction::for_instance(
+            inst,
+            ctx.backend.ctor(Tier::Component, "Led", &[output, active_low.to_string()]),
+        )
     }
-}
-
-fn sanitize(id: &str) -> String {
-    let mut out = String::new();
-    for (i, c) in id.chars().enumerate() {
-        if c.is_alphanumeric() && (i == 0 && c.is_alphabetic() || i > 0) {
-            out.push(c);
-        } else if i > 0 {
-            out.push('_');
-        }
-    }
-    if out.is_empty() {
-        out = "inst".into();
-    }
-    out
 }

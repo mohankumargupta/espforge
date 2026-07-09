@@ -9,6 +9,8 @@
 //! + a `black_box` init hack (ADR-006). `espforge-bindings` holds the in-tree
 //! list; the CLI indexes it by `kind`.
 
+use crate::backend;
+use crate::codegen;
 use crate::ir::ResolvedInstance;
 use crate::value::{Artifact, Diag};
 use std::fmt::Debug;
@@ -28,6 +30,17 @@ pub struct Construction {
     /// References `registry` (a `PeripheralRegistry`) and any shared components
     /// by their field name.
     pub expr: String,
+}
+
+impl Construction {
+    /// Build a construction for `inst` from a backend-rendered expression.
+    /// Sanitizes the instance id into the struct field name (ADR-008).
+    pub fn for_instance(inst: &ResolvedInstance, expr: impl Into<String>) -> Self {
+        Construction {
+            field: codegen::sanitize(&inst.id),
+            expr: expr.into(),
+        }
+    }
 }
 
 /// A driver declaration. Implemented once per capability (e.g. `led`,
@@ -91,11 +104,15 @@ pub struct DriverFlags {
 pub struct GenContext {
     /// Target chip, e.g. `esp32`.
     pub target: Option<String>,
-    /// Embassy vs blocking.
+    /// Embassy vs blocking (IR-level flag; driver codegen uses `backend`).
     pub is_embassy: bool,
     /// Resolved peripherals, so drivers can resolve a claimed peripheral to its
     /// esp_hal field name (ADR-008 move-by-value wiring).
     pub peripherals: Vec<crate::ir::Peripheral>,
+    /// The codegen backend (blocking now; embassy later). Drivers render
+    /// backend-specific snippets through this rather than inlining `esp_hal`
+    /// calls (ADR-008). Held as `&'static` so the context is cheap to clone.
+    pub backend: &'static dyn backend::Backend,
 }
 
 /// An explicit, in-tree registry of drivers (ADR-006). The CLI holds one of
