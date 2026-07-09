@@ -13,7 +13,7 @@ impl I2cBus {
     /// pins moved in by value. Devices borrow `&I2cBus` (shared access) to talk
     /// on the same bus.
     pub fn new(
-        i2c: esp_hal::peripherals::I2C0,
+        i2c: esp_hal::peripherals::I2C0<'static>,
         sda: impl OutputPin + 'static + esp_hal::gpio::InputPin,
         scl: impl OutputPin + 'static + esp_hal::gpio::InputPin ,
     ) -> Self {
