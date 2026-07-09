@@ -10,7 +10,6 @@ esp32:
     ghost_gpio: { pin: 19, direction: output }
 
 components:
-  # Duplicate instance name -> duplicate instance name diagnostic.
   - id: led
     using: led
     with:
@@ -19,8 +18,6 @@ components:
     using: led
     with:
       pin: $gpio_b
-
-  # Two instances share the same physical pin (GPIO18) -> double-claim.
   - id: red_led
     using: led
     with:
@@ -29,19 +26,13 @@ components:
     using: led
     with:
       pin: $gpio_b
-
-  # Unknown driver kind -> unknown driver diagnostic.
   - id: mystery
     using: nope
     with:
       pin: $gpio_a
-
-  # Missing required pin ref -> missing-with-key diagnostic.
   - id: orphan
     using: led
     with: {}
-
-  # Unresolved reference -> unresolved reference diagnostic.
   - id: ghost
     using: led
     with:
