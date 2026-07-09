@@ -5,23 +5,12 @@ espforge:
 
 esp32:
   gpio:
-    - gpio: 18
-  i2c:
-    - name: i2c_master
-      peripheral: 0
-      sda: 21
-      scl: 22
-      frequency: 100
+    gpio2: { pin: 18, direction: output }
 
 components:
-  - id: i2c_bus
-    using: i2c
-    with:
-      bus: $i2c_master
-
-devices:
-  - id: status_led
+  - id: red_led
     using: led
     with:
-      pin: $GPIO18
-      active_low: false
+      pin: $gpio2
+
+devices: []

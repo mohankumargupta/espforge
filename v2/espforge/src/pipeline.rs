@@ -80,7 +80,9 @@ pub fn validate(project: &Project) -> Result<(), Vec<Diag>> {
         for key in spec.pins.iter().chain(spec.peripherals.iter()) {
             match extract_ref(&inst.with, key) {
                 Some(ResourceRef { name, span }) => {
-                    if !resolvable.contains(&name) {
+                    let pin_key = gpio_key_for_ref(&project.esp32, &name);
+                    let resolved = resolvable.contains(&name) || pin_key.is_some();
+                    if !resolved {
                         diags.push(
                             Diag::error(format!("unresolved reference `${name}`"))
                                 .at(span)
@@ -89,7 +91,8 @@ pub fn validate(project: &Project) -> Result<(), Vec<Diag>> {
                         );
                         continue;
                     }
-                    if let Some(num) = name.strip_prefix("GPIO").and_then(|n| n.parse::<u32>().ok()) {
+                    if let Some(gkey) = pin_key {
+                        let num = project.esp32.gpio[&gkey].pin;
                         if let Some(prev) = pin_owner.get(&num) {
                             diags.push(
                                 Diag::error(format!(
@@ -232,7 +235,8 @@ pub fn resolve(project: &Project) -> DeviceTree {
             }
             for key in &spec.pins {
                 if let Some(ResourceRef { name, span }) = extract_ref(&inst.with, key) {
-                    if let Some(num) = name.strip_prefix("GPIO").and_then(|n| n.parse::<u32>().ok()) {
+                    if let Some(gkey) = gpio_key_for_ref(&project.esp32, &name) {
+                        let num = project.esp32.gpio[&gkey].pin;
                         pins.push(PinRef { number: num, span });
                         pin_claim_owner.insert(num, inst.id.clone());
                     }
@@ -307,38 +311,56 @@ fn is_device(cat: &[DriverSpec], kind: &str) -> bool {
 }
 
 fn collect_peripheral_names(esp32: &Esp32Section, out: &mut HashSet<String>) {
-    for b in esp32.i2c.iter() {
-        out.insert(b.name.clone());
+    for name in esp32.gpio.keys() {
+        out.insert(name.clone());
     }
-    for b in esp32.spi.iter() {
-        out.insert(b.name.clone());
+    for name in esp32.i2c.keys() {
+        out.insert(name.clone());
     }
-    for b in esp32.uart.iter() {
-        out.insert(b.name.clone());
+    for name in esp32.spi.keys() {
+        out.insert(name.clone());
     }
-    for p in esp32.gpio.iter() {
-        out.insert(format!("GPIO{}", p.gpio));
+    for name in esp32.uart.keys() {
+        out.insert(name.clone());
     }
     if esp32.wifi.is_some() {
         out.insert("wifi".to_string());
     }
 }
 
+/// Map a pin reference name to its `esp32.gpio` key. Accepts both the explicit
+/// map key (`$gpio2`) and the legacy numeric form (`$GPIO18` / `pin: 18`), which
+/// reverse-resolves to the gpio entry whose `pin` matches. Returns `None` for
+/// anything that is not a gpio peripheral.
+fn gpio_key_for_ref(esp32: &Esp32Section, name: &str) -> Option<String> {
+    if esp32.gpio.contains_key(name) {
+        return Some(name.to_string());
+    }
+    if let Some(num) = name.strip_prefix("GPIO").and_then(|n| n.parse::<u32>().ok()) {
+        return esp32
+            .gpio
+            .iter()
+            .find(|(_, g)| g.pin == num)
+            .map(|(k, _)| k.clone());
+    }
+    None
+}
+
 fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
     let mut v = Vec::new();
-    for p in &esp32.gpio {
+    for (name, g) in &esp32.gpio {
         v.push(Peripheral {
-            name: format!("GPIO{}", p.gpio),
+            name: name.clone(),
             kind: PeripheralKind::Pin,
-            number: p.gpio,
-            field: format!("GPIO{}", p.gpio),
+            number: g.pin,
+            field: format!("GPIO{}", g.pin),
             bus: None,
             claimed_by: None,
         });
     }
-    for b in &esp32.i2c {
+    for (name, b) in &esp32.i2c {
         v.push(Peripheral {
-            name: b.name.clone(),
+            name: name.clone(),
             kind: PeripheralKind::I2c,
             number: b.peripheral,
             field: format!("I2C{}", b.peripheral),
@@ -348,14 +370,14 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
                 mosi: b.mosi,
                 miso: b.miso,
                 sclk: b.sclk,
-                frequency_khz: b.frequency,
+                frequency_khz: b.frequency_khz,
             }),
             claimed_by: None,
         });
     }
-    for b in &esp32.spi {
+    for (name, b) in &esp32.spi {
         v.push(Peripheral {
-            name: b.name.clone(),
+            name: name.clone(),
             kind: PeripheralKind::Spi,
             number: b.peripheral,
             field: format!("SPI{}", b.peripheral),
@@ -365,14 +387,14 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
                 mosi: b.mosi,
                 miso: b.miso,
                 sclk: b.sclk,
-                frequency_khz: b.frequency,
+                frequency_khz: b.frequency_khz,
             }),
             claimed_by: None,
         });
     }
-    for b in &esp32.uart {
+    for (name, b) in &esp32.uart {
         v.push(Peripheral {
-            name: b.name.clone(),
+            name: name.clone(),
             kind: PeripheralKind::Uart,
             number: b.peripheral,
             field: format!("UART{}", b.peripheral),
@@ -382,7 +404,7 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
                 mosi: b.mosi,
                 miso: b.miso,
                 sclk: b.sclk,
-                frequency_khz: b.frequency,
+                frequency_khz: b.frequency_khz,
             }),
             claimed_by: None,
         });

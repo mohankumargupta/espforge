@@ -8,6 +8,7 @@
 
 use crate::value::{PinRef, ResourceRef, Span};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A fully parsed project. The single source-of-truth description before
 /// validation/resolution.
@@ -46,32 +47,54 @@ impl Default for Runtime {
 }
 
 /// The `esp32:` section: raw hardware peripherals (ADR-003).
+///
+/// Named-map shape (v1 heritage, per design §17.4): each resource is keyed by an
+/// explicit name the user chooses, e.g. `gpio2: { pin: 18, direction: output }`.
+/// That name is the `$ref` source — `components` reference it as `$gpio2`, never
+/// by GPIO number (explicit over implicit, Zen of espforge).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Esp32Section {
     #[serde(default)]
-    pub gpio: Vec<GpioPin>,
+    pub gpio: HashMap<String, GpioPin>,
     #[serde(default)]
-    pub i2c: Vec<BusConfig>,
+    pub i2c: HashMap<String, BusConfig>,
     #[serde(default)]
-    pub spi: Vec<BusConfig>,
+    pub spi: HashMap<String, BusConfig>,
     #[serde(default)]
-    pub uart: Vec<BusConfig>,
+    pub uart: HashMap<String, BusConfig>,
     #[serde(default)]
     pub wifi: Option<WifiConfig>,
+    #[serde(default)]
+    pub psram: Option<PsRamConfig>,
+    #[serde(default)]
+    pub heap: Option<HeapConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpioPin {
-    /// GPIO number. Aliased from `pin`/`number`.
-    #[serde(alias = "pin", alias = "number")]
-    pub gpio: u32,
+    /// GPIO number. Aliased from `number`.
+    #[serde(alias = "number")]
+    pub pin: u32,
+    /// Signal direction at the pad. Accepted and echoed; not yet enforced.
+    #[serde(default)]
+    pub direction: Option<Direction>,
+}
+
+/// Pad direction (v1 spelling). Carried into the IR; enforcement is a later
+/// `validate` enhancement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Direction {
+    Input,
+    Output,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BusConfig {
-    /// Logical bus name, e.g. `i2c0`. The `$name` users reference.
-    pub name: String,
-    /// Hardware peripheral index, e.g. `0` for `I2C0`.
+    /// Hardware peripheral index, e.g. `0` for `I2C0`/`SPI0`. The YAML key is
+    /// `i2c`/`spi`/`uart` depending on the section (aliased here so a single
+    /// struct serves all three bus kinds).
+    #[serde(alias = "i2c", alias = "spi", alias = "uart")]
     pub peripheral: u32,
     #[serde(default)]
     pub sda: Option<u32>,
@@ -84,14 +107,34 @@ pub struct BusConfig {
     #[serde(default)]
     pub sclk: Option<u32>,
     /// Bus clock frequency in kHz.
-    #[serde(default)]
-    pub frequency: Option<u32>,
+    #[serde(default, rename = "frequency_kHz", alias = "frequency")]
+    pub frequency_khz: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WifiConfig {
     pub ssid: String,
     pub password: String,
+    /// Authentication mode, e.g. `open`, `wpa2`. Optional; defaults to `open`.
+    #[serde(default = "default_auth")]
+    pub auth: String,
+}
+
+fn default_auth() -> String {
+    "open".to_string()
+}
+
+/// PSRAM configuration (schema-complete per §17.4; consumed when a driver needs
+/// it). `mode` is the esp-hal PSRAM mode, e.g. `octal`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PsRamConfig {
+    pub mode: String,
+}
+
+/// Heap configuration (schema-complete per §17.4).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeapConfig {
+    pub size: u32,
 }
 
 /// A named occurrence of a component or device (ADR-003: an `Instance`).

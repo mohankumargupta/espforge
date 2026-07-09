@@ -4,7 +4,9 @@ This document is the compiled output of an 11-decision first-principles redesign
 session (`/grill-with-docs`). It is ground-up: it does not inherit the v1
 13-crate layout. The authoritative record of *why* is the ADR log under `adr/`.
 
-Status: design only. No architecture or code has been produced yet.
+Status: design-only + active `create`/`build` work on the `espforgev2` branch.
+The pipeline, model, emitters, and examples crate exist; the v2 `esp32`
+named-map shape and the `create` subcommand are the current work.
 
 ## 1. Problem statement
 A user who knows electronics/ESP32 but not HAL boilerplate wants to describe a
@@ -133,7 +135,10 @@ Typed sectioned YAML — `espforge:` (name/platform/runtime), `esp32:` (peripher
 `components:` (`using:` + `with:`), `devices:` (same). `using` selects a driver;
 `with:` is deserialized into the driver's typed schema and validated up front.
 References use `$name` (esphome-like, familiar). **App logic lives only in
-`app.rs`** — YAML is structure-only, no declarative-step DSL. No section renames.
+`app.rs`** — YAML is structure-only, no declarative-step DSL. (Exception to
+"no section renames": the v2 `esp32:` section adopts the v1 named-map shape and
+field spellings — see §17.4. The `components`/`devices` list form is unchanged
+from earlier v2 design.)
 
 ## 12. Runtime contract
 Generated `Context { logger, delay, component!/device! accessors }` is the
@@ -158,10 +163,12 @@ integration gate**. Mock-HAL runtime tests deferred to a post-v1 optional layer.
 
 ## 15. Migration strategy
 Clean-slate **big-bang on new branch `espforgev2`**, built ground-up from a blank
-sheet; v1 repo left intact. User YAML unchanged (D4) so existing projects carry
-over without edits. Exit criterion: `espforgev2` reproduces example outputs and
-passes `espforge validate` on all `espforge_examples`. CLI ships **`validate`**
-and **`version`** subcommands.
+sheet; v1 repo left intact. The v2 `esp32:` shape diverges from v1 user YAML
+(D4), so existing v1 projects are **ported by hand** into the v2 contract (§17.4)
+rather than carried over verbatim. Exit criterion: `espforgev2` reproduces example
+outputs and passes `espforge validate` on all `espforge_examples`. CLI ships
+**`create`** (alias **`setup`**), **`build`**, **`validate`**, and **`version`**
+subcommands.
 
 ## 16. Alternatives considered (per decision)
 - **D1:** one-shot scaffolder (A) rejected — regen machinery unjustified; runtime
@@ -190,3 +197,147 @@ and **`version`** subcommands.
   investment. Chose stage + IR golden tests, bug-driven.
 - **D11:** strangler (A) and per-driver port (C) reconsidered — user opted for
   clean-slate `espforgev2` big-bang. Chose ground-up rewrite on new branch.
+
+## 17. `create` / `build` — the clean-and-jerk pair (derived from `/grill-me`)
+
+The user workflow is a two-phase **clean-and-jerk**: `create` bootstraps a
+project folder **once** from a curated template; `build` is the **repeatable**
+re-emit on every YAML/`app.rs` edit. This split mirrors v1's `example`/`compile`
+split but is grounded in the v2 drift-detecting manifest (ADR-001): `create`
+lays down the source-of-truth inputs, `build` regenerates espforge-owned layers
+and refuses to clobber user-edited (drifted) files.
+
+### 17.1 `create` — bootstrap (runs once)
+
+```
+espforge create <example> [--name X] [--out DIR]
+espforge create            # no <example> → interactive dialoguer picker
+espforge setup <example>   # alias of create
+```
+
+- **Template source is baked-in at compile time** via `include_dir!` over
+  `espforge-examples/examples` (v1 behaviour, kept). The example set is a
+  **closed, explicit, versioned** set — no ambient filesystem discovery (Zen of
+  espforge: explicit over implicit). This keeps "does this example exist?"
+  a pure, testable map lookup (no IO), satisfying the v2 pipeline-purity ethos
+  and the CI integration gate (ADR-010/011).
+- **Unknown example name → error + exit.** No fuzzy "did you mean" picker; the
+  set is closed.
+- **Interactive fallback:** when `<example>` is omitted, a `dialoguer` `Select`
+  lists the baked-in templates and an `Input` collects the project name. No
+  full-screen TUI/ratatui — the interaction is a flat pick + a name, which does
+  not justify a heavy dependency and would break scriptability/testability.
+- **`--name` defaults to the example name** when omitted, and the resolved name
+  is **always echoed back** to the user (no silent substitution). Folder =
+  `<out>/<name>` (default `<out> = cwd`).
+- **`create` copies assets only — it does not run the pipeline** (v1 `example`
+  behaviour). It prints friendly, explicit next-steps: the exact `espforge build`
+  invocation to run, where `app.rs`/`diagram.json` live, and what to edit.
+- **Assets copied** (template tree shape preserved from v1):
+  - `<example>/<example>.yaml` → `<name>/<name>.yaml` (the spec / source of truth)
+  - `<example>/app/rust/app.rs` → `<name>/src/app.rs` (user-owned app logic)
+  - `<example>/diagram.json` → `<name>/diagram.json` (wokwi, optional)
+
+### 17.2 `build` — regenerate (repeatable)
+
+```
+espforge build [--project X --out DIR]
+```
+
+- **Arg-less form runs in `cwd`.** It discovers the spec by finding the YAML
+  containing `espforge:` + `components:`/`devices:` (the spec named `<name>.yaml`
+  left by `create`), sets `out = cwd`, then runs `scaffold()` (esp-generate) →
+  `generate()` → `write()` (drift-detecting manifest). Path args become optional
+  overrides for out-of-tree or multi-spec use.
+- This makes the repeat invocation trivial: `cd <project> && espforge build`.
+
+### 17.3 App-code collision (resolved)
+
+`build` **generates `src/app.rs` itself** as a `SeedOnce` artifact
+(`emit/rust.rs`): written only if absent, never clobbered. Therefore a template's
+`app/rust/app.rs` lands at `src/app.rs` first (during `create`), and `build`
+subsequently **leaves it untouched**. Consequence: every template's `app.rs`
+**must be v2-authored** — it uses the v2 `component!(ctx, name)` /
+`device!(ctx, name)` macros (`emit/rust.rs`) and the embassy `async` signatures
+when `runtime: embassy`. Templates are **not** auto-converted from v1; they are
+ported by hand into the v2 shape. "Keep all aspects of v1 examples" means keep
+the v1 **tree shape and feel**, not the v1 schema.
+
+### 17.4 v2 YAML contract (explicit over implicit)
+
+Adopted from the grilling: **v1 named-map `esp32:` shape + v2 `using:` driver
+kinds + v2 list-form `components`/`devices`**. No implicit behaviour.
+
+```yaml
+espforge:
+  name: blink
+  target: esp32c3          # v1 `platform` → v2 `target`
+  runtime: blocking        # or embassy; v2 also supports `alloc: true`
+
+esp32:                     # NAMED MAP, v1 shape (explicit key per resource)
+  gpio:
+    gpio2: { pin: 18, direction: output }
+    gpio9: { pin: 9, direction: input }
+  i2c:  { i2c0: { i2c: 0, sda: 6, scl: 7, frequency_kHz: 100 } }
+  spi:  { spi2: { spi: 2, sck: 3, mosi: 4, miso: 0, frequency_kHz: 10000 } }
+  uart: { uart0: { uart: 1, tx: 6, rx: 5 } }
+  wifi: { ssid: Wokwi-GUEST, password: "", auth: open }
+  psram: { mode: octal }
+  heap: { size: 73000 }
+
+components:                # LIST form, explicit id, v2 lowercase driver kinds
+  - id: red_led
+    using: led
+    with: { pin: $gpio2, active_low: false }
+devices:
+  - id: screen
+    using: ssd1306
+    with: { bus: $i2c0, reset: $GPIO16, dc: $GPIO5 }
+```
+
+Contract specifics:
+- **`esp32:` is a named map** keyed by resource name (`gpio2`, `i2c0`). Field
+  names are the v1 spellings: `pin`, `direction`, `i2c`/`spi`/`uart` peripheral
+  index, `sda`/`scl`, `tx`/`rx`, `frequency_kHz`, `ssid`/`password`/`auth`,
+  `mode` (psram), `size` (heap). This overrides the earlier v2 sequence form
+  (`gpio: [{ gpio: 18 }]`) at the model level — `create` and `build` share the
+  same parser, so this is a global parser change, not template-only.
+- **`$ref` = the `esp32` map key** (`$gpio2`). This matches v1 behaviour and
+  removes the earlier v2 inconsistency where gpio used `$GPIO18` but buses used
+  `$i2c_master`. Peripherals are referenced by their map key uniformly.
+- **`direction` is accept-and-echo** for v1: carried into the IR and echoed, but
+  not yet enforced (e.g. an `led` pin need not yet be validated as `output`).
+  Enforcement is a later `validate` enhancement.
+- **`esp32` is schema-complete** even where emit is lazy: `psram`/`heap`/`wifi`
+  are accepted so the schema matches v1; codegen consumes them when the
+  corresponding driver is present (esp-generate `-o wifi`, embassy/alloc flags).
+- **`components`/`devices` stay the v2 LIST form** `{ id, using, with }` — the
+  minimal blast radius. `id` is the explicit name, used as the `$ref` source for
+  other instances and as the generated struct field name (`emit/rust.rs`).
+
+### 17.5 Migration notes (current branch state)
+
+- Rewrite the in-repo v2 templates from the old sequence form to §17.4:
+  `espforge-examples/examples/blink/blink.yaml`, `.../display/ssd1306.yaml`, and
+  `.../blink/broken.yaml` (the latter must still exercise the validation path).
+- `Esp32Section` in `espforge-model/src/project.rs` changes from `Vec<GpioPin>`
+  to a name-keyed map; `pipeline.rs`/`validate` carry the name + direction
+  through to `IR::Peripheral`. Shared by `create` and `build`.
+
+## 18. Decision ledger (from `/grill-me`)
+
+1. `create` is template-driven; it feeds examples into the same build pipeline
+   (no parallel template-copy code path — keeps the v2 pipeline single-source).
+2. CLI args primary; `dialoguer` interactive picker on missing/unknown example;
+   **no** fuzzy "did you mean" and **no** ratatui.
+3. Templates baked in at compile time via `include_dir!`; unknown name → error +
+   exit; `--name` defaults to the example name and is always echoed back.
+4. `create` copies assets only + prints friendly next-steps (v1 `example`
+   behaviour), does **not** emit.
+5. `build` runs arg-less in `cwd`, discovering the spec; `--project`/`--out` are
+   optional overrides.
+6. `esp32:` uses the v1 named-map shape + v2 `using:` kinds + `$key` refs;
+   `direction` accept-and-echo; `esp32` schema-complete (psram/heap/wifi).
+7. `components`/`devices` keep the v2 list form with explicit `id`.
+8. Templates are v2-authored (hand-ported), not auto-converted from v1; the
+   example tree shape + feel is preserved, the schema is not.

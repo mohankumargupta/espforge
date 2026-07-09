@@ -1,28 +1,50 @@
 espforge:
   name: broken
-  target: esp32
+  target: esp32c3
+  runtime: blocking
 
 esp32:
   gpio:
-    - gpio: 18
-    - gpio: 18
+    gpio_a: { pin: 18, direction: output }
+    gpio_b: { pin: 18, direction: output }
+    ghost_gpio: { pin: 19, direction: output }
 
 components:
-  - id: led1
+  # Duplicate instance name -> duplicate instance name diagnostic.
+  - id: led
     using: led
     with:
-      pin: $GPIO18
-  - id: led2
+      pin: $gpio_a
+  - id: led
     using: led
     with:
-      pin: $GPIO18
-  - id: ghost
-    using: i2c
-    with:
-      bus: $missing_bus
+      pin: $gpio_b
 
-devices:
-  - id: bad
+  # Two instances share the same physical pin (GPIO18) -> double-claim.
+  - id: red_led
+    using: led
+    with:
+      pin: $gpio_a
+  - id: green_led
+    using: led
+    with:
+      pin: $gpio_b
+
+  # Unknown driver kind -> unknown driver diagnostic.
+  - id: mystery
     using: nope
     with:
-      pin: $GPIO18
+      pin: $gpio_a
+
+  # Missing required pin ref -> missing-with-key diagnostic.
+  - id: orphan
+    using: led
+    with: {}
+
+  # Unresolved reference -> unresolved reference diagnostic.
+  - id: ghost
+    using: led
+    with:
+      pin: $missing_gpio
+
+devices: []
