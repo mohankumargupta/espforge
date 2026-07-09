@@ -29,14 +29,19 @@ pub const ESPFORGE_USE_LOCAL: &str = "ESPFORGE_USE_LOCAL";
 /// that checkout. Applies uniformly to `espforge-runtime`, `espforge-bindings`,
 /// `espforge-model`, etc.
 fn espforge_dep(crate_name: &str) -> String {
+    const VERSION: &str = "0.1.0";
     match env::var(ESPFORGE_USE_LOCAL) {
         Ok(path) if !path.trim().is_empty() => {
+            let normalized = path
+                .trim()
+                .replace('\\', "/")
+                .trim_end_matches('/')
+                .to_string();
             format!(
-                "{crate_name} = {{ path = \"{}/{crate_name}\" }}",
-                path.trim_end_matches('/')
+                "{crate_name} = {{ path = \"{normalized}/{crate_name}\", version = \"{VERSION}\" }}"
             )
         }
-        _ => format!("{crate_name} = \"0.1\""),
+        _ => format!("{crate_name} = \"{VERSION}\""),
     }
 }
 
