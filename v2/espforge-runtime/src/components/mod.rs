@@ -3,3 +3,7 @@
 
 pub mod i2c;
 pub mod led;
+
+pub use i2c::I2cBus;
+pub use led::Led;
+
