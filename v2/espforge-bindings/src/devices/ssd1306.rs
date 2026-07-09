@@ -1,5 +1,6 @@
-//! `ssd1306` device driver (ADR-006). A terminal device that shares an `i2c`
-//! component by reference and claims reset/DC pins by value (ADR-003/008).
+//! `ssd1306` device driver (ADR-006). Lives under `devices/`. A terminal device
+//! that shares an `i2c` component by reference and claims reset/DC pins by value
+//! (ADR-003/008).
 
 use espforge_model::driver::{Construction, Driver, GenContext};
 use espforge_model::ir::ResolvedInstance;

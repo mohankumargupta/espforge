@@ -220,7 +220,9 @@ espforge setup <example>   # alias of create
   **closed, explicit, versioned** set — no ambient filesystem discovery (Zen of
   espforge: explicit over implicit). This keeps "does this example exist?"
   a pure, testable map lookup (no IO), satisfying the v2 pipeline-purity ethos
-  and the CI integration gate (ADR-010/011).
+  and the CI integration gate (ADR-010/011). The list of example names is
+  **derived** from the embedded tree at runtime (every leaf dir containing a
+  spec), not hand-maintained — adding a template needs no code change.
 - **Unknown example name → error + exit.** No fuzzy "did you mean" picker; the
   set is closed.
 - **Interactive fallback:** when `<example>` is omitted, a `dialoguer` `Select`
@@ -233,10 +235,15 @@ espforge setup <example>   # alias of create
 - **`create` copies assets only — it does not run the pipeline** (v1 `example`
   behaviour). It prints friendly, explicit next-steps: the exact `espforge build`
   invocation to run, where `app.rs`/`diagram.json` live, and what to edit.
-- **Assets copied** (template tree shape preserved from v1):
-  - `<example>/<example>.yaml` → `<name>/<name>.yaml` (the spec / source of truth)
-  - `<example>/app/rust/app.rs` → `<name>/src/app.rs` (user-owned app logic)
-  - `<example>/diagram.json` → `<name>/diagram.json` (wokwi, optional)
+- **Assets copied** (template tree shape preserved from v1, including the
+  numbered-category folder convention — `01.Basics/blink`, `06.Displays/display`,
+  …). The example key is the **leaf folder name**; `create blink` resolves to
+  `01.Basics/blink` regardless of category (v1 resolution behaviour):
+  - the example's spec (the embedded `.yaml` containing `espforge:`) →
+    `<name>/<name>.yaml` (the spec / source of truth). The source filename is
+    decoupled from the example key, so `display`'s spec may be `display.yaml`.
+  - `app/rust/app.rs` → `<name>/src/app.rs` (user-owned app logic)
+  - `diagram.json` → `<name>/diagram.json` (wokwi, optional)
 
 ### 17.2 `build` — regenerate (repeatable)
 

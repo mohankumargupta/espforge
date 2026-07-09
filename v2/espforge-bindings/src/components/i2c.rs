@@ -1,4 +1,5 @@
-//! `i2c` component driver (ADR-006). Wires an I2C peripheral by value.
+//! `i2c` component driver (ADR-006). Wires an I2C peripheral by value. Lives
+//! under `components/` alongside the other reusable capability drivers.
 
 use espforge_model::driver::{Construction, Driver, GenContext};
 use espforge_model::ir::{Peripheral, ResolvedInstance, Tier};

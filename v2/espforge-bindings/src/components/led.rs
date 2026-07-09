@@ -1,4 +1,5 @@
-//! `led` component driver (ADR-006).
+//! `led` component driver (ADR-006). Lives under `components/` alongside the
+//! other reusable capability drivers.
 
 use espforge_model::driver::{Construction, Driver, GenContext};
 use espforge_model::ir::{ResolvedInstance, Tier};
