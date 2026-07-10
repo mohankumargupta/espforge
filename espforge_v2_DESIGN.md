@@ -113,9 +113,57 @@ versions. It applies at two levels:
 ## 9. Extension / plugin model
 One module/file per driver via a derive macro (typed config + `using` name +
 required features + dep graph + `generate` body). **Discovery = explicit registry
-list** (`&[&dyn Driver]` held by the CLI); the `inventory` + `black_box init()`
-hack is removed. **External/user plugin crates are out of scope for v1** (drivers
-ship in-tree, curated).
+list** (`&[&dyn Driver]` held by the CLI, assembled automatically — see §9b);
+the `inventory` + `black_box init()` hack is removed. **External/user plugin
+crates are out of scope for v1** (drivers ship in-tree, curated).
+
+### 9b. Automatic registry assembly (build-script codegen)
+
+The registry list in §9 is still *explicit* (no link-time discovery) but its
+**assembly is generated at compile time** so adding a driver file needs no edit
+to any `mod.rs`. This is the same pattern `tonic-build`, `protobuf-build`,
+`sqlx`, `bindgen`, and `capnproto` use: a `build.rs` inspects the source tree and
+emits a `.rs` into `OUT_DIR` that the crate `include!`s.
+
+**Mechanism.**
+1. `espforge-bindings/build.rs` walks `src/components/` and `src/devices/`.
+   Every `*.rs` that is not `mod.rs` is a driver module; its filename stem is the
+   module name (`led`, `i2c`, `ssd1306`).
+2. For each driver module, the generated file emits `pub mod <name>;` and a
+   reference to that module's driver const.
+3. Each driver module **exports a fixed-name const** — `pub const DRIVER:
+   &'static dyn Driver = &<NAME>;` — so the generator never has to guess the
+   per-driver const name (e.g. `LED`, `I2C`). This is the load-bearing
+   convention; it removes the fragile "uppercase the filename" step.
+4. Generated output (e.g. `OUT_DIR/components_gen.rs`):
+   ```rust
+   pub mod led;
+   pub mod i2c;
+
+   use espforge_model::driver::Registry;
+   pub fn registry() -> Registry {
+       Registry::new(&[led::DRIVER, i2c::DRIVER])
+   }
+   ```
+   `src/components/mod.rs` collapses to a single line:
+   `include!(concat!(env!("OUT_DIR"), "/components_gen.rs"));`
+5. `build.rs` emits `cargo:rerun-if-changed=src/components` and
+   `=src/devices` so adding/removing a file regenerates on the next build.
+
+**Why this shape (not `inventory`/`linkme`).** Discovery happens at *compile
+time* in inspectable source under `target/.../out/`, not via linker sections
+(ADR-006: "no link-time discovery magic"). Zero new runtime dependencies; the
+registry stays a plain `&[&dyn Driver]`, so all consumers (`emit/rust.rs`,
+`pipeline.rs`) are unchanged and `registry().all()` is still a static slice.
+
+**Trade-offs.**
+- Adds a `build.rs` step; `rerun-if-changed` keeps it a no-op on unchanged builds.
+- The generated file is derived (lives in `target/`, not the repo) — standard.
+- The `pub const DRIVER` export is a hard convention per driver module.
+
+**Day-to-day.** Drop `src/components/button.rs` (declaring `pub static BUTTON`
+and `pub const DRIVER = &BUTTON`) → `button` is in the registry on next build,
+no `mod.rs` touch. Remove the file → it leaves the registry.
 
 ## 10. Codegen pipeline
 `parse → validate → resolve(→DeviceTree IR) → emit*`.
