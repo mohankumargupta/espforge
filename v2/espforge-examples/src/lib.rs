@@ -24,53 +24,57 @@ pub use include_dir::Dir;
 /// The embedded example tree: compiled from `examples/` next to this crate.
 pub static EXAMPLES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/examples");
 
-/// Derive the list of example names from the embedded tree: every leaf
-/// directory that contains a project spec (a `.yaml` with `espforge:`), resolved
-/// by leaf folder name. Excludes `broken`, which exists only to exercise the
-/// validation path — its dir has no spec. This is derived rather than a hand
-/// maintained list so adding a template (e.g. `02.Digital/button`) needs no code
-/// change.
-pub fn example_names() -> Vec<&'static str> {
-    fn walk(dir: &Dir<'static>, out: &mut Vec<&'static str>) {
-        // A leaf example dir has a spec as an *immediate* child (a .yaml
-        // containing `espforge:`). We check immediate files only, so a parent
-        // category folder (e.g. `01.Basics`) is not mistaken for an example.
-        let is_example = dir.files().any(|f| {
-            f.path().extension().and_then(|e| e.to_str()) == Some("yaml")
-                && String::from_utf8_lossy(f.contents()).contains("espforge:")
-        });
-        if is_example {
-            if let Some(name) = dir.path().file_name().and_then(|n| n.to_str()) {
-                out.push(name);
-            }
-            return; // don't descend into an example leaf
-        }
-        for d in dir.dirs() {
-            walk(d, out);
-        }
+/// Walk the embedded tree and collect every leaf example as
+/// `(rel_path, dir)`, where `rel_path` is the category-qualified path verbatim
+/// from the tree root (e.g. `01.Basics/blink`, `06.Displays/display`). Category
+/// folders are organizational only but are preserved verbatim so the picker and
+/// error lists can show them (design §17.1). `rel_path` is derived straight from
+/// `dir.path()` relative to `EXAMPLES_DIR`, so it cannot drift from the real
+/// folder layout.
+fn walk_examples<'a>(dir: &'a Dir<'a>, out: &mut Vec<(String, &'a Dir<'a>)>) {
+    // A leaf example dir has a spec as an *immediate* child (a .yaml containing
+    // `espforge:`). We check immediate files only, so a parent category folder
+    // (e.g. `01.Basics`) is not mistaken for an example.
+    let is_example = dir.files().any(|f| {
+        f.path().extension().and_then(|e| e.to_str()) == Some("yaml")
+            && String::from_utf8_lossy(f.contents()).contains("espforge:")
+    });
+    if is_example {
+        let rel = dir
+            .path()
+            .strip_prefix(EXAMPLES_DIR.path())
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        out.push((rel, dir));
+        return; // don't descend into an example leaf
     }
-    let mut out = Vec::new();
-    walk(&EXAMPLES_DIR, &mut out);
-    out.sort_unstable();
-    out
+    for d in dir.dirs() {
+        walk_examples(d, out);
+    }
 }
 
-/// Return the embedded leaf directory for a known example, resolved by **leaf
-/// folder name** anywhere in the tree (v1 behaviour). Returns `None` for an
-/// unknown example — a closed, explicit set with no fuzzy matching.
+/// List known example names as category-qualified paths verbatim from the
+/// embedded tree (e.g. `01.Basics/blink`, `06.Displays/display`). Sorted for
+/// stable display in the picker and error listing (design §17.1).
+pub fn example_names() -> Vec<String> {
+    let mut all = Vec::new();
+    walk_examples(&EXAMPLES_DIR, &mut all);
+    let mut names: Vec<String> = all.into_iter().map(|(rel, _)| rel).collect();
+    names.sort_unstable();
+    names
+}
+
+/// Return the embedded leaf directory for a known example, resolved either by
+/// its full category-qualified path (`01.Basics/blink`) or its bare leaf name
+/// (`blink`). The exact path is preferred; bare-leaf is a fallback so the common
+/// `create blink` invocation keeps working. Closed, explicit set — no fuzzy
+/// matching.
 pub fn find_example(name: &str) -> Option<&'static Dir<'static>> {
-    fn walk<'a>(dir: &'a Dir<'a>, name: &str) -> Option<&'a Dir<'a>> {
-        if dir.path().file_name().and_then(|n| n.to_str()) == Some(name) {
-            return Some(dir);
-        }
-        for d in dir.dirs() {
-            if let Some(found) = walk(d, name) {
-                return Some(found);
-            }
-        }
-        None
-    }
-    walk(&EXAMPLES_DIR, name)
+    let mut all = Vec::new();
+    walk_examples(&EXAMPLES_DIR, &mut all);
+    all.iter()
+        .find(|(rel, d)| rel == name || d.path().file_name().and_then(|n| n.to_str()) == Some(name))
+        .map(|(_, d)| *d)
 }
 
 /// Whether `name` is a known example (resolvable by leaf folder name).

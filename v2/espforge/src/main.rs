@@ -188,8 +188,16 @@ fn run_create(
         );
     }
 
-    // 3. Project name defaults to the example name (Zen: explicit, echoed back).
-    let name = name.unwrap_or_else(|| example.clone());
+    // 3. Project name defaults to the example's leaf name (the part after the
+    //    last `/`), so `create 01.Basics/blink` and `create blink` both yield a
+    //    `blink/` project folder. The category prefix is just for selection.
+    let name = name.unwrap_or_else(|| {
+        example
+            .rsplit('/')
+            .next()
+            .unwrap_or(&example)
+            .to_string()
+    });
     let out = out.unwrap_or_else(|| PathBuf::from("."));
     let dest = out.join(&name);
     if dest.exists() {
