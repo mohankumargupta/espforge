@@ -1,51 +1,19 @@
 [package]
-edition      = "2024"
-name         = "blink"
-rust-version = "1.88"
-version      = "0.1.0"
-
-[[bin]]
 name = "blink"
-path = "./src/bin/main.rs"
-
-[dependencies.embedded-hal-bus]
-version = "0.3.0"
-optional = true
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-esp-hal = { version = "~1.1.0", features = ["esp32c3", "log-04", "unstable"] }
+espforge-runtime = { path = "/home/pi/junk/espforge/v2/espforge-runtime", version = "0.1.0" }
+esp-hal = { version = "*", features = ["esp32c3"] }
+esp-backtrace = { version = "*", features = ["esp32c3", "println", "panic-handler"] }
+esp-println = { version = "*", features = ["esp32c3", "log-04"] }
+static_cell = "*"
 
-
-esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32c3", "log-04"] }
-log                    = "0.4.27"
-
-critical-section = "1.2.0"
-esp-alloc = "0.10.0"
-esp-backtrace = { version = "0.19.0", features = [
-  "esp32c3",
-  "panic-handler",
-  "println",
-] }
-esp-println = { version = "0.17.0", features = ["esp32c3", "log-04"] }
-espforge_platform = { version = "0.1.14" }
-espforge_components = { version = "0.1.12", features = ["led"] }
-espforge_devices = { version = "0.1.14" }
-static_cell = "2.1"
-embedded-hal = "1.0.0"
-
-[dependencies.embedded-io]
-version = "0.7.1"
-optional = true
-
-
-# For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
-[profile.dev]
-# The default debug profile is too slow and too big for resource-constrained devices.
-# Always build with some optimizations enabled.
-opt-level = "s"
 
 [profile.release]
-codegen-units = 1     # LLVM can perform better optimizations using a single thread
-debug         = 2     # prefer slower builds but better debugging experience
-lto           = 'fat'
-opt-level     = 's'
+debug = true
+
+# Standalone workspace root: keeps this generated project self-contained and
+# prevents cargo from walking up to a parent workspace (ADR-008 generated output).
+[workspace]

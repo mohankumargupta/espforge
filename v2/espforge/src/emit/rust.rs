@@ -129,6 +129,10 @@ static_cell = "*"
 
 [profile.release]
 debug = true
+
+# Standalone workspace root: keeps this generated project self-contained and
+# prevents cargo from walking up to a parent workspace (ADR-008 generated output).
+[workspace]
 "#
     ))
 }
@@ -204,7 +208,8 @@ pub mod app;
 pub use generated::{Components, Devices, PeripheralRegistry};
 
 /// Access a component from a `Context`'s generated `Components` struct.
-/// Usage: `component!(ctx, my_led)`#[macro_export]
+/// Usage: `component!(ctx, my_led)`
+#[macro_export]
 macro_rules! component {
     ($ctx:expr, $name:ident) => {
         &$ctx.components.$name
@@ -212,7 +217,8 @@ macro_rules! component {
 }
 
 /// Access a device from a `Context`'s generated `Devices` struct.
-/// Usage: `device!(ctx, my_screen)`#[macro_export]
+/// Usage: `device!(ctx, my_screen)`
+#[macro_export]
 macro_rules! device {
     ($ctx:expr, $name:ident) => {
         &$ctx.devices.$name
