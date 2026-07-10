@@ -1,5 +1,5 @@
-//! `led` component driver (ADR-006). Lives under `components/` alongside the
-//! other reusable capability drivers.
+// `led` component driver (ADR-006). Lives under `components/` alongside the
+// other reusable capability drivers.
 
 use espforge_model::codegen;
 use espforge_model::driver::{Construction, Driver, GenContext};
@@ -11,6 +11,10 @@ use espforge_model::value::{Artifact, Diag};
 pub struct LedDriver;
 
 pub static LED: LedDriver = LedDriver;
+
+/// Registry entry for this driver (ADR-006/§9b). The build script references
+/// `led::DRIVER` so it never has to guess the per-driver const name.
+pub const DRIVER: &'static dyn Driver = &LED;
 
 impl Driver for LedDriver {
     fn kind(&self) -> &str {

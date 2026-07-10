@@ -1,5 +1,5 @@
-//! `i2c` component driver (ADR-006). Wires an I2C peripheral by value. Lives
-//! under `components/` alongside the other reusable capability drivers.
+// `i2c` component driver (ADR-006). Wires an I2C peripheral by value. Lives
+// under `components/` alongside the other reusable capability drivers.
 
 use espforge_model::codegen;
 use espforge_model::driver::{Construction, Driver, GenContext};
@@ -10,6 +10,9 @@ use espforge_model::value::{Artifact, Diag};
 pub struct I2cDriver;
 
 pub static I2C: I2cDriver = I2cDriver;
+
+/// Registry entry for this driver (ADR-006/§9b).
+pub const DRIVER: &'static dyn Driver = &I2C;
 
 impl Driver for I2cDriver {
     fn kind(&self) -> &str {

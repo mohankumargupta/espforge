@@ -1,6 +1,6 @@
-//! `ssd1306` device driver (ADR-006). Lives under `devices/`. A terminal device
-//! that shares an `i2c` component by reference and claims reset/DC pins by value
-//! (ADR-003/008).
+// `ssd1306` device driver (ADR-006). Lives under `devices/`. A terminal device
+// that shares an `i2c` component by reference and claims reset/DC pins by value
+// (ADR-003/008).
 
 use espforge_model::codegen;
 use espforge_model::driver::{Construction, Driver, GenContext};
@@ -11,6 +11,9 @@ use espforge_model::value::{Artifact, Diag};
 pub struct Ssd1306Driver;
 
 pub static SSD1306: Ssd1306Driver = Ssd1306Driver;
+
+/// Registry entry for this driver (ADR-006/§9b).
+pub const DRIVER: &'static dyn Driver = &SSD1306;
 
 impl Driver for Ssd1306Driver {
     fn kind(&self) -> &str {
