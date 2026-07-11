@@ -17,32 +17,96 @@ use anyhow::Result;
 use espforge_model::ir::{DeviceTree, Runtime, Tier};
 use espforge_model::value::Artifact;
 use std::env;
+use std::path::Path;
 
-/// Environment variable (v1 behaviour): when set to a local espforge checkout,
-/// generated projects depend on local path copies of `espforge-runtime` instead
-/// of the published crates.io version.
+/// Environment variable (v1 behaviour): when set to a truthy value (`"true"`,
+/// `ESPFORGE_USE_LOCAL=true`), generated projects depend on local path copies
+/// of `espforge-runtime` instead of the published crates.io version. Fed by
+/// the `justfile` that `setup`/`create` emit (ADR-001/§17.1).
 pub const ESPFORGE_USE_LOCAL: &str = "ESPFORGE_USE_LOCAL";
+
+/// When `ESPFORGE_USE_LOCAL` is set, this names the `espforge` binary whose
+/// containing `v2` checkout provides the local path deps. If unset, we fall
+/// back to the location of the running `espforge` executable.
+pub const ESPFORGE_BINARY: &str = "ESPFORGE_BINARY";
 
 /// Resolve an `espforge-*` dependency declaration for the generated project's
 /// `Cargo.toml`. By default it uses the published crates.io version; when
-/// `ESPFORGE_USE_LOCAL` is set (v1 behaviour) it flips to a local path dep into
-/// that checkout. Applies uniformly to `espforge-runtime`, `espforge-bindings`,
-/// `espforge-model`, etc.
+/// `ESPFORGE_USE_LOCAL` is truthy it flips to a local path dep rooted at the
+/// `v2` directory of the espforge checkout (derived from `ESPFORGE_BINARY`, or
+/// the running executable). Applies uniformly to `espforge-runtime`,
+/// `espforge-bindings`, `espforge-model`, etc.
 fn espforge_dep(crate_name: &str) -> String {
     const VERSION: &str = "0.1.0";
-    match env::var(ESPFORGE_USE_LOCAL) {
-        Ok(path) if !path.trim().is_empty() => {
-            let normalized = path
-                .trim()
-                .replace('\\', "/")
-                .trim_end_matches('/')
-                .to_string();
-            format!(
-                "{crate_name} = {{ path = \"{normalized}/{crate_name}\", version = \"{VERSION}\" }}"
-            )
-        }
-        _ => format!("{crate_name} = \"{VERSION}\""),
+    if !use_local() {
+        return format!("{crate_name} = \"{VERSION}\"");
     }
+    let root = v2_root();
+    format!(
+        "{crate_name} = {{ path = \"{root}/{crate_name}\", version = \"{VERSION}\" }}"
+    )
+}
+
+/// `true` iff `ESPFORGE_USE_LOCAL` is set to a truthy value ("true"/"1"/"yes").
+fn use_local() -> bool {
+    match env::var(ESPFORGE_USE_LOCAL) {
+        Ok(v) => {
+            let t = v.trim().to_ascii_lowercase();
+            matches!(t.as_str(), "true" | "1" | "yes" | "on")
+        }
+        Err(_) => false,
+    }
+}
+
+/// Derive the `v2` root of the espforge checkout. `ESPFORGE_BINARY` points at
+/// the espforge binary (e.g. `/repo/v2/target/debug/espforge`); we walk up to
+/// the nearest ancestor named `v2`, falling back to the binary's parent and then
+/// the running executable's parent.
+fn v2_root() -> String {
+    let candidates: Vec<std::path::PathBuf> = [
+        env::var(ESPFORGE_BINARY).ok(),
+        env::current_exe()
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned()),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|p| Path::new(&p).to_path_buf())
+    .collect();
+
+    for bin in &candidates {
+        if let Some(root) = walk_up_to_v2(bin) {
+            return normalize(&root);
+        }
+    }
+    // Last resort: parent of the running executable.
+    if let Some(exe) = env::current_exe().ok() {
+        if let Some(parent) = exe.parent() {
+            return normalize(parent);
+        }
+    }
+    ".".to_string()
+}
+
+/// Walk `start` upward until an ancestor directory is named `v2`; return it.
+fn walk_up_to_v2(start: &Path) -> Option<std::path::PathBuf> {
+    // If the path is itself a file, start from its parent.
+    let mut cur = if start.is_dir() { start.to_path_buf() } else { start.parent()?.to_path_buf() };
+    loop {
+        if cur.file_name().map(|n| n == "v2").unwrap_or(false) {
+            return Some(cur);
+        }
+        if !cur.pop() {
+            return None;
+        }
+    }
+}
+
+fn normalize(p: &Path) -> String {
+    p.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string()
 }
 
 pub fn emit(ir: &DeviceTree) -> Result<Vec<Artifact>> {

@@ -117,6 +117,18 @@ fn run() -> anyhow::Result<()> {
                 Some(p) => p,
                 None => discover_spec(std::path::Path::new("."))?,
             };
+            // Honour persisted `.espforge/settings.json` (from `create`/`setup`)
+            // when run directly. Env vars (e.g. set via `just`) take precedence.
+            if std::env::var("ESPFORGE_USE_LOCAL").is_err() {
+                if let Some(settings) =
+                    read_settings(project.parent().unwrap_or_else(|| std::path::Path::new(".")))
+                {
+                    if settings.use_local {
+                        // SAFETY: single-threaded CLI startup; set once before emit.
+                        unsafe { std::env::set_var("ESPFORGE_USE_LOCAL", "true") };
+                    }
+                }
+            }
             let text = std::fs::read_to_string(&project)
                 .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", project.display()))?;
             let proj = espforge::parse::parse_str(&text)?;
@@ -174,6 +186,10 @@ fn run_create(
     name: Option<String>,
     out: Option<PathBuf>,
 ) -> anyhow::Result<()> {
+    // 0. Read the optional `answers.yaml` from the cwd — it controls the
+    //    generated justfile (binary path + whether to use local espforge crates).
+    let answers = read_answers(std::path::Path::new("."));
+
     // 1. Resolve the example name (arg, else interactive dialoguer picker).
     let example = match example {
         Some(name) => name,
@@ -210,6 +226,10 @@ fn run_create(
         .map_err(|e| anyhow::anyhow!("failed to create {}: {e}", dest.display()))?;
     copy_spec(&example, &name, &dest)?;
     copy_app(&example, &dest)?;
+    // Write the justfile derived from answers.yaml (ADR-001).
+    write_justfile(&dest, &answers)?;
+    // Persist the answers so `espforge build` honours them when run directly.
+    write_settings(&dest, &answers)?;
     // diagram.json is optional; only copy if the template ships one.
     if let Some(d) = espforge_examples::asset(&example, "diagram.json") {
         std::fs::write(dest.join("diagram.json"), d)
@@ -235,6 +255,7 @@ fn run_create(
     println!("  then build it:");
     let proj_arg = format!("{}", dest.join(format!("{name}.yaml")).display());
     println!("    cd {name} && espforge build --project {} --out build", proj_arg);
+    println!("    (or: cd {name} && just build)");
     println!();
     println!("  `build` is repeatable — re-run it after any YAML or app.rs edit.");
     Ok(())
@@ -273,4 +294,113 @@ fn copy_app(example: &str, dest: &std::path::Path) -> anyhow::Result<()> {
     std::fs::write(dest_path, app)
         .map_err(|e| anyhow::anyhow!("failed to write src/app.rs: {e}"))?;
     Ok(())
+}
+
+/// Options read from an optional `answers.yaml` in the current working dir
+/// (design §17.1). They control how `setup`/`create` bootstrap the project —
+/// most importantly which espforge binary `just build` invokes and whether the
+/// generated project depends on local espforge crates. Also persisted as
+/// `.espforge/settings.json` so that `espforge build` honours them when run
+/// directly (not just via `just`).
+///
+/// Defaults (when `answers.yaml` is absent or a field is omitted):
+/// - `use_local`: `false`  → generated code uses published crates.io deps
+/// - `binary_path`: `"espforge"` → the `just` recipe shells out to `espforge`
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct Answers {
+    use_local: bool,
+    binary_path: String,
+}
+
+/// Read `answers.yaml` from `dir` if present. Missing file or unreadable
+/// content falls back to the defaults (this is an optional convenience file,
+/// not a hard requirement).
+///
+/// Defaults: `use_local = false` (published crates.io deps), and `binary_path
+/// = "espforge"` (the `just` recipe shells out to the `espforge` on PATH).
+fn read_answers(dir: &std::path::Path) -> Answers {
+    let mut a = Answers {
+        use_local: false,
+        binary_path: "espforge".to_string(),
+    };
+    let path = dir.join("answers.yaml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return a;
+    };
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        #[serde(default)]
+        use_local: Option<bool>,
+        #[serde(default)]
+        binary_path: Option<String>,
+    }
+    let raw: Raw = match serde_yaml_ng::from_str(&text) {
+        Ok(r) => r,
+        Err(_) => return a,
+    };
+    if let Some(v) = raw.use_local {
+        a.use_local = v;
+    }
+    if let Some(v) = raw.binary_path {
+        a.binary_path = v;
+    }
+    a
+}
+
+/// Render the per-project `justfile`. It carries the `answers.yaml` values as
+/// `just` variables prefixed `ESPFORGE_`, exporting them so that `espforge
+/// build` (invoked from a recipe) inherits them in its environment. `setup`/
+/// `create` write this into the created project folder (ADR-001).
+fn justfile_content(a: &Answers) -> String {
+    let use_local = if a.use_local { "true" } else { "false" };
+    format!(
+        r#"set shell := ["sh", "-c"]
+set windows-shell := ["powershell", "-c"]
+
+# When true, generated projects use local espforge crates (built from this
+# checkout) instead of the published crates.io versions.
+export ESPFORGE_USE_LOCAL := "{use_local}"
+# Path to the espforge binary `just build` shells out to.
+export ESPFORGE_BINARY := "{binary}"
+
+build:
+    {{{{ ESPFORGE_BINARY }}}} build
+    cd build ; cargo build
+"#,
+        use_local = use_local,
+        binary = a.binary_path,
+    )
+}
+
+/// Write the `justfile` (derived from `answers.yaml`) into the created project
+/// folder, then report it as an available recipe.
+fn write_justfile(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
+    let content = justfile_content(a);
+    std::fs::write(dest.join("justfile"), content)
+        .map_err(|e| anyhow::anyhow!("failed to write justfile: {e}"))?;
+    Ok(())
+}
+
+/// Persist the answers as `.espforge/settings.json` inside the project folder
+/// so that `espforge build` (run directly, not via `just`) still honours
+/// `use_local` and the `binary_path` (ADR-001). Env vars take precedence over
+/// this file at build time.
+fn write_settings(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
+    let dir = dest.join(".espforge");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| anyhow::anyhow!("failed to create .espforge: {e}"))?;
+    let json = serde_json::to_string_pretty(a)
+        .map_err(|e| anyhow::anyhow!("failed to serialize settings: {e}"))?;
+    std::fs::write(dir.join("settings.json"), json)
+        .map_err(|e| anyhow::anyhow!("failed to write settings.json: {e}"))?;
+    Ok(())
+}
+
+/// Read `.espforge/settings.json` from the project root (the directory
+/// containing the spec), if present. Used by `build` to honour `use_local`
+/// when invoked directly rather than through `just`.
+fn read_settings(spec_dir: &std::path::Path) -> Option<Answers> {
+    let path = spec_dir.join(".espforge").join("settings.json");
+    let text = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&text).ok()
 }
