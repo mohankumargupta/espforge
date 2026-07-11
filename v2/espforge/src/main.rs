@@ -187,7 +187,7 @@ fn run_create(
     out: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     // 0. Read the optional `answers.yaml` from the cwd — it controls the
-    //    generated justfile (binary path + whether to use local espforge crates).
+    //    generated justfile (binary path, local crates, build profile).
     let answers = read_answers(std::path::Path::new("."));
 
     // 1. Resolve the example name (arg, else interactive dialoguer picker).
@@ -298,30 +298,80 @@ fn copy_app(example: &str, dest: &std::path::Path) -> anyhow::Result<()> {
 
 /// Options read from an optional `answers.yaml` in the current working dir
 /// (design §17.1). They control how `setup`/`create` bootstrap the project —
-/// most importantly which espforge binary `just build` invokes and whether the
-/// generated project depends on local espforge crates. Also persisted as
+/// most importantly which espforge binary `just build` invokes, whether the
+/// generated project depends on local espforge crates, and whether the
+/// generated firmware is built in debug or release. Also persisted as
 /// `.espforge/settings.json` so that `espforge build` honours them when run
 /// directly (not just via `just`).
 ///
 /// Defaults (when `answers.yaml` is absent or a field is omitted):
-/// - `use_local`: `false`  → generated code uses published crates.io deps
-/// - `binary_path`: `"espforge"` → the `just` recipe shells out to `espforge`
+/// - `use_local: false`        → generated code uses published crates.io deps
+/// - `path: espforge`          → the `just` recipe shells out to the `espforge`
+///                               on PATH (on Windows this defaults to
+///                               `espforge.exe`, see [`platform_binary`])
+/// - `debug_or_release: debug` → `just build` runs a plain `cargo build`
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Answers {
     use_local: bool,
-    binary_path: String,
+    path: String,
+    debug_or_release: Profile,
+}
+
+/// Which profile `just build` compiles the generated firmware with.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Profile {
+    #[default]
+    Debug,
+    Release,
+}
+
+/// The `espforge` binary the generated `justfile` shells out to, by default
+/// just `espforge` on PATH. Cross-platform aware: on Windows the on-disk
+/// binary is `espforge.exe`, so we append `.exe` to a bare name/path.
+fn default_binary(is_windows: bool) -> String {
+    if is_windows {
+        "espforge.exe".to_string()
+    } else {
+        "espforge".to_string()
+    }
+}
+
+/// Normalise a user-supplied `path` to the binary name the host can actually
+/// execute. On Windows, a path with no file extension (e.g. `/path/espforge`
+/// or just `espforge`) is given the `.exe` extension, matching the binary the
+/// `cargo build` produces (`target/debug/espforge.exe`). A path that already
+/// has any extension (`.exe`, `.com`, a versioned `espforge-1.2.3`, ...) is
+/// left verbatim, because the cargo output is always `.exe` and an explicit
+/// extension reflects a deliberate choice. Non-Windows keeps the path verbatim.
+///
+/// Takes `is_windows` explicitly (rather than `cfg!(windows)`) so the Windows
+/// branch is unit-testable on any host.
+fn platform_binary(path: &str, is_windows: bool) -> String {
+    if is_windows {
+        let has_extension = std::path::Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.contains('.'))
+            .unwrap_or(false);
+        if !has_extension {
+            return format!("{path}.exe");
+        }
+    }
+    path.to_string()
 }
 
 /// Read `answers.yaml` from `dir` if present. Missing file or unreadable
 /// content falls back to the defaults (this is an optional convenience file,
 /// not a hard requirement).
 ///
-/// Defaults: `use_local = false` (published crates.io deps), and `binary_path
-/// = "espforge"` (the `just` recipe shells out to the `espforge` on PATH).
+/// Defaults: `use_local = false` (published crates.io deps), `path` =
+/// `espforge` (or `espforge.exe` on Windows), and `debug_or_release = debug`.
 fn read_answers(dir: &std::path::Path) -> Answers {
     let mut a = Answers {
         use_local: false,
-        binary_path: "espforge".to_string(),
+        path: default_binary(cfg!(windows)),
+        debug_or_release: Profile::default(),
     };
     let path = dir.join("answers.yaml");
     let Ok(text) = std::fs::read_to_string(&path) else {
@@ -332,7 +382,9 @@ fn read_answers(dir: &std::path::Path) -> Answers {
         #[serde(default)]
         use_local: Option<bool>,
         #[serde(default)]
-        binary_path: Option<String>,
+        path: Option<String>,
+        #[serde(default)]
+        debug_or_release: Option<Profile>,
     }
     let raw: Raw = match serde_yaml_ng::from_str(&text) {
         Ok(r) => r,
@@ -341,8 +393,11 @@ fn read_answers(dir: &std::path::Path) -> Answers {
     if let Some(v) = raw.use_local {
         a.use_local = v;
     }
-    if let Some(v) = raw.binary_path {
-        a.binary_path = v;
+    if let Some(v) = raw.path {
+        a.path = v;
+    }
+    if let Some(v) = raw.debug_or_release {
+        a.debug_or_release = v;
     }
     a
 }
@@ -351,8 +406,14 @@ fn read_answers(dir: &std::path::Path) -> Answers {
 /// `just` variables prefixed `ESPFORGE_`, exporting them so that `espforge
 /// build` (invoked from a recipe) inherits them in its environment. `setup`/
 /// `create` write this into the created project folder (ADR-001).
+///
+/// The binary `just` shells out to is run through [`platform_binary`] so it is
+/// correct on Windows (`espforge.exe`). The `cargo build` profile is driven by
+/// `debug_or_release` via the cross-platform `--release` flag.
 fn justfile_content(a: &Answers) -> String {
     let use_local = if a.use_local { "true" } else { "false" };
+    let binary = platform_binary(&a.path, cfg!(windows));
+    let cargo_flags = cargo_profile_flags(a.debug_or_release);
     format!(
         r#"set shell := ["sh", "-c"]
 set windows-shell := ["powershell", "-c"]
@@ -360,16 +421,27 @@ set windows-shell := ["powershell", "-c"]
 # When true, generated projects use local espforge crates (built from this
 # checkout) instead of the published crates.io versions.
 export ESPFORGE_USE_LOCAL := "{use_local}"
-# Path to the espforge binary `just build` shells out to.
+# Path to the espforge binary `just build` shells out to (on Windows this
+# resolves to espforge.exe).
 export ESPFORGE_BINARY := "{binary}"
 
 build:
     {{{{ ESPFORGE_BINARY }}}} build
-    cd build ; cargo build
+    cd build ; cargo build{cargo_flags}
 "#,
         use_local = use_local,
-        binary = a.binary_path,
+        binary = binary,
+        cargo_flags = cargo_flags,
     )
+}
+
+/// The `cargo build` profile flags for the chosen debug/release profile,
+/// identical on every platform (no per-OS branching needed).
+fn cargo_profile_flags(profile: Profile) -> &'static str {
+    match profile {
+        Profile::Release => " --release",
+        Profile::Debug => "",
+    }
 }
 
 /// Write the `justfile` (derived from `answers.yaml`) into the created project
@@ -383,8 +455,8 @@ fn write_justfile(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
 
 /// Persist the answers as `.espforge/settings.json` inside the project folder
 /// so that `espforge build` (run directly, not via `just`) still honours
-/// `use_local` and the `binary_path` (ADR-001). Env vars take precedence over
-/// this file at build time.
+/// `use_local`, the `path`, and `debug_or_release` (ADR-001). Env vars take
+/// precedence over this file at build time.
 fn write_settings(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
     let dir = dest.join(".espforge");
     std::fs::create_dir_all(&dir)
@@ -403,4 +475,83 @@ fn read_settings(spec_dir: &std::path::Path) -> Option<Answers> {
     let path = spec_dir.join(".espforge").join("settings.json");
     let text = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&text).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_binary_linux_keeps_path_verbatim() {
+        assert_eq!(platform_binary("espforge", false), "espforge");
+        assert_eq!(platform_binary("/path/to/espforge", false), "/path/to/espforge");
+        // An explicit .exe on a non-Windows host is left alone.
+        assert_eq!(platform_binary("espforge.exe", false), "espforge.exe");
+    }
+
+    #[test]
+    fn platform_binary_windows_appends_exe() {
+        // Bare names and bare paths get the .exe suffix on Windows.
+        assert_eq!(platform_binary("espforge", true), "espforge.exe");
+        assert_eq!(platform_binary("/path/to/espforge", true), "/path/to/espforge.exe");
+        // An explicit .exe is never overridden.
+        assert_eq!(platform_binary("espforge.exe", true), "espforge.exe");
+        // A different extension is left intact.
+        assert_eq!(platform_binary("espforge.com", true), "espforge.com");
+    }
+
+    #[test]
+    fn default_binary_is_platform_aware() {
+        assert_eq!(default_binary(false), "espforge");
+        assert_eq!(default_binary(true), "espforge.exe");
+    }
+
+    #[test]
+    fn debug_or_release_maps_to_cargo_flags() {
+        assert_eq!(cargo_profile_flags(Profile::Debug), "");
+        assert_eq!(cargo_profile_flags(Profile::Release), " --release");
+    }
+
+    #[test]
+    fn read_answers_parses_new_format() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("espforge_ans_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut f = std::fs::File::create(dir.join("answers.yaml")).unwrap();
+        write!(
+            f,
+            "use_local: True\npath: /path/to/espforge\ndebug_or_release: release\n"
+        )
+        .unwrap();
+        drop(f);
+
+        let a = read_answers(&dir);
+        assert!(a.use_local);
+        assert_eq!(a.path, "/path/to/espforge");
+        assert_eq!(a.debug_or_release, Profile::Release);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_answers_defaults_when_missing() {
+        let dir = std::env::temp_dir().join(format!("espforge_ans_none_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let a = read_answers(&dir);
+        assert!(!a.use_local);
+        assert_eq!(a.path, default_binary(cfg!(windows)));
+        assert_eq!(a.debug_or_release, Profile::Debug);
+    }
+
+    #[test]
+    fn justfile_uses_platform_binary_and_profile() {
+        let a = Answers {
+            use_local: true,
+            path: "/path/to/espforge".to_string(),
+            debug_or_release: Profile::Release,
+        };
+        let jf = justfile_content(&a);
+        assert!(jf.contains("export ESPFORGE_BINARY := \"/path/to/espforge\""));
+        assert!(jf.contains("cargo build --release"));
+    }
 }
