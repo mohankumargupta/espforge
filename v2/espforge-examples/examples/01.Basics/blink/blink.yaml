@@ -8,7 +8,7 @@ esp32:
     gpio2: { pin: 18, direction: output }
 
 components:
-  - id: red_led
+  red_led:
     using: led
     with:
       pin: $gpio2

@@ -119,10 +119,18 @@ fn run() -> anyhow::Result<()> {
             };
             // Honour persisted `answers.yaml` (from `create`/`setup`) when run
             // directly. Env vars (e.g. set via `just`) take precedence.
-            if std::env::var("ESPFORGE_USE_LOCAL").is_err() {
-                if let Some(settings) =
-                    read_settings(project.parent().unwrap_or_else(|| std::path::Path::new(".")))
-                {
+            let profile = if std::env::var("ESPFORGE_USE_LOCAL").is_err() {
+                let settings = read_settings(
+                    project.parent().unwrap_or_else(|| std::path::Path::new(".")),
+                );
+                let profile = settings
+                    .as_ref()
+                    .map(|s| match s.debug_or_release {
+                        Profile::Release => "release",
+                        Profile::Debug => "debug",
+                    })
+                    .unwrap_or("debug");
+                if let Some(settings) = settings {
                     if settings.use_local {
                         // SAFETY: single-threaded CLI startup; set once before emit.
                         unsafe { std::env::set_var("ESPFORGE_USE_LOCAL", "true") };
@@ -140,7 +148,10 @@ fn run() -> anyhow::Result<()> {
                         }
                     }
                 }
-            }
+                profile
+            } else {
+                "debug"
+            };
             let text = std::fs::read_to_string(&project)
                 .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", project.display()))?;
             let proj = espforge::parse::parse_str(&text)?;
@@ -156,6 +167,14 @@ fn run() -> anyhow::Result<()> {
             // Layer 2: espforge's wiring layers + manifest.
             let artifacts = espforge::emit::generate(&ir)?;
             espforge::emit::write(&out, &artifacts)?;
+
+            // Layer 3: wokwi simulation assets. `diagram.json` is copied from
+            // the project root with placeholders resolved; `wokwi.toml` is
+            // generated pointing at the compiled binary. Both are always
+            // overwritten in `out` (generated output).
+            let project_dir = project.parent().unwrap_or_else(|| std::path::Path::new("."));
+            espforge::emit::wokwi::resolve_diagram(project_dir, &out, &ir)?;
+            espforge::emit::wokwi::write_wokwi_toml(&out, &ir, profile)?;
 
             println!(
                 "build: wrote project to {} — {} instance(s), features {:?}",
@@ -247,11 +266,10 @@ fn run_create(
     // records the spec (project YAML) file name so it travels with the project.
     let spec_name = format!("{name}.yaml");
     write_settings(&dest, &answers, &spec_name)?;
-    // diagram.json is optional; only copy if the template ships one.
-    if let Some(d) = espforge_examples::asset(&example, "diagram.json") {
-        std::fs::write(dest.join("diagram.json"), d)
-            .map_err(|e| anyhow::anyhow!("failed to write diagram.json: {e}"))?;
-    }
+    // diagram.json / wokwi.toml are optional; copy verbatim if the template
+    // ships them (build resolves placeholders and regenerates them into `out`).
+    copy_asset(&example, "diagram.json", &dest)?;
+    copy_asset(&example, "wokwi.toml", &dest)?;
 
     // 5. Friendly, explicit next steps (v1 `example` behaviour).
     println!("created project `{name}` at {}", dest.display());
@@ -267,6 +285,9 @@ fn run_create(
     println!("    {}/{}", dest.display(), name);
     if espforge_examples::asset(&example, "diagram.json").is_some() {
         println!("    {}/diagram.json", dest.display());
+    }
+    if espforge_examples::asset(&example, "wokwi.toml").is_some() {
+        println!("    {}/wokwi.toml", dest.display());
     }
     println!();
     println!("  then build it:");
@@ -310,6 +331,16 @@ fn copy_app(example: &str, dest: &std::path::Path) -> anyhow::Result<()> {
     let dest_path = dest.join("src").join("app.rs");
     std::fs::write(dest_path, app)
         .map_err(|e| anyhow::anyhow!("failed to write src/app.rs: {e}"))?;
+    Ok(())
+}
+
+/// Copy an optional example asset verbatim into the project folder, if the
+/// template ships it. Used for `diagram.json` / `wokwi.toml` (both optional).
+fn copy_asset(example: &str, name: &str, dest: &std::path::Path) -> anyhow::Result<()> {
+    if let Some(bytes) = espforge_examples::asset(example, name) {
+        std::fs::write(dest.join(name), bytes)
+            .map_err(|e| anyhow::anyhow!("failed to write {name}: {e}"))?;
+    }
     Ok(())
 }
 

@@ -3,11 +3,11 @@
   "author": "espforge",
   "editor": "wokwi",
   "parts": [
-    { "type": "board-esp32-c3-devkitm-1", "id": "board", "top": 0, "left": 0 },
-    { "type": "wokwi-led", "id": "led1", "top": -40, "left": 96, "attrs": { "color": "red", "gpio": "2" } }
+    { "type": "PLACEHOLDER_WOKWI_BOARD", "id": "board", "top": 0, "left": 0 },
+    { "type": "wokwi-led", "id": "led1", "top": -40, "left": 96, "attrs": { "color": "red", "gpio": "PLACEHOLDER_GPIO" } }
   ],
   "connections": [
-    [ "led1:Anode", "board:GPIO18", "green", [] ],
-    [ "led1:Cathode", "board:GND.2", "black", [] ]
+    [ "led1:Anode", "board:PLACEHOLDER_GPIO", "green", [] ],
+    [ "led1:Cathode", "board:PLACEHOLDER_GND_BOTTOM_RIGHT", "black", [] ]
   ]
 }

@@ -5,6 +5,7 @@
 pub mod manifest;
 pub mod rust;
 pub mod scaffold;
+pub mod wokwi;
 
 use anyhow::Result;
 use espforge_model::ir::DeviceTree;

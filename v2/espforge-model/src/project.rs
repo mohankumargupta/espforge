@@ -16,7 +16,9 @@ use std::collections::HashMap;
 pub struct Project {
     pub espforge: EspforgeMeta,
     pub esp32: Esp32Section,
+    #[serde(default, deserialize_with = "instance_list")]
     pub components: Vec<Instance>,
+    #[serde(default, deserialize_with = "instance_list")]
     pub devices: Vec<Instance>,
 }
 
@@ -144,7 +146,9 @@ pub struct HeapConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instance {
     /// The instance's name (the `$name` others reference). Aliased from `name`.
-    #[serde(alias = "name")]
+    /// Defaults to empty so the v1 keyed-map form can backfill it from the map
+    /// key (see [`InstanceList`]).
+    #[serde(default, alias = "name")]
     pub id: String,
     /// The driver kind, e.g. `led`, `ssd1306`, `http`.
     #[serde(alias = "driver", alias = "using")]
@@ -155,6 +159,73 @@ pub struct Instance {
     /// Source span of this instance node (for diagnostics).
     #[serde(skip)]
     pub span: Span,
+}
+
+/// A `Vec<Instance>` that deserializes from either form:
+/// - the v2 sequence form:  `[ { id: red_led, using: led, with: ... }, ... ]`
+/// - the v1 keyed-map form: `red_led: { using: led, with: ... }` (the map key
+///   becomes the instance `id`). The map form is the "good bit" carried over
+/// from v1; both forms coexist (non-breaking).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct InstanceList(pub Vec<Instance>);
+
+impl<'de> Deserialize<'de> for InstanceList {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+        let value = serde_yaml_ng::Value::deserialize(deserializer)?;
+        match value {
+            // v2 sequence form.
+            serde_yaml_ng::Value::Sequence(seq) => {
+                let mut out = Vec::with_capacity(seq.len());
+                for item in seq {
+                    out.push(
+                        Instance::deserialize(item)
+                            .map_err(|e: serde_yaml_ng::Error| D::Error::custom(e.to_string()))?,
+                    );
+                }
+                Ok(InstanceList(out))
+            }
+            // v1 keyed-map form.
+            serde_yaml_ng::Value::Mapping(map) => {
+                let mut out = Vec::with_capacity(map.len());
+                for (key, val) in map {
+                    let id = match key {
+                        serde_yaml_ng::Value::String(s) => s,
+                        other => {
+                            return Err(D::Error::custom(format!(
+                                "component/device key must be a string, found {other:?}"
+                            )))
+                        }
+                    };
+                    let mut inst = Instance::deserialize(val)
+                        .map_err(|e: serde_yaml_ng::Error| D::Error::custom(e.to_string()))?;
+                    // The map key is the instance id; only fill it if the value
+                    // did not already specify one.
+                    if inst.id.is_empty() {
+                        inst.id = id;
+                    }
+                    out.push(inst);
+                }
+                Ok(InstanceList(out))
+            }
+            serde_yaml_ng::Value::Null => Ok(InstanceList(Vec::new())),
+            other => Err(D::Error::custom(format!(
+                "components/devices must be a list or a map, found {other:?}"
+            ))),
+        }
+    }
+}
+
+/// `deserialize_with` target for `Project::components`/`devices`: accepts the
+/// v2 sequence or v1 keyed-map form and yields `Vec<Instance>`.
+fn instance_list<'de, D>(deserializer: D) -> Result<Vec<Instance>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(InstanceList::deserialize(deserializer)?.0)
 }
 
 // --- Reference normalization ------------------------------------------------
