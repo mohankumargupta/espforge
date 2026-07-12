@@ -38,10 +38,10 @@ impl Driver for LedDriver {
         let pin = inst
             .pins
             .first()
-            .map(|p| p.number.to_string())
+            .map(|p| format!("GPIO{}", p.number))
             .unwrap_or_else(|| "unreachable!()".into());
         // The backend builds the polarity-aware Output from the moved-in GPIO
-        // peripheral; we hand it the bare GPIO field number.
+        // peripheral; the field name is the esp_hal `GPIO{n}` member.
         let output = ctx.backend.gpio_output(&pin, active_low);
         Construction::for_instance(
             inst,
