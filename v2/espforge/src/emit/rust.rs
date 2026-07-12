@@ -30,6 +30,13 @@ pub const ESPFORGE_USE_LOCAL: &str = "ESPFORGE_USE_LOCAL";
 /// back to the location of the running `espforge` executable.
 pub const ESPFORGE_BINARY: &str = "ESPFORGE_BINARY";
 
+/// When `ESPFORGE_USE_LOCAL` is set, this names the espforge checkout root
+/// (the `v2` directory) to use for local path deps, already expressed relative
+/// to the generated project's `out` directory. Set by the `build` subcommand
+/// from the `path:` in `answers.yaml` (which is relative to the project dir),
+/// re-based to `out`. Takes precedence over `ESPFORGE_BINARY`/`current_exe`.
+pub const ESPFORGE_PATH: &str = "ESPFORGE_PATH";
+
 /// Resolve an `espforge-*` dependency declaration for the generated project's
 /// `Cargo.toml`. By default it uses the published crates.io version; when
 /// `ESPFORGE_USE_LOCAL` is truthy it flips to a local path dep rooted at the
@@ -62,7 +69,15 @@ fn use_local() -> bool {
 /// the espforge binary (e.g. `/repo/v2/target/debug/espforge`); we walk up to
 /// the nearest ancestor named `v2`, falling back to the binary's parent and then
 /// the running executable's parent.
+/// Derive the `v2` root of the espforge checkout, preferring an explicit
+/// `ESPFORGE_PATH` (the checkout, relative to `out`), then the `v2` ancestor of
+/// `ESPFORGE_BINARY`, then the running executable's `v2` ancestor.
 fn v2_root() -> String {
+    if let Ok(path) = env::var(ESPFORGE_PATH) {
+        if !path.is_empty() {
+            return normalize(Path::new(&path));
+        }
+    }
     let candidates: Vec<std::path::PathBuf> = [
         env::var(ESPFORGE_BINARY).ok(),
         env::current_exe()

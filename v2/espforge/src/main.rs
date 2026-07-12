@@ -126,6 +126,18 @@ fn run() -> anyhow::Result<()> {
                     if settings.use_local {
                         // SAFETY: single-threaded CLI startup; set once before emit.
                         unsafe { std::env::set_var("ESPFORGE_USE_LOCAL", "true") };
+                        // `path:` in answers.yaml is relative to the project dir
+                        // (parent of the spec). The generated manifest lives in
+                        // `out` (e.g. `build/`, one level deeper), so re-base the
+                        // checkout root to be relative to `out` and hand it to the
+                        // emitter via ESPFORGE_PATH (which takes precedence over
+                        // deriving the root from the espforge binary location).
+                        let project_dir =
+                            project.parent().unwrap_or_else(|| std::path::Path::new("."));
+                        let checkout = project_dir.join(&settings.path);
+                        if let Some(rel) = diff_paths(&checkout, &out) {
+                            unsafe { std::env::set_var("ESPFORGE_PATH", rel) };
+                        }
                     }
                 }
             }
@@ -371,6 +383,51 @@ fn platform_binary(path: &str, is_windows: bool) -> String {
         }
     }
     path.to_string()
+}
+
+/// Compute `from` expressed as a lexical path relative to `base`, resolving
+/// `..`/`..` components without touching the filesystem. Both paths are taken
+/// as-is (typically both relative to the same working directory), so the result
+/// points from `base` to `from` — used to re-base the espforge checkout
+/// (`path:` in `answers.yaml`, relative to the project dir) to the generated
+/// project's `out` directory. Returns `None` only if `from` ends up escaping
+/// with no common root.
+fn diff_paths(from: &std::path::Path, base: &std::path::Path) -> Option<String> {
+    // Lexically normalise: drop `.`, and collapse `..` against the preceding
+    // non-`..` component (a leading `..` is preserved).
+    fn norm(p: &std::path::Path) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for c in p.components() {
+            let s = c.as_os_str().to_string_lossy().into_owned();
+            match s.as_str() {
+                "." => {}
+                ".." => {
+                    if out.last().map(|l| l.as_str()) != Some("..") {
+                        out.pop();
+                    }
+                    if out.is_empty() {
+                        out.push("..".to_string());
+                    }
+                }
+                other => out.push(other.to_string()),
+            }
+        }
+        out
+    }
+    let from = norm(from);
+    let base = norm(base);
+
+    // Strip the common prefix.
+    let mut i = 0;
+    while i < from.len() && i < base.len() && from[i] == base[i] {
+        i += 1;
+    }
+    let mut rel: Vec<String> = vec!["..".to_string(); base.len() - i];
+    rel.extend_from_slice(&from[i..]);
+    if rel.is_empty() {
+        rel.push(".".to_string());
+    }
+    Some(rel.join("/"))
 }
 
 /// Read `answers.yaml` from `dir` if present. The file may be wrapped in a
@@ -672,5 +729,28 @@ mod tests {
             assert!(jf.contains("export ESPFORGE_BINARY := \"espforge\""));
             assert!(jf.contains("#export ESPFORGE_BINARY := \"espforge.exe\""));
         }
+    }
+
+    #[test]
+    fn diff_paths_rebases_checkout_to_out() {
+        use std::path::Path;
+        // `path:` is relative to the project dir; the manifest is written into
+        // `out` (one level deeper), so the dep must gain an extra `../`.
+        let from = Path::new("blink/../../mohankumargupta/espforge/v2");
+        let base = Path::new("blink/build");
+        assert_eq!(
+            diff_paths(from, base),
+            Some("../../../mohankumargupta/espforge/v2".to_string())
+        );
+        // Sibling under a shared parent needs a `..`.
+        assert_eq!(
+            diff_paths(Path::new("a/b/c"), Path::new("a/b/d")),
+            Some("../c".to_string())
+        );
+        // Identical paths resolve to ".".
+        assert_eq!(
+            diff_paths(Path::new("a/b/c"), Path::new("a/b/c")),
+            Some(".".to_string())
+        );
     }
 }
