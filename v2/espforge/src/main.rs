@@ -117,8 +117,8 @@ fn run() -> anyhow::Result<()> {
                 Some(p) => p,
                 None => discover_spec(std::path::Path::new("."))?,
             };
-            // Honour persisted `.espforge/settings.json` (from `create`/`setup`)
-            // when run directly. Env vars (e.g. set via `just`) take precedence.
+            // Honour persisted `answers.yaml` (from `create`/`setup`) when run
+            // directly. Env vars (e.g. set via `just`) take precedence.
             if std::env::var("ESPFORGE_USE_LOCAL").is_err() {
                 if let Some(settings) =
                     read_settings(project.parent().unwrap_or_else(|| std::path::Path::new(".")))
@@ -224,20 +224,15 @@ fn run_create(
     //    src/app.rs, diagram.json (optional).
     std::fs::create_dir_all(dest.join("src"))
         .map_err(|e| anyhow::anyhow!("failed to create {}: {e}", dest.display()))?;
-    // The spec (project YAML) is written with a `spec:` self-pointer under the
-    // `espforge:` block naming this very file, so the spec is discoverable even
-    // when its on-disk name differs from the project folder name.
-    let spec_name = format!("{name}.yaml");
     copy_spec(&example, &name, &dest)?;
     copy_app(&example, &dest)?;
-    // Write the justfile derived from answers.yaml (ADR-001). It lives under
-    // `.espforge/` next to the carried-down `answers.yaml`.
+    // Write the justfile derived from answers.yaml (ADR-001) at the project
+    // root, next to `answers.yaml`.
     write_justfile(&dest, &answers)?;
-    // Carry the answers down into the project as `.espforge/answers.yaml`,
-    // wrapped in `espforge:` with a `spec:` self-pointer naming the project
-    // YAML. `espforge build` reads this so it honours `use_local` when run
-    // directly rather than through `just`.
-    write_settings(&dest, &answers, &spec_name)?;
+    // Carry the answers down into the project as `answers.yaml` at the project
+    // root, wrapped in `espforge:`. `espforge build` reads this so it honours
+    // `use_local` when run directly rather than through `just`.
+    write_settings(&dest, &answers)?;
     // diagram.json is optional; only copy if the template ships one.
     if let Some(d) = espforge_examples::asset(&example, "diagram.json") {
         std::fs::write(dest.join("diagram.json"), d)
@@ -284,42 +279,14 @@ fn prompt_example() -> anyhow::Result<String> {
 }
 
 /// Copy the example's spec (any embedded `.yaml` containing `espforge:`) to
-/// `<dest>/<name>.yaml`, injecting a `spec: <name>.yaml` line under the
-/// `espforge:` block so the file names itself. The destination is always named
-/// after the project.
+/// `<dest>/<name>.yaml`. The destination is always named after the project.
 fn copy_spec(example: &str, name: &str, dest: &std::path::Path) -> anyhow::Result<()> {
     let spec = espforge_examples::example_spec(example)
         .ok_or_else(|| anyhow::anyhow!("template `{example}` has no project spec"))?;
-    let spec_text = String::from_utf8_lossy(spec);
-    let spec_name = format!("{name}.yaml");
-    let injected = inject_spec_field(&spec_text, &spec_name);
-    let dest_path = dest.join(&spec_name);
-    std::fs::write(dest_path, injected)
+    let dest_path = dest.join(format!("{name}.yaml"));
+    std::fs::write(dest_path, spec)
         .map_err(|e| anyhow::anyhow!("failed to write spec: {e}"))?;
     Ok(())
-}
-
-/// Insert `spec: <spec_name>` into the `espforge:` block of a project YAML,
-/// after the `espforge:` key line. If the file already declares a `spec:`,
-/// it is left untouched (idempotent). If `espforge:` is missing, the text is
-/// returned unchanged. Re-serializing through the typed `Project` is avoided
-/// so user comments and layout in the template are preserved verbatim.
-fn inject_spec_field(yaml: &str, spec_name: &str) -> String {
-    let mut out = String::with_capacity(yaml.len() + 64);
-    let mut injected = false;
-    for line in yaml.lines() {
-        out.push_str(line);
-        out.push('\n');
-        if injected {
-            continue;
-        }
-        let trimmed = line.trim_start();
-        if trimmed == "espforge:" {
-            out.push_str(&format!("  spec: {}\n", spec_name));
-            injected = true;
-        }
-    }
-    out
 }
 
 /// Copy `<example>/app/rust/app.rs` to `<dest>/src/app.rs` (user-owned).
@@ -562,48 +529,40 @@ impl Profile {
     }
 }
 
-/// Write the `justfile` (derived from `answers.yaml`) into `.espforge/` inside
-/// the created project folder, then report it as an available recipe. The
-/// `justfile` lives in `.espforge/` so it can read `.espforge/answers.yaml`
-/// relative to itself.
+/// Write the `justfile` (derived from `answers.yaml`) into the created project
+/// folder (project root, next to `answers.yaml`), so it is the obvious recipe
+/// to run with `just`.
 fn write_justfile(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
-    let dir = dest.join(".espforge");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| anyhow::anyhow!("failed to create .espforge: {e}"))?;
     let content = justfile_content(a);
-    std::fs::write(dir.join("justfile"), content)
+    std::fs::write(dest.join("justfile"), content)
         .map_err(|e| anyhow::anyhow!("failed to write justfile: {e}"))?;
     Ok(())
 }
 
-/// Write the carried-down `answers.yaml` into the project folder (alongside the
-/// spec). It is wrapped in an `espforge:` mapping and carries a `spec:`
-/// self-pointer naming the project YAML, so it mirrors the spec and is
-/// discoverable. `espforge build` reads `.espforge/answers.yaml` to honour
-/// `use_local` when run directly (not via `just`). Env vars take precedence.
-fn write_settings(dest: &std::path::Path, a: &Answers, spec_name: &str) -> anyhow::Result<()> {
-    let dir = dest.join(".espforge");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| anyhow::anyhow!("failed to create .espforge: {e}"))?;
+/// Write the carried-down `answers.yaml` into the project root (alongside the
+/// spec), wrapped in an `espforge:` mapping. `espforge build` reads this to
+/// honour `use_local` when run directly rather than through `just`. Env vars
+/// take precedence.
+fn write_settings(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
     let use_local = if a.use_local { "true" } else { "false" };
     let profile = match a.debug_or_release {
         Profile::Release => "release",
         Profile::Debug => "debug",
     };
     let text = format!(
-        "espforge:\n  use_local: \"{}\"\n  path: \"{}\"\n  debug_or_release: \"{}\"\n  spec: \"{}\"\n",
-        use_local, a.path, profile, spec_name
+        "espforge:\n  use_local: \"{}\"\n  path: \"{}\"\n  debug_or_release: \"{}\"\n",
+        use_local, a.path, profile
     );
-    std::fs::write(dir.join("answers.yaml"), text)
+    std::fs::write(dest.join("answers.yaml"), text)
         .map_err(|e| anyhow::anyhow!("failed to write answers.yaml: {e}"))?;
     Ok(())
 }
 
-/// Read `.espforge/answers.yaml` from the project root (the directory
-/// containing the spec), if present. Used by `build` to honour `use_local`
-/// when invoked directly rather than through `just`.
+/// Read `answers.yaml` from the project root (the directory containing the
+/// spec), if present. Used by `build` to honour `use_local` when invoked
+/// directly rather than through `just`.
 fn read_settings(spec_dir: &std::path::Path) -> Option<Answers> {
-    let path = spec_dir.join(".espforge").join("answers.yaml");
+    let path = spec_dir.join("answers.yaml");
     let text = std::fs::read_to_string(&path).ok()?;
     Some(read_answers_from_str(&text))
 }
@@ -649,9 +608,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("espforge_ans_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let mut f = std::fs::File::create(dir.join("answers.yaml")).unwrap();
+        // The carried-down shape: options wrapped under `espforge:`, quoted.
         write!(
             f,
-            "use_local: True\npath: /path/to/espforge\ndebug_or_release: release\n"
+            "espforge:\n  use_local: \"true\"\n  path: /path/to/espforge\n  debug_or_release: \"release\"\n"
         )
         .unwrap();
         drop(f);
@@ -682,7 +642,7 @@ mod tests {
             debug_or_release: Profile::Release,
         };
         let jf = justfile_content(&a);
-        assert!(jf.contains("export ESPFORGE_BINARY := \"/path/to/espforge\""));
+        assert!(jf.contains("export ESPFORGE_BINARY := \"/path/to/espforge/v2/target/release/espforge\""));
         assert!(jf.contains("cargo build --release"));
     }
 }
