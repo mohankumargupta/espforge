@@ -231,8 +231,10 @@ fn run_create(
     write_justfile(&dest, &answers)?;
     // Carry the answers down into the project as `answers.yaml` at the project
     // root, wrapped in `espforge:`. `espforge build` reads this so it honours
-    // `use_local` when run directly rather than through `just`.
-    write_settings(&dest, &answers)?;
+    // `use_local` when run directly rather than through `just`. `config`
+    // records the spec (project YAML) file name so it travels with the project.
+    let spec_name = format!("{name}.yaml");
+    write_settings(&dest, &answers, &spec_name)?;
     // diagram.json is optional; only copy if the template ships one.
     if let Some(d) = espforge_examples::asset(&example, "diagram.json") {
         std::fs::write(dest.join("diagram.json"), d)
@@ -440,72 +442,74 @@ fn read_answers_from_str(text: &str) -> Answers {
 }
 
 /// Render the per-project `justfile`. It carries the `answers.yaml` values as
-/// `just` variables prefixed `ESPFORGE_`, exporting them so that `espforge
-/// build` (invoked from a recipe) inherits them in its environment. `setup`/
-/// `create` write this into the created project folder (ADR-001).
+/// `just` variables, exporting `ESPFORGE_BINARY` so that `espforge build`
+/// (invoked from a recipe) inherits it in its environment. `setup`/`create`
+/// write this into the created project folder (ADR-001).
 ///
 /// The `ESPFORGE_BINARY` line is selected by `use_local` + host platform (see
 /// [`justfile_binary_lines`]): exactly one candidate is left *uncommented* and
-/// the rest are commented out. If `use_local`, the local binary path is derived
-/// from `path` (the espforge checkout) and substituted in; otherwise `espforge`
-/// on PATH (or `espforge.exe` on Windows) is selected.
+/// the rest remain commented out. When `use_local` is true, the local-binary
+/// placeholder is uncommented and replaced with the calculated path
+/// (`path/target/<profile>/espforge`, since `path` already points at the `v2`
+/// workspace); otherwise the PATH line (`espforge` on Linux, `espforge.exe` on
+/// Windows) is active.
 fn justfile_content(a: &Answers) -> String {
-    let use_local = if a.use_local { "true" } else { "false" };
     let cargo_flags = cargo_profile_flags(a.debug_or_release);
     format!(
         r#"set shell := ["sh", "-c"]
 set windows-shell := ["powershell", "-c"]
 
-# When true, generated projects use local espforge crates (built from this
-# checkout) instead of the published crates.io versions.
-export ESPFORGE_USE_LOCAL := "{use_local}"
 {lines}
 
 build:
     {{{{ ESPFORGE_BINARY }}}} build
     cd build ; cargo build{cargo_flags}
 "#,
-        use_local = use_local,
         lines = justfile_binary_lines(a),
         cargo_flags = cargo_flags,
     )
 }
 
-/// Produce the commented-out candidate `ESPFORGE_BINARY` declarations for the
-/// `justfile`, with exactly one left uncommented based on `use_local` and the
-/// host platform. Candidate set (order matters only for readability):
-///   - local build (this checkout): `<checkout>/v2/target/<profile>/espforge[.exe]`
-///   - local install on PATH:        `espforge` (or `espforge.exe` on Windows)
+/// Produce the three candidate `ESPFORGE_BINARY` declarations for the
+/// `justfile`, starting all commented out and leaving exactly one uncommented:
+///   1. local build of this checkout: `<path>/target/<profile>/espforge[.exe]`
+///   2. on PATH (Linux):              `espforge`
+///   3. on PATH (Windows):           `espforge.exe`
 ///
-/// When `use_local` is true the **local-build** line is uncommented and the
-/// PATH line is commented out; otherwise the PATH line is active and the
-/// local-build line is commented out. The binary path runs through
-/// [`platform_binary`] so it is correct on Windows.
+/// Selection:
+///   - `use_local == true`  -> uncomment line 1, substituting the binary path
+///     (derived from `path` + `debug_or_release`). Lines 2/3 stay commented.
+///   - `use_local == false` -> uncomment line 2 on Linux, line 3 on Windows;
+///     lines 1 stays commented.
 fn justfile_binary_lines(a: &Answers) -> String {
-    // `path` may point at the repo root (`../espforge`) or the `v2` workspace
-    // (`../espforge/v2`). Strip a trailing `/v2` so the `v2/target/...` suffix
-    // is always correct either way.
-    let checkout = a.path.trim_end_matches('/').trim_end_matches("/v2");
-    let local = platform_binary(checkout, cfg!(windows));
-    let local_binary = format!("{}/v2/target/{}/espforge", local, a.debug_or_release.target_dir());
-    let path_binary = platform_binary("espforge", cfg!(windows));
-    let (local_active, path_active) = if a.use_local {
-        (true, false)
-    } else {
-        (false, true)
-    };
-    let local_line = format!(
-        "{}export ESPFORGE_BINARY := \"{}\"",
-        if local_active { "" } else { "# " },
+    let local_binary = platform_binary(
+        &format!("{}/target/{}/espforge", a.path.trim_end_matches('/'), a.debug_or_release.target_dir()),
+        cfg!(windows),
+    );
+    // Line 1: local build. Active only when use_local; otherwise kept as the
+    // `/path/to/espforge_binary` placeholder for the user to edit.
+    let local_prefix = if a.use_local { "" } else { "#" };
+    let local_value = if a.use_local {
         local_binary
-    );
-    let path_line = format!(
-        "{}export ESPFORGE_BINARY := \"{}\"",
-        if path_active { "" } else { "# " },
-        path_binary
-    );
+    } else {
+        "/path/to/espforge_binary".to_string()
+    };
+    // Lines 2/3: PATH installs. Active when !use_local, by platform.
+    let (linux_active, windows_active) = if a.use_local {
+        (false, false)
+    } else {
+        (true, cfg!(windows))
+    };
+    let linux_prefix = if linux_active { "" } else { "#" };
+    let windows_prefix = if windows_active { "" } else { "#" };
     format!(
-        "# Local build of this checkout (uncomment / edit to taste):\n{local_line}\n# On PATH (release installed via `cargo install`):\n{path_line}"
+        "{local_prefix}export ESPFORGE_BINARY := \"{local_value}\"\n\
+         {linux_prefix}export ESPFORGE_BINARY := \"espforge\"\n\
+         {windows_prefix}export ESPFORGE_BINARY := \"espforge.exe\"",
+        local_prefix = local_prefix,
+        local_value = local_value,
+        linux_prefix = linux_prefix,
+        windows_prefix = windows_prefix,
     )
 }
 
@@ -543,15 +547,15 @@ fn write_justfile(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
 /// spec), wrapped in an `espforge:` mapping. `espforge build` reads this to
 /// honour `use_local` when run directly rather than through `just`. Env vars
 /// take precedence.
-fn write_settings(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
+fn write_settings(dest: &std::path::Path, a: &Answers, config: &str) -> anyhow::Result<()> {
     let use_local = if a.use_local { "true" } else { "false" };
     let profile = match a.debug_or_release {
         Profile::Release => "release",
         Profile::Debug => "debug",
     };
     let text = format!(
-        "espforge:\n  use_local: \"{}\"\n  path: \"{}\"\n  debug_or_release: \"{}\"\n",
-        use_local, a.path, profile
+        "espforge:\n  use_local: \"{}\"\n  path: \"{}\"\n  debug_or_release: \"{}\"\n  config: \"{}\"\n",
+        use_local, a.path, profile, config
     );
     std::fs::write(dest.join("answers.yaml"), text)
         .map_err(|e| anyhow::anyhow!("failed to write answers.yaml: {e}"))?;
@@ -635,14 +639,38 @@ mod tests {
     }
 
     #[test]
-    fn justfile_uses_platform_binary_and_profile() {
+    fn justfile_local_uses_calculated_binary() {
         let a = Answers {
             use_local: true,
             path: "/path/to/espforge".to_string(),
             debug_or_release: Profile::Release,
         };
         let jf = justfile_content(&a);
-        assert!(jf.contains("export ESPFORGE_BINARY := \"/path/to/espforge/v2/target/release/espforge\""));
+        // Local build: uncommented, with calculated path (no extra /v2 since
+        // `path` already points at the v2 workspace).
+        assert!(jf.contains("export ESPFORGE_BINARY := \"/path/to/espforge/target/release/espforge\""));
+        // PATH candidates stay commented.
+        assert!(jf.contains("#export ESPFORGE_BINARY := \"espforge\""));
         assert!(jf.contains("cargo build --release"));
+    }
+
+    #[test]
+    fn justfile_nonlocal_uncomments_path_binary() {
+        let a = Answers {
+            use_local: false,
+            path: "/path/to/espforge".to_string(),
+            debug_or_release: Profile::Debug,
+        };
+        let jf = justfile_content(&a);
+        // Local placeholder stays commented.
+        assert!(jf.contains("#export ESPFORGE_BINARY := \"/path/to/espforge_binary\""));
+        // On Linux, the `espforge` PATH line is active; `espforge.exe` commented.
+        if cfg!(windows) {
+            assert!(jf.contains("export ESPFORGE_BINARY := \"espforge.exe\""));
+            assert!(jf.contains("#export ESPFORGE_BINARY := \"espforge\""));
+        } else {
+            assert!(jf.contains("export ESPFORGE_BINARY := \"espforge\""));
+            assert!(jf.contains("#export ESPFORGE_BINARY := \"espforge.exe\""));
+        }
     }
 }
