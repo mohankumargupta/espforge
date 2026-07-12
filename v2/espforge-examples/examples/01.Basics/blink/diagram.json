@@ -2,12 +2,16 @@
   "version": 1,
   "author": "espforge",
   "editor": "wokwi",
+  "refs": {
+    "led_pin": "$red_led.pin",
+    "gnd": "board:GND.2"
+  },
   "parts": [
-    { "type": "PLACEHOLDER_WOKWI_BOARD", "id": "board", "top": 0, "left": 0 },
-    { "type": "wokwi-led", "id": "led1", "top": -40, "left": 96, "attrs": { "color": "red", "gpio": "PLACEHOLDER_GPIO" } }
+    { "type": "$board", "id": "board", "top": 0, "left": 0 },
+    { "type": "wokwi-led", "id": "led1", "top": -40, "left": 96, "attrs": { "color": "red", "gpio": "$led_pin" } }
   ],
   "connections": [
-    [ "led1:Anode", "board:PLACEHOLDER_GPIO", "green", [] ],
-    [ "led1:Cathode", "board:PLACEHOLDER_GND_BOTTOM_RIGHT", "black", [] ]
+    [ "led1:Anode", "board:$led_pin", "green", [] ],
+    [ "led1:Cathode", "$gnd", "black", [] ]
   ]
 }

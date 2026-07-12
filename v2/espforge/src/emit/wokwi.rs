@@ -1,11 +1,27 @@
-//! Wokwi simulation assets: `diagram.json` (with placeholders resolved from the
-//! IR) and a generated `wokwi.toml` pointing `elf`/`firmware` at the compiled
-//! binary. See the grilling notes — `setup` copies the example's assets
-//! verbatim into the project root; `build` resolves placeholders and writes
-//! fresh copies into `out` (always overriding, Grill 3).
+//! Wokwi simulation assets: `diagram.json` (with `$yaml_ref` tokens resolved
+//! from the project YAML / IR) and a generated `wokwi.toml` pointing
+//! `elf`/`firmware` at the compiled binary.
+//!
+//! The `diagram.json` template (copied verbatim by `setup` into the project
+//! root) may use a small, YAML-tied token scheme so the wiring is obvious:
+//!
+//! - `$<peripheral>`   — a gpio/i2c/spi peripheral ref from the YAML, e.g.
+//!   `$gpio2` resolves to `GPIO18` (the physical pin).
+//! - `$<component>.<pin>` — a component instance + its logical pin, e.g.
+//!   `$red_led.pin` resolves to the GPIO the `red_led` component drives.
+//! - `$board`           — the wokwi board type for the target chip, e.g.
+//!   `board-esp32-c3-devkitm-1`.
+//! - `refs` (top-level, optional) — named aliases expanded first, e.g.
+//!   `"led_pin": "$red_led.pin"` then used as `$led_pin`; board-literal pins
+//!   are bound here too, e.g. `"gnd": "board:GND.2"`.
+//!
+//! `build` expands `refs`, resolves every `$token`, and writes a clean,
+//! token-free `diagram.json` into `out` (always overriding). The template is
+//! never fed to wokwi, so the extra `refs` key and `$tokens` are harmless.
 
 use anyhow::Result;
 use espforge_model::ir::DeviceTree;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Wokwi board type per esp32 target chip.
@@ -37,40 +53,144 @@ fn target_triple(target: &str) -> &'static str {
     }
 }
 
-/// The physical GPIO pin (e.g. `GPIO18`) driven by the first `led` instance,
-/// used to resolve the `PLACEHOLDER_GPIO` token in the diagram. We read the
-/// instance's own pin number (the physical board pin wokwi expects) rather than
-/// the esp_hal peripheral `field`, which is also the physical pin but reached
-/// indirectly. Falls back to the first LED-less resolved pin when no led.
-fn led_gpio_field(ir: &DeviceTree) -> Option<String> {
-    ir.instances
+/// Physical GPIO pin (e.g. `GPIO18`) for a peripheral ref name (`gpio2`) or a
+/// `component.pin` expression, by looking the name up in the IR.
+fn resolve_token(ir: &DeviceTree, token: &str) -> Option<String> {
+    let target = ir.meta.target.as_deref().unwrap_or("esp32c3");
+    if token == "board" {
+        return Some(board_type(target).to_string());
+    }
+    // `component.pin` form.
+    if let Some((inst, field)) = token.split_once('.') {
+        if let Some(instance) = ir.instances.iter().find(|i| i.id == inst) {
+            // Map the logical pin name to the instance's first GPIO pin. Most
+            // components drive a single pin; multi-pin components (i2c, spi)
+            // resolve their first pin here and can be extended later.
+            if field == "pin" || !instance.pins.is_empty() {
+                if let Some(p) = instance.pins.first() {
+                    return Some(format!("GPIO{}", p.number));
+                }
+            }
+        }
+        return None;
+    }
+    // Bare peripheral ref name, e.g. `gpio2`.
+    ir.peripherals
         .iter()
-        .find(|i| i.kind == "led")
-        .and_then(|i| i.pins.first())
-        .or_else(|| {
-            ir.instances
-                .iter()
-                .find(|i| !i.pins.is_empty())
-                .and_then(|i| i.pins.first())
-        })
+        .find(|p| p.name == token)
         .map(|p| format!("GPIO{}", p.number))
 }
 
-/// Resolve the placeholder tokens in a `diagram.json` template against the IR.
-/// Tokens: `PLACEHOLDER_WOKWI_BOARD`, `PLACEHOLDER_GPIO`,
-/// `PLACEHOLDER_GND_BOTTOM_RIGHT`.
-fn resolve_diagram_tokens(ir: &DeviceTree, template: &str) -> String {
-    let target = ir.meta.target.as_deref().unwrap_or("esp32c3");
-    let board = board_type(target);
-    let gpio = led_gpio_field(ir).unwrap_or_else(|| "GPIO2".to_string());
-    template
-        .replace("PLACEHOLDER_WOKWI_BOARD", board)
-        .replace("PLACEHOLDER_GPIO", &gpio)
-        .replace("PLACEHOLDER_GND_BOTTOM_RIGHT", "GND.2")
+/// Expand the top-level `refs` map (one level of indirection) and then resolve
+/// every `$token` in the template text. Tokens that cannot be resolved are left
+/// untouched (visible in the output as a signal something is misnamed).
+fn substitute_tokens(ir: &DeviceTree, template: &str) -> String {
+    // Read the `refs` map via serde (the template is valid JSON; wokwi ignores
+    // unknown top-level keys, so the extra `refs` is harmless there).
+    let mut refs: HashMap<String, String> = HashMap::new();
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(template) {
+        if let Some(map) = value.get("refs").and_then(|r| r.as_object()) {
+            for (k, v) in map {
+                if let Some(s) = v.as_str() {
+                    refs.insert(k.clone(), s.to_string());
+                }
+            }
+        }
+    }
+
+    // Expand refs first (single pass; ref values should not reference other
+    // refs to avoid loops).
+    let mut text = template.to_string();
+    for (k, v) in &refs {
+        text = text.replace(&format!("${k}"), v);
+    }
+    // Then resolve remaining `$token` occurrences.
+    let resolved = resolve_all_tokens(ir, &text);
+    // The `refs` map is template-only metadata; strip it so the build copy is a
+    // clean wokwi file (wokwi would ignore it anyway, but this keeps the output
+    // tidy and token-free).
+    strip_refs(&resolved)
 }
 
-/// Copy the project's `diagram.json` (if present) into `out`, resolving
-/// placeholders. Always overwrites the build copy (it is generated output).
+/// Remove the top-level `"refs": { ... }` object from a JSON document, leaving
+/// the rest of the text untouched. Consumes a preceding comma and trims the
+/// whitespace run that followed it so the remaining JSON stays valid.
+fn strip_refs(text: &str) -> String {
+    let open = match text.find("\"refs\"") {
+        Some(i) => i,
+        None => return text.to_string(),
+    };
+    // Find the `{` that opens the refs object (after "refs":).
+    let brace = match text[open..].find('{') {
+        Some(j) => open + j,
+        None => return text.to_string(),
+    };
+    let mut depth = 0i32;
+    let mut end = brace;
+    for (i, c) in text[brace..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = brace + i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    // The segment to drop is `,` (or `, `) before "refs" through the closing
+    // `}` of the object. Find the comma preceding "refs".
+    let comma = text[..open].rfind(',');
+    let drop_start = comma.unwrap_or(open);
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&text[..drop_start]);
+    // Skip the whitespace after the dropped segment up to the next non-space.
+    let mut rest = text[end + 1..].char_indices();
+    let after = rest
+        .find(|(_, c)| !c.is_whitespace())
+        .map(|(i, _)| i)
+        .unwrap_or(text[end + 1..].len());
+    out.push_str(&text[end + 1 + after..]);
+    out
+}
+
+/// Replace every `$token` in `text` with its resolved value (or leave it if
+/// unresolved). A token is `$` followed by `[A-Za-z0-9_.]+`.
+fn resolve_all_tokens(ir: &DeviceTree, text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len()
+                && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || bytes[j] == b'.')
+            {
+                j += 1;
+            }
+            let token = &text[start..j];
+            match resolve_token(ir, token) {
+                Some(resolved) => out.push_str(&resolved),
+                None => {
+                    out.push('$');
+                    out.push_str(token);
+                }
+            }
+            i = j;
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Copy the project's `diagram.json` (if present) into `out`, expanding `refs`
+/// and resolving `$yaml_ref` tokens. Always overwrites the build copy (it is
+/// generated output).
 pub fn resolve_diagram(project_dir: &Path, out: &Path, ir: &DeviceTree) -> Result<()> {
     let src = project_dir.join("diagram.json");
     if !src.exists() {
@@ -78,15 +198,15 @@ pub fn resolve_diagram(project_dir: &Path, out: &Path, ir: &DeviceTree) -> Resul
     }
     let template = std::fs::read_to_string(&src)
         .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", src.display()))?;
-    let resolved = resolve_diagram_tokens(ir, &template);
+    let resolved = substitute_tokens(ir, &template);
     std::fs::write(out.join("diagram.json"), resolved)
         .map_err(|e| anyhow::anyhow!("failed to write diagram.json: {e}"))?;
     Ok(())
 }
 
 /// Generate `wokwi.toml` in `out` pointing `elf`/`firmware` at the compiled
-/// binary (`target/<triple>/<profile>/<name>`), bare binary (no `.elf`,
-/// Grill 2). Always overwrites (Grill 3).
+/// binary (`target/<triple>/<profile>/<name>`), bare binary (no `.elf`). Always
+/// overwrites.
 pub fn write_wokwi_toml(out: &Path, ir: &DeviceTree, profile: &str) -> Result<()> {
     let target = ir.meta.target.as_deref().unwrap_or("esp32c3");
     let triple = target_triple(target);
