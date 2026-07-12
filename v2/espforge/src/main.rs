@@ -393,22 +393,22 @@ fn platform_binary(path: &str, is_windows: bool) -> String {
 /// project's `out` directory. Returns `None` only if `from` ends up escaping
 /// with no common root.
 fn diff_paths(from: &std::path::Path, base: &std::path::Path) -> Option<String> {
-    // Lexically normalise: drop `.`, and collapse `..` against the preceding
-    // non-`..` component (a leading `..` is preserved).
+    // Lexically normalise: drop `.`, and cancel a `..` against the preceding
+    // concrete component only. A `..` that has no concrete component to cancel
+    // (leading `..`, or consecutive `..`) is preserved — unlike std path
+    // canonicalisation, which would error or stop at a root.
     fn norm(p: &std::path::Path) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for c in p.components() {
             let s = c.as_os_str().to_string_lossy().into_owned();
             match s.as_str() {
                 "." => {}
-                ".." => {
-                    if out.last().map(|l| l.as_str()) != Some("..") {
+                ".." => match out.last().map(|l| l.as_str()) {
+                    Some("..") | None => out.push("..".to_string()),
+                    Some(_) => {
                         out.pop();
                     }
-                    if out.is_empty() {
-                        out.push("..".to_string());
-                    }
-                }
+                },
                 other => out.push(other.to_string()),
             }
         }
