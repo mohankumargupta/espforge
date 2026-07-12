@@ -31,6 +31,12 @@ pub struct EspforgeMeta {
     /// Runtime: `blocking` or `embassy`.
     #[serde(default)]
     pub runtime: Runtime,
+    /// Name of the spec (project YAML) file this project was bootstrapped
+    /// from. Written by `setup`/`create` as a self-pointer under `espforge:`
+    /// so the spec is discoverable even when its on-disk name differs from the
+    /// project folder name. Optional; ignored if absent.
+    #[serde(default)]
+    pub spec: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

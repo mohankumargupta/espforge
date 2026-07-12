@@ -224,8 +224,17 @@ fn run_create(
     //    src/app.rs, diagram.json (optional).
     std::fs::create_dir_all(dest.join("src"))
         .map_err(|e| anyhow::anyhow!("failed to create {}: {e}", dest.display()))?;
+    // The spec (project YAML) is written with a `spec:` self-pointer under the
+    // `espforge:` block naming this very file, so the spec is discoverable even
+    // when its on-disk name differs from the project folder name.
     copy_spec(&example, &name, &dest)?;
     copy_app(&example, &dest)?;
+    // Carry the optional `answers.yaml` (cwd) into the project folder so it
+    // travels with the created project.
+    if let Some(a) = read_optional_file(std::path::Path::new("."), "answers.yaml") {
+        std::fs::write(dest.join("answers.yaml"), a)
+            .map_err(|e| anyhow::anyhow!("failed to write answers.yaml: {e}"))?;
+    }
     // Write the justfile derived from answers.yaml (ADR-001).
     write_justfile(&dest, &answers)?;
     // Persist the answers so `espforge build` honours them when run directly.
@@ -276,14 +285,49 @@ fn prompt_example() -> anyhow::Result<String> {
 }
 
 /// Copy the example's spec (any embedded `.yaml` containing `espforge:`) to
-/// `<dest>/<name>.yaml`. The destination is always named after the project.
+/// `<dest>/<name>.yaml`, injecting a `spec: <name>.yaml` line under the
+/// `espforge:` block so the file names itself. The destination is always named
+/// after the project.
 fn copy_spec(example: &str, name: &str, dest: &std::path::Path) -> anyhow::Result<()> {
     let spec = espforge_examples::example_spec(example)
         .ok_or_else(|| anyhow::anyhow!("template `{example}` has no project spec"))?;
-    let dest_path = dest.join(format!("{name}.yaml"));
-    std::fs::write(dest_path, spec)
+    let spec_text = String::from_utf8_lossy(spec);
+    let spec_name = format!("{name}.yaml");
+    let injected = inject_spec_field(&spec_text, &spec_name);
+    let dest_path = dest.join(&spec_name);
+    std::fs::write(dest_path, injected)
         .map_err(|e| anyhow::anyhow!("failed to write spec: {e}"))?;
     Ok(())
+}
+
+/// Insert `spec: <spec_name>` into the `espforge:` block of a project YAML,
+/// after the `espforge:` key line. If the file already declares a `spec:`,
+/// it is left untouched (idempotent). If `espforge:` is missing, the text is
+/// returned unchanged. Re-serializing through the typed `Project` is avoided
+/// so user comments and layout in the template are preserved verbatim.
+fn inject_spec_field(yaml: &str, spec_name: &str) -> String {
+    let mut out = String::with_capacity(yaml.len() + 64);
+    let mut injected = false;
+    for line in yaml.lines() {
+        out.push_str(line);
+        out.push('\n');
+        if injected {
+            continue;
+        }
+        let trimmed = line.trim_start();
+        if trimmed == "espforge:" {
+            out.push_str(&format!("  spec: {}\n", spec_name));
+            injected = true;
+        }
+    }
+    out
+}
+
+/// Read a file from `dir` if it exists, returning its bytes. Missing or
+/// unreadable files yield `None` (used for optional companion files like
+/// `answers.yaml`).
+fn read_optional_file(dir: &std::path::Path, name: &str) -> Option<Vec<u8>> {
+    std::fs::read(dir.join(name)).ok()
 }
 
 /// Copy `<example>/app/rust/app.rs` to `<dest>/src/app.rs` (user-owned).
