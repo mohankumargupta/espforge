@@ -227,18 +227,17 @@ fn run_create(
     // The spec (project YAML) is written with a `spec:` self-pointer under the
     // `espforge:` block naming this very file, so the spec is discoverable even
     // when its on-disk name differs from the project folder name.
+    let spec_name = format!("{name}.yaml");
     copy_spec(&example, &name, &dest)?;
     copy_app(&example, &dest)?;
-    // Carry the optional `answers.yaml` (cwd) into the project folder so it
-    // travels with the created project.
-    if let Some(a) = read_optional_file(std::path::Path::new("."), "answers.yaml") {
-        std::fs::write(dest.join("answers.yaml"), a)
-            .map_err(|e| anyhow::anyhow!("failed to write answers.yaml: {e}"))?;
-    }
-    // Write the justfile derived from answers.yaml (ADR-001).
+    // Write the justfile derived from answers.yaml (ADR-001). It lives under
+    // `.espforge/` next to the carried-down `answers.yaml`.
     write_justfile(&dest, &answers)?;
-    // Persist the answers so `espforge build` honours them when run directly.
-    write_settings(&dest, &answers)?;
+    // Carry the answers down into the project as `.espforge/answers.yaml`,
+    // wrapped in `espforge:` with a `spec:` self-pointer naming the project
+    // YAML. `espforge build` reads this so it honours `use_local` when run
+    // directly rather than through `just`.
+    write_settings(&dest, &answers, &spec_name)?;
     // diagram.json is optional; only copy if the template ships one.
     if let Some(d) = espforge_examples::asset(&example, "diagram.json") {
         std::fs::write(dest.join("diagram.json"), d)
@@ -323,13 +322,6 @@ fn inject_spec_field(yaml: &str, spec_name: &str) -> String {
     out
 }
 
-/// Read a file from `dir` if it exists, returning its bytes. Missing or
-/// unreadable files yield `None` (used for optional companion files like
-/// `answers.yaml`).
-fn read_optional_file(dir: &std::path::Path, name: &str) -> Option<Vec<u8>> {
-    std::fs::read(dir.join(name)).ok()
-}
-
 /// Copy `<example>/app/rust/app.rs` to `<dest>/src/app.rs` (user-owned).
 fn copy_app(example: &str, dest: &std::path::Path) -> anyhow::Result<()> {
     let app = espforge_examples::asset(example, "app/rust/app.rs")
@@ -340,30 +332,37 @@ fn copy_app(example: &str, dest: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Options read from an optional `answers.yaml` in the current working dir
-/// (design §17.1). They control how `setup`/`create` bootstrap the project —
-/// most importantly which espforge binary `just build` invokes, whether the
-/// generated project depends on local espforge crates, and whether the
-/// generated firmware is built in debug or release. Also persisted as
-/// `.espforge/settings.json` so that `espforge build` honours them when run
-/// directly (not just via `just`).
+/// Options that control how `setup`/`create` bootstrap a project (design
+/// §17.1). `use_local` selects local espforge crates vs published crates.io;
+/// `path` is the espforge checkout (used to compute the local binary path when
+/// `use_local`); `debug_or_release` selects the `cargo build` profile. These
+/// are read from an `answers.yaml` in the cwd (the carried config) and written
+/// back into the project folder as `answers.yaml` with a `spec:` self-pointer.
 ///
 /// Defaults (when `answers.yaml` is absent or a field is omitted):
 /// - `use_local: false`        → generated code uses published crates.io deps
-/// - `path: espforge`          → the `just` recipe shells out to the `espforge`
-///                               on PATH (on Windows this defaults to
-///                               `espforge.exe`, see [`platform_binary`])
+/// - `path: espforge`          → the local binary defaults to `espforge` on PATH
+///                               (on Windows this is `espforge.exe`)
 /// - `debug_or_release: debug` → `just build` runs a plain `cargo build`
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 struct Answers {
     use_local: bool,
     path: String,
     debug_or_release: Profile,
 }
 
+impl Default for Answers {
+    fn default() -> Self {
+        Answers {
+            use_local: false,
+            path: default_binary(cfg!(windows)),
+            debug_or_release: Profile::Debug,
+        }
+    }
+}
+
 /// Which profile `just build` compiles the generated firmware with.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum Profile {
     #[default]
     Debug,
@@ -405,43 +404,70 @@ fn platform_binary(path: &str, is_windows: bool) -> String {
     path.to_string()
 }
 
-/// Read `answers.yaml` from `dir` if present. Missing file or unreadable
-/// content falls back to the defaults (this is an optional convenience file,
-/// not a hard requirement).
+/// Read `answers.yaml` from `dir` if present. The file may be wrapped in a
+/// top-level `espforge:` mapping (the carried-down shape); bare keys are also
+/// accepted for convenience. Missing file or unreadable content falls back to
+/// the defaults (this is an optional convenience file, not a hard requirement).
 ///
 /// Defaults: `use_local = false` (published crates.io deps), `path` =
 /// `espforge` (or `espforge.exe` on Windows), and `debug_or_release = debug`.
 fn read_answers(dir: &std::path::Path) -> Answers {
-    let mut a = Answers {
-        use_local: false,
-        path: default_binary(cfg!(windows)),
-        debug_or_release: Profile::default(),
-    };
     let path = dir.join("answers.yaml");
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return a;
-    };
+    match std::fs::read_to_string(&path) {
+        Ok(text) => read_answers_from_str(&text),
+        Err(_) => Answers::default(),
+    }
+}
+
+/// Parse `answers.yaml` text into [`Answers`]. The file may be wrapped in a
+/// top-level `espforge:` mapping (the carried-down shape) or use bare keys.
+/// Unparseable content or a missing `espforge:` mapping falls back to the
+/// defaults (this is an optional convenience file, not a hard requirement).
+fn read_answers_from_str(text: &str) -> Answers {
+    let mut a = Answers::default();
+    // Fields are parsed as strings (the carried-down `answers.yaml` quotes
+    // them, e.g. `use_local: "false"`) and normalised below, so both bare and
+    // quoted forms are accepted.
     #[derive(serde::Deserialize)]
     struct Raw {
         #[serde(default)]
-        use_local: Option<bool>,
+        use_local: Option<String>,
         #[serde(default)]
         path: Option<String>,
-        #[serde(default)]
-        debug_or_release: Option<Profile>,
+        #[serde(default, rename = "debug_or_release")]
+        debug_or_release: Option<String>,
     }
-    let raw: Raw = match serde_yaml_ng::from_str(&text) {
-        Ok(r) => r,
+    // Parse as a generic mapping first: if the file nests the options under a
+    // top-level `espforge:` key (the carried-down shape), read from there.
+    // Otherwise fall back to bare keys at the top level. A bare-keys
+    // `from_str::<Raw>` always "succeeds" (all fields optional, extra keys
+    // ignored), so it must only be used when there is no `espforge:` wrapper.
+    let raw: Raw = match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text) {
+        Ok(value) => match value.get("espforge").and_then(|e| e.as_mapping()) {
+            // `espforge:`-wrapped shape.
+            Some(map) => match serde_yaml_ng::from_value::<Raw>(serde_yaml_ng::Value::Mapping(map.clone())) {
+                Ok(r) => r,
+                Err(_) => return a,
+            },
+            // No `espforge:` wrapper -> bare keys at top level.
+            None => match serde_yaml_ng::from_value::<Raw>(value) {
+                Ok(r) => r,
+                Err(_) => return a,
+            },
+        },
         Err(_) => return a,
     };
     if let Some(v) = raw.use_local {
-        a.use_local = v;
+        a.use_local = matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes");
     }
     if let Some(v) = raw.path {
         a.path = v;
     }
     if let Some(v) = raw.debug_or_release {
-        a.debug_or_release = v;
+        a.debug_or_release = match v.trim().to_ascii_lowercase().as_str() {
+            "release" => Profile::Release,
+            _ => Profile::Debug,
+        };
     }
     a
 }
@@ -451,12 +477,13 @@ fn read_answers(dir: &std::path::Path) -> Answers {
 /// build` (invoked from a recipe) inherits them in its environment. `setup`/
 /// `create` write this into the created project folder (ADR-001).
 ///
-/// The binary `just` shells out to is run through [`platform_binary`] so it is
-/// correct on Windows (`espforge.exe`). The `cargo build` profile is driven by
-/// `debug_or_release` via the cross-platform `--release` flag.
+/// The `ESPFORGE_BINARY` line is selected by `use_local` + host platform (see
+/// [`justfile_binary_lines`]): exactly one candidate is left *uncommented* and
+/// the rest are commented out. If `use_local`, the local binary path is derived
+/// from `path` (the espforge checkout) and substituted in; otherwise `espforge`
+/// on PATH (or `espforge.exe` on Windows) is selected.
 fn justfile_content(a: &Answers) -> String {
     let use_local = if a.use_local { "true" } else { "false" };
-    let binary = platform_binary(&a.path, cfg!(windows));
     let cargo_flags = cargo_profile_flags(a.debug_or_release);
     format!(
         r#"set shell := ["sh", "-c"]
@@ -465,17 +492,53 @@ set windows-shell := ["powershell", "-c"]
 # When true, generated projects use local espforge crates (built from this
 # checkout) instead of the published crates.io versions.
 export ESPFORGE_USE_LOCAL := "{use_local}"
-# Path to the espforge binary `just build` shells out to (on Windows this
-# resolves to espforge.exe).
-export ESPFORGE_BINARY := "{binary}"
+{lines}
 
 build:
     {{{{ ESPFORGE_BINARY }}}} build
     cd build ; cargo build{cargo_flags}
 "#,
         use_local = use_local,
-        binary = binary,
+        lines = justfile_binary_lines(a),
         cargo_flags = cargo_flags,
+    )
+}
+
+/// Produce the commented-out candidate `ESPFORGE_BINARY` declarations for the
+/// `justfile`, with exactly one left uncommented based on `use_local` and the
+/// host platform. Candidate set (order matters only for readability):
+///   - local build (this checkout): `<checkout>/v2/target/<profile>/espforge[.exe]`
+///   - local install on PATH:        `espforge` (or `espforge.exe` on Windows)
+///
+/// When `use_local` is true the **local-build** line is uncommented and the
+/// PATH line is commented out; otherwise the PATH line is active and the
+/// local-build line is commented out. The binary path runs through
+/// [`platform_binary`] so it is correct on Windows.
+fn justfile_binary_lines(a: &Answers) -> String {
+    // `path` may point at the repo root (`../espforge`) or the `v2` workspace
+    // (`../espforge/v2`). Strip a trailing `/v2` so the `v2/target/...` suffix
+    // is always correct either way.
+    let checkout = a.path.trim_end_matches('/').trim_end_matches("/v2");
+    let local = platform_binary(checkout, cfg!(windows));
+    let local_binary = format!("{}/v2/target/{}/espforge", local, a.debug_or_release.target_dir());
+    let path_binary = platform_binary("espforge", cfg!(windows));
+    let (local_active, path_active) = if a.use_local {
+        (true, false)
+    } else {
+        (false, true)
+    };
+    let local_line = format!(
+        "{}export ESPFORGE_BINARY := \"{}\"",
+        if local_active { "" } else { "# " },
+        local_binary
+    );
+    let path_line = format!(
+        "{}export ESPFORGE_BINARY := \"{}\"",
+        if path_active { "" } else { "# " },
+        path_binary
+    );
+    format!(
+        "# Local build of this checkout (uncomment / edit to taste):\n{local_line}\n# On PATH (release installed via `cargo install`):\n{path_line}"
     )
 }
 
@@ -488,37 +551,61 @@ fn cargo_profile_flags(profile: Profile) -> &'static str {
     }
 }
 
-/// Write the `justfile` (derived from `answers.yaml`) into the created project
-/// folder, then report it as an available recipe.
+/// The cargo target subdirectory a profile builds into (`debug` or `release`),
+/// used to derive the local espforge binary path under `path/v2/target/...`.
+impl Profile {
+    fn target_dir(self) -> &'static str {
+        match self {
+            Profile::Release => "release",
+            Profile::Debug => "debug",
+        }
+    }
+}
+
+/// Write the `justfile` (derived from `answers.yaml`) into `.espforge/` inside
+/// the created project folder, then report it as an available recipe. The
+/// `justfile` lives in `.espforge/` so it can read `.espforge/answers.yaml`
+/// relative to itself.
 fn write_justfile(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
+    let dir = dest.join(".espforge");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| anyhow::anyhow!("failed to create .espforge: {e}"))?;
     let content = justfile_content(a);
-    std::fs::write(dest.join("justfile"), content)
+    std::fs::write(dir.join("justfile"), content)
         .map_err(|e| anyhow::anyhow!("failed to write justfile: {e}"))?;
     Ok(())
 }
 
-/// Persist the answers as `.espforge/settings.json` inside the project folder
-/// so that `espforge build` (run directly, not via `just`) still honours
-/// `use_local`, the `path`, and `debug_or_release` (ADR-001). Env vars take
-/// precedence over this file at build time.
-fn write_settings(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
+/// Write the carried-down `answers.yaml` into the project folder (alongside the
+/// spec). It is wrapped in an `espforge:` mapping and carries a `spec:`
+/// self-pointer naming the project YAML, so it mirrors the spec and is
+/// discoverable. `espforge build` reads `.espforge/answers.yaml` to honour
+/// `use_local` when run directly (not via `just`). Env vars take precedence.
+fn write_settings(dest: &std::path::Path, a: &Answers, spec_name: &str) -> anyhow::Result<()> {
     let dir = dest.join(".espforge");
     std::fs::create_dir_all(&dir)
         .map_err(|e| anyhow::anyhow!("failed to create .espforge: {e}"))?;
-    let json = serde_json::to_string_pretty(a)
-        .map_err(|e| anyhow::anyhow!("failed to serialize settings: {e}"))?;
-    std::fs::write(dir.join("settings.json"), json)
-        .map_err(|e| anyhow::anyhow!("failed to write settings.json: {e}"))?;
+    let use_local = if a.use_local { "true" } else { "false" };
+    let profile = match a.debug_or_release {
+        Profile::Release => "release",
+        Profile::Debug => "debug",
+    };
+    let text = format!(
+        "espforge:\n  use_local: \"{}\"\n  path: \"{}\"\n  debug_or_release: \"{}\"\n  spec: \"{}\"\n",
+        use_local, a.path, profile, spec_name
+    );
+    std::fs::write(dir.join("answers.yaml"), text)
+        .map_err(|e| anyhow::anyhow!("failed to write answers.yaml: {e}"))?;
     Ok(())
 }
 
-/// Read `.espforge/settings.json` from the project root (the directory
+/// Read `.espforge/answers.yaml` from the project root (the directory
 /// containing the spec), if present. Used by `build` to honour `use_local`
 /// when invoked directly rather than through `just`.
 fn read_settings(spec_dir: &std::path::Path) -> Option<Answers> {
-    let path = spec_dir.join(".espforge").join("settings.json");
+    let path = spec_dir.join(".espforge").join("answers.yaml");
     let text = std::fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&text).ok()
+    Some(read_answers_from_str(&text))
 }
 
 #[cfg(test)]
