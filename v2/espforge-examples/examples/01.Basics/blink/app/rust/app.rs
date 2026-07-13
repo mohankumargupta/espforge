@@ -8,7 +8,6 @@ pub fn forever(mut ctx: &mut crate::Context) {
     let mut led = crate::component!(ctx, red_led);
     loop {
         led.toggle();
-        // Timing is application logic — espforge does not own it.
-        // Insert a delay (e.g. `esp_hal::Delay::new().delay_ms(500)`) for a visible blink.
+        ctx.delay.delay_ms(1000);
     }
 }
