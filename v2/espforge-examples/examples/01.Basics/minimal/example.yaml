@@ -1,0 +1,3 @@
+espforge:
+  name: minimal
+  chip: esp32c3
