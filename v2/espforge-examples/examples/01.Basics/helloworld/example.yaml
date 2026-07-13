@@ -1,3 +1,9 @@
 espforge:
-  name: helloworld
-  chip: esp32c3
+  name: minimal
+  target: esp32c3
+  runtime: blocking
+
+esp32: {}
+components: {}
+devices: {}
+  
