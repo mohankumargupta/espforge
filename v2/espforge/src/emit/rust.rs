@@ -297,7 +297,7 @@ pub use generated::{Components, Devices, PeripheralRegistry};
 #[macro_export]
 macro_rules! component {
     ($ctx:expr, $name:ident) => {
-        &$ctx.components.$name
+        &mut $ctx.components.$name
     };
 }
 
@@ -306,7 +306,7 @@ macro_rules! component {
 #[macro_export]
 macro_rules! device {
     ($ctx:expr, $name:ident) => {
-        &$ctx.devices.$name
+        &mut $ctx.devices.$name
     };
 }
 
