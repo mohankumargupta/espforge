@@ -206,6 +206,13 @@ esp-println = {{ version = "*", features = ["{chip}", "log-04"] }}
 static_cell = "*"
 {embassy}{alloc}
 
+# Name the binary explicitly so it matches the package name (and the path
+# wokwi.toml points at). Without this, Cargo names the binary after the
+# `src/bin/main.rs` file stem ("main"), producing no `blink` binary.
+[[bin]]
+name = "{name}"
+path = "src/bin/main.rs"
+
 [profile.release]
 debug = true
 
