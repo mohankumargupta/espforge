@@ -522,13 +522,13 @@ fn read_answers(dir: &std::path::Path) -> Answers {
 /// defaults (this is an optional convenience file, not a hard requirement).
 fn read_answers_from_str(text: &str) -> Answers {
     let mut a = Answers::default();
-    // Fields are parsed as strings (the carried-down `answers.yaml` quotes
-    // them, e.g. `use_local: "false"`) and normalised below, so both bare and
-    // quoted forms are accepted.
+    // `use_local` is a real YAML boolean; `path` and `debug_or_release` are
+    // parsed as strings (the carried-down `answers.yaml` quotes them) and
+    // normalised below.
     #[derive(serde::Deserialize)]
     struct Raw {
         #[serde(default)]
-        use_local: Option<String>,
+        use_local: Option<bool>,
         #[serde(default)]
         path: Option<String>,
         #[serde(default, rename = "debug_or_release")]
@@ -555,7 +555,7 @@ fn read_answers_from_str(text: &str) -> Answers {
         Err(_) => return a,
     };
     if let Some(v) = raw.use_local {
-        a.use_local = matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes");
+        a.use_local = v;
     }
     if let Some(v) = raw.path {
         a.path = v;
@@ -676,14 +676,13 @@ fn write_justfile(dest: &std::path::Path, a: &Answers) -> anyhow::Result<()> {
 /// honour `use_local` when run directly rather than through `just`. Env vars
 /// take precedence.
 fn write_settings(dest: &std::path::Path, a: &Answers, config: &str) -> anyhow::Result<()> {
-    let use_local = if a.use_local { "true" } else { "false" };
     let profile = match a.debug_or_release {
         Profile::Release => "release",
         Profile::Debug => "debug",
     };
     let text = format!(
-        "espforge:\n  use_local: \"{}\"\n  path: \"{}\"\n  debug_or_release: \"{}\"\n  config: \"{}\"\n",
-        use_local, a.path, profile, config
+        "espforge:\n  use_local: {}\n  path: \"{}\"\n  debug_or_release: \"{}\"\n  config: \"{}\"\n",
+        a.use_local, a.path, profile, config
     );
     std::fs::write(dest.join("answers.yaml"), text)
         .map_err(|e| anyhow::anyhow!("failed to write answers.yaml: {e}"))?;
@@ -743,7 +742,7 @@ mod tests {
         // The carried-down shape: options wrapped under `espforge:`, quoted.
         write!(
             f,
-            "espforge:\n  use_local: \"true\"\n  path: /path/to/espforge\n  debug_or_release: \"release\"\n"
+            "espforge:\n  use_local: true\n  path: /path/to/espforge\n  debug_or_release: \"release\"\n"
         )
         .unwrap();
         drop(f);
@@ -847,7 +846,7 @@ mod tests {
         artifacts
             .into_iter()
             .find(|a| a.path == "Cargo.toml")
-            .map(|a| a.contents)
+            .map(|a| a.content)
             .expect("Cargo.toml artifact")
     }
 
