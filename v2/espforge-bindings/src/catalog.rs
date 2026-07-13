@@ -14,6 +14,8 @@ use espforge_model::ir::{Access, DepKind, Tier};
 /// - `ssd1306`    — Device, shares an `i2c` component by reference (bus sharing
 ///                 lives at the component tier, ADR-003/008) and claims a few
 ///                 control pins by value.
+/// - `button`     — Component, claims one pin by value (an input with optional
+///                 pull-up).
 pub fn catalog() -> Vec<DriverSpec> {
     vec![
         DriverSpec {
@@ -41,6 +43,14 @@ pub fn catalog() -> Vec<DriverSpec> {
                 access: Access::Shared,
             }],
             pins: vec!["reset".to_string(), "dc".to_string()],
+            peripherals: vec![],
+            flags: SpecFlags::default(),
+        },
+        DriverSpec {
+            kind: "button".to_string(),
+            tier: Tier::Component,
+            deps: vec![],
+            pins: vec!["pin".to_string()],
             peripherals: vec![],
             flags: SpecFlags::default(),
         },

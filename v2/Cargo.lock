@@ -656,6 +656,7 @@ dependencies = [
  "cfg-if",
  "document-features",
  "esp-metadata-generated",
+ "esp32c3",
 ]
 
 [[package]]

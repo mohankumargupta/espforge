@@ -21,4 +21,6 @@ ssd1306 = { version = "*", optional = true }
 # plus one cfg-gated `pub mod` line.
 led = []
 i2c = []
+button = []
 ssd1306 = ["dep:ssd1306"]
+

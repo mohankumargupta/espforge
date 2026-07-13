@@ -9,13 +9,15 @@ esp32:
 
 components:
   red_led:
-    using: LED
+    using: led
     with:
-      gpio: $gpio7
+      pin: $gpio7
       active_low: false
 
   button:
-    using: Button
+    using: button
     with:
-      gpio: $gpio9
+      pin: $gpio9
       pull_up: true
+
+devices: {}

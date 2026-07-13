@@ -19,6 +19,10 @@ pub trait Backend: Debug + Send + Sync {
     /// `active_low` flag selects the idle level (ADR-003).
     fn gpio_output(&self, gpio: &str, active_low: bool) -> String;
 
+    /// Wrap a moved-in GPIO peripheral into an `Input` with a pull resistor.
+    /// `pull_up` selects `Pull::Up`; otherwise `Pull::None` (ADR-003).
+    fn gpio_input(&self, gpio: &str, pull_up: bool) -> String;
+
     /// Construct an I2C master bus from its peripheral + sda/scl pins.
     fn i2c_master(&self, i2c: &str, sda: &str, scl: &str) -> String;
 
@@ -43,6 +47,13 @@ impl Backend for Blocking {
         let level = if active_low { "High" } else { "Low" };
         format!(
             "esp_hal::gpio::Output::new(registry.peripherals.{gpio}, esp_hal::gpio::Level::{level}, esp_hal::gpio::OutputConfig::default())"
+        )
+    }
+
+    fn gpio_input(&self, gpio: &str, pull_up: bool) -> String {
+        let pull = if pull_up { "Up" } else { "None" };
+        format!(
+            "esp_hal::gpio::Input::new(registry.peripherals.{gpio}, esp_hal::gpio::InputConfig::default().with_pull(esp_hal::gpio::Pull::{pull}))"
         )
     }
 

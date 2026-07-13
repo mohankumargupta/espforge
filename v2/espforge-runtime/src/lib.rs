@@ -13,7 +13,7 @@
 // Capability modules are compiled in only when the generated project enables
 // their feature (design §19.1). A `helloworld` project that lists no features
 // compiles neither `components` nor `devices`.
-#[cfg(any(feature = "led", feature = "i2c"))]
+#[cfg(any(feature = "led", feature = "i2c", feature = "button"))]
 pub mod components;
 #[cfg(feature = "ssd1306")]
 pub mod devices;
