@@ -206,16 +206,19 @@ pub fn resolve_diagram(project_dir: &Path, out: &Path, ir: &DeviceTree) -> Resul
 
 /// Generate `wokwi.toml` in `out` pointing `elf`/`firmware` at the compiled
 /// binary (`target/<triple>/<profile>/<name>`), bare binary (no `.elf`). Always
-/// overwrites.
+/// overwrites. The binary `name` is the package name from the generated
+/// `Cargo.toml` (the real source of truth for what `cargo build` emits), not
+/// re-derived from the IR, so the path always matches the file Cargo produces.
 pub fn write_wokwi_toml(out: &Path, ir: &DeviceTree, profile: &str) -> Result<()> {
     let target = ir.meta.target.as_deref().unwrap_or("esp32c3");
     let triple = target_triple(target);
-    let name = ir
-        .meta
-        .name
-        .clone()
-        .unwrap_or_else(|| "espforge_project".into())
-        .replace('-', "_");
+    let name = package_name(out).unwrap_or_else(|| {
+        ir.meta
+            .name
+            .clone()
+            .unwrap_or_else(|| "espforge_project".into())
+            .replace('-', "_")
+    });
     let bin = format!("target/{triple}/{profile}/{name}");
     let content = format!(
         "[wokwi]\n\
@@ -227,4 +230,29 @@ pub fn write_wokwi_toml(out: &Path, ir: &DeviceTree, profile: &str) -> Result<()
     std::fs::write(out.join("wokwi.toml"), content)
         .map_err(|e| anyhow::anyhow!("failed to write wokwi.toml: {e}"))?;
     Ok(())
+}
+
+/// Read the `[package] name` from the generated `Cargo.toml` in `out`. Returns
+/// `None` if the file is missing or has no package name (caller falls back to
+/// the IR name). Lightweight line scan — no TOML parser needed.
+fn package_name(out: &Path) -> Option<String> {
+    let cargo_toml = out.join("Cargo.toml");
+    let text = std::fs::read_to_string(&cargo_toml).ok()?;
+    let mut in_package = false;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('[') {
+            in_package = trimmed == "[package]";
+            continue;
+        }
+        if in_package && trimmed.starts_with("name") {
+            if let Some(eq) = trimmed.find('=') {
+                let value = trimmed[eq + 1..].trim().trim_matches('"');
+                if !value.is_empty() {
+                    return Some(value.to_string());
+                }
+            }
+        }
+    }
+    None
 }
