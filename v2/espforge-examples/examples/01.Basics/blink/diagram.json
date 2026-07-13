@@ -7,11 +7,11 @@
     "gnd": "GND.10"
   },
   "parts": [
-    { "type": "$board", "id": "board", "top": 0, "left": 0 },
+    { "type": "$board", "id": "esp", "top": 0, "left": 0 },
     { "type": "wokwi-led", "id": "led1", "top": -40, "left": 96, "attrs": { "color": "red", "gpio": "$led_pin_number" } }
   ],
   "connections": [
-    [ "led1:A", "board:$led_pin_number", "green", [] ],
-    [ "led1:C", "board:$gnd", "black", [] ]
+    [ "led1:A", "esp:$led_pin_number", "green", [] ],
+    [ "led1:C", "esp:$gnd", "black", [] ]
   ]
 }
