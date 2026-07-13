@@ -3,15 +3,15 @@
   "author": "espforge",
   "editor": "wokwi",
   "refs": {
-    "led_pin": "$red_led.pin",
-    "gnd": "board:GND.2"
+    "led_pin_number": "$red_led.pin",
+    "gnd": "GND.10"
   },
   "parts": [
     { "type": "$board", "id": "board", "top": 0, "left": 0 },
-    { "type": "wokwi-led", "id": "led1", "top": -40, "left": 96, "attrs": { "color": "red", "gpio": "$led_pin" } }
+    { "type": "wokwi-led", "id": "led1", "top": -40, "left": 96, "attrs": { "color": "red", "gpio": "$led_pin_number" } }
   ],
   "connections": [
-    [ "led1:Anode", "board:$led_pin", "green", [] ],
-    [ "led1:Cathode", "$gnd", "black", [] ]
+    [ "led1:A", "board:$led_pin_number", "green", [] ],
+    [ "led1:C", "board:$gnd", "black", [] ]
   ]
 }

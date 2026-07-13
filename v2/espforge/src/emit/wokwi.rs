@@ -60,25 +60,25 @@ fn resolve_token(ir: &DeviceTree, token: &str) -> Option<String> {
     if token == "board" {
         return Some(board_type(target).to_string());
     }
-    // `component.pin` form.
+    // `component.<field>` form. The default `.pin` resolves to the bare physical
+    // pin number (what wokwi's `board:` expects, e.g. `18`); `.field` yields the
+    // esp_hal peripheral name (`GPIO18`) for the rare Rust-context diagram.
     if let Some((inst, field)) = token.split_once('.') {
         if let Some(instance) = ir.instances.iter().find(|i| i.id == inst) {
-            // Map the logical pin name to the instance's first GPIO pin. Most
-            // components drive a single pin; multi-pin components (i2c, spi)
-            // resolve their first pin here and can be extended later.
-            if field == "pin" || !instance.pins.is_empty() {
-                if let Some(p) = instance.pins.first() {
-                    return Some(format!("GPIO{}", p.number));
-                }
+            if let Some(p) = instance.pins.first() {
+                return Some(match field {
+                    "field" | "gpio" => format!("GPIO{}", p.number),
+                    _ => format!("{}", p.number),
+                });
             }
         }
         return None;
     }
-    // Bare peripheral ref name, e.g. `gpio2`.
+    // Bare peripheral ref name, e.g. `gpio2` -> bare physical pin number.
     ir.peripherals
         .iter()
         .find(|p| p.name == token)
-        .map(|p| format!("GPIO{}", p.number))
+        .map(|p| format!("{}", p.number))
 }
 
 /// Expand the top-level `refs` map (one level of indirection) and then resolve
