@@ -396,3 +396,111 @@ Contract specifics:
 7. `components`/`devices` keep the v2 list form with explicit `id`.
 8. Templates are v2-authored (hand-ported), not auto-converted from v1; the
    example tree shape + feel is preserved, the schema is not.
+
+## 19. Conditional compilation — only used deps are compiled (grilling session)
+
+**Problem.** A generated firmware project should compile *only* the
+`espforge-runtime` modules and external crates it actually uses (e.g. `helloworld`
+must not pull the `led`/`ssd1306` runtime code or their deps). As of the session
+start this was **not implemented**: `espforge-runtime` unconditionally
+`pub mod`-ed every module with no `[features]` and no optional deps, and
+`emit_cargo_toml` emitted a fixed dep set (only `embassy`/`alloc` were
+conditional). The `Driver::required_features()` hook existed but `emit`
+ignored `ir.required_features`.
+
+**Scope decision.** Conditionality applies **only to the generated firmware
+project** (`espforge-runtime` features + the generated `Cargo.toml` deps). The
+host toolchain (`espforge`, `espforge-bindings`) stays monolithic — it compiles
+all drivers because it is a compiler over a closed driver set; this costs
+nothing on-device.
+
+### 19.1 Mechanism
+
+- **One crate, feature-gated.** Keep a single `espforge-runtime` leaf (no
+  per-capability crates — that would explode the published-crate count and break
+  the curated in-tree-driver model, ADR-006/§9). Each capability module is
+  gated: `components/mod.rs` / `devices/mod.rs` use
+  `#[cfg(feature = "led")] pub mod led;` etc. The `feature` name equals the
+  module's folder/stem name (reuses the §9b `build.rs` walk convention).
+- **External driver crates are optional deps of `espforge-runtime`.** e.g.
+  `[dependencies.ssd1306] optional = true` + `ssd1306 = ["dep:ssd1306"]`. The
+  runtime re-exports whatever the app touches under `#[cfg(feature = "ssd1306")]`
+  (`pub use ssd1306::…`). The generated project depends *only* on
+  `espforge-runtime` (with features), never directly on the upstream crate. This
+  keeps the app manifest tiny and identical in shape regardless of drivers, and
+  the compiler only pulls the external crate when its feature is on.
+- **Per-driver cost is small + explicit.** Adding a real driver needs: the
+  module file, **one `[features]` line** in `espforge-runtime/Cargo.toml`, **one
+  cfg-gated `pub mod` line** in `mod.rs`, the §9b `pub const DRIVER` export, and
+  `runtime_features()`. The `build.rs`-generated bindings registry (§9b) stays
+  untouched. Cargo's features are static, so the `Cargo.toml`/`mod.rs` lines are
+  unavoidable (a second `build.rs` to auto-generate `mod.rs` cfg-lines is
+  rejected as excess machinery).
+
+### 19.2 Driver trait split
+
+The old `Driver::required_features()` conflated two concepts. They are split:
+
+- **`fn runtime_features(&self) -> &[&str]`** (new) — returns the
+  `espforge-runtime` **module feature names** this driver needs. Default
+  `[self.kind()]`. The `kind` is the canonical feature name; an override is
+  permitted but discouraged (rare case: two `using:` drivers sharing one feature
+  set / external dep — the union dedups).
+- **`DriverFlags`** (existing, `driver.rs`) carries the cross-cutting
+  **project-level** flags (`has_alloc`, `has_wifi`, `needs_delay`,
+  `needs_stack`) via `ir.flags`. These map to project deps (see §19.3), not to
+  `espforge-runtime` module features.
+- **`required_features()`** is repurposed/dropped to remove the ambiguity.
+
+### 19.3 Manifest emission
+
+`emit_cargo_toml` is rewritten to be driven purely by `ir.flags` plus the
+**union of `runtime_features()`** over `ir.instances`:
+
+- `is_embassy` → `embassy-executor` + esp-hal `"embassy"` feature.
+- `has_alloc` → `embedded-alloc`.
+- `has_wifi` → `esp-wifi` (+ esp-hal wifi feature). *(new)*
+- `needs_stack` → `embassy-net`. *(new)*
+- drivers → `espforge-runtime = { …, features = [<union>] }`.
+- `Logger` / `Delay` stay unconditionally compiled (shared, negligible);
+  `needs_delay` remains a marker, not a separate dep.
+- The flag→dep mapping is **centralized in the emit step**, not scattered into
+  driver declarations.
+
+### 19.4 Plumbing
+
+`emit()` computes the feature-union in `BTreeSet<String>` (deduped + sorted for
+**deterministic manifests**, which matters for drift detection, §5.1) and passes
+it **explicitly** to `emit_cargo_toml(ir, &rt_features)`. It is *not* stored back
+into `DeviceTree` (the IR stays driver-agnostic, ADR-006). Both the published
+`"0.1.0"` form and the `ESPFORGE_USE_LOCAL` path-dep form carry `features = […]`;
+when the set is **empty the dep is emitted bare** (`espforge-runtime = "0.1.0"`),
+matching the current minimal-project output.
+
+### 19.5 Verification
+
+The esp32c3 uses a RISC-V target (`riscv32imc-unknown-none-elf`) that is part of
+the **stable** Rust toolchain — no esp-patched fork needed for a compile check
+(the esp fork only adds the `esp32c3` bare-metal alias + extra SOCs). In this
+repo's environment the stable toolchain plus `riscv32imc-unknown-none-elf` are
+installed, so a generated `esp32c3` firmware project **can** be cross-compiled
+on the host to prove conditionality.
+
+Two complementary checks:
+- **Golden/assertion tests on the emitted `Cargo.toml`** (host-side, hermetic,
+  matches the §14 test discipline) — fast first-line guard:
+  - `helloworld.yaml` → `espforge-runtime = "0.1.0"` (no `features`, no
+    `ssd1306`/`esp-wifi` anywhere).
+  - `display.yaml` → `espforge-runtime = { …, features = ["ssd1306"] }`.
+- **Real cross-compile** of generated projects for `esp32c3` against
+  `riscv32imc-unknown-none-elf` as a CI integration gate. Because cargo only
+  pulls optional deps whose feature is enabled, a `helloworld` build that
+  succeeds **without** compiling the `ssd1306` module/external crate is the
+  definitive proof that unused deps are excluded. (Note: `ESPFORGE_USE_LOCAL`
+  path-deps point at the workspace `espforge-runtime`; ensure the workspace
+  `[workspace]` exclusion in the generated manifest doesn't fight the local
+  path resolution.)
+
+### 19.6 Status
+
+Design-only. Not yet implemented. No code changed in the grilling session.

@@ -16,6 +16,7 @@
 use anyhow::Result;
 use espforge_model::ir::{DeviceTree, Runtime, Tier};
 use espforge_model::value::Artifact;
+use std::collections::BTreeSet;
 use std::env;
 use std::path::Path;
 
@@ -43,14 +44,40 @@ pub const ESPFORGE_PATH: &str = "ESPFORGE_PATH";
 /// `v2` directory of the espforge checkout (derived from `ESPFORGE_BINARY`, or
 /// the running executable). Applies uniformly to `espforge-runtime`,
 /// `espforge-bindings`, `espforge-model`, etc.
-fn espforge_dep(crate_name: &str) -> String {
+/// Emit an `espforge-*` dependency for the generated project's `Cargo.toml`.
+/// By default it uses the published crates.io version; when `ESPFORGE_USE_LOCAL`
+/// is truthy it flips to a local path dep rooted at the `v2` directory of the
+/// espforge checkout (design §17.1). `features` carries the `espforge-runtime`
+/// module features (design §19.4); when empty the dep is emitted bare so a
+/// minimal project gets the cleanest possible manifest.
+fn espforge_dep(crate_name: &str, features: &[String]) -> String {
     const VERSION: &str = "0.1.0";
     if !use_local() {
-        return format!("{crate_name} = \"{VERSION}\"");
+        if features.is_empty() {
+            return format!("{crate_name} = \"{VERSION}\"");
+        }
+        return format!(
+            "{crate_name} = {{ version = \"{VERSION}\", features = [{}] }}",
+            features
+                .iter()
+                .map(|f| format!("\"{f}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
     let root = v2_root();
+    if features.is_empty() {
+        return format!(
+            "{crate_name} = {{ path = \"{root}/{crate_name}\", version = \"{VERSION}\" }}"
+        );
+    }
     format!(
-        "{crate_name} = {{ path = \"{root}/{crate_name}\", version = \"{VERSION}\" }}"
+        "{crate_name} = {{ path = \"{root}/{crate_name}\", version = \"{VERSION}\", features = [{}] }}",
+        features
+            .iter()
+            .map(|f| format!("\"{f}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
     )
 }
 
@@ -154,8 +181,23 @@ pub fn emit(ir: &DeviceTree) -> Result<Vec<Artifact>> {
         }
     }
 
+    // Collect the union of `espforge-runtime` module features required by every
+    // instance's driver (design §19.4). Deterministic ordering via `BTreeSet`
+    // keeps emitted manifests stable (matters for drift detection, §5.1).
+    let mut rt_features: BTreeSet<String> = BTreeSet::new();
+    for inst in &ir.instances {
+        if let Some(driver) = catalog.get(&inst.kind) {
+            for f in driver.runtime_features() {
+                rt_features.insert(f);
+            }
+        }
+    }
+
     let mut out = Vec::new();
-    out.push(Artifact::owned("Cargo.toml", emit_cargo_toml(ir)?));
+    out.push(Artifact::owned(
+        "Cargo.toml",
+        emit_cargo_toml(ir, &rt_features)?,
+    ));
     out.push(Artifact::owned("src/generated.rs", emit_generated(ir, &catalog)));
     out.push(Artifact::owned("src/lib.rs", emit_lib(ir)));
     out.push(Artifact::owned(
@@ -174,7 +216,7 @@ fn project_name(ir: &DeviceTree) -> String {
 }
 
 //produces Cargo.toml
-fn emit_cargo_toml(ir: &DeviceTree) -> Result<String> {
+fn emit_cargo_toml(ir: &DeviceTree, rt_features: &BTreeSet<String>) -> Result<String> {
     let name = project_name(ir);
     let chip = ir
         .meta
@@ -183,7 +225,11 @@ fn emit_cargo_toml(ir: &DeviceTree) -> Result<String> {
         .unwrap_or_else(|| "esp32c3".to_string());
     let embassy = if ir.flags.is_embassy { "embassy-executor = \"*\"\n" } else { "" };
     let alloc = if ir.flags.has_alloc { "embedded-alloc = \"*\"\n" } else { "" };
-    let runtime_dep = espforge_dep("espforge-runtime");
+    // Network deps are pulled only when the project actually needs them
+    // (design §19.3).
+    let wifi = if ir.flags.has_wifi { "esp-wifi = \"*\"\n" } else { "" };
+    let stack = if ir.flags.needs_stack { "embassy-net = \"*\"\n" } else { "" };
+    let runtime_dep = espforge_dep("espforge-runtime", &rt_features.iter().cloned().collect::<Vec<_>>());
     // esp-hal + friends need the chip feature enabled (e.g. "esp32c3"); esp-hal
     // also needs "embassy" when using the async runtime (ADR-008 flags).
     let mut hal_feats = vec![chip.clone()];
@@ -203,7 +249,7 @@ esp-hal = {{ version = "*", features = ["{hal_feats}"] }}
 esp-backtrace = {{ version = "*", features = ["{chip}", "println", "panic-handler"] }}
 esp-println = {{ version = "*", features = ["{chip}", "log-04"] }}
 static_cell = "*"
-{embassy}{alloc}
+{embassy}{alloc}{wifi}{stack}
 
 # Name the binary explicitly so it matches the package name (and the path
 # wokwi.toml points at). Without this, Cargo names the binary after the

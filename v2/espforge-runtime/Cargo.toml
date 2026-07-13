@@ -8,3 +8,17 @@ license.workspace = true
 esp-hal = {version="*", features = ["unstable"]}
 embedded-hal = "*"
 log = "0.4"
+
+# Optional external driver crates, pulled only by the matching feature
+# (design §19.1/§19.3). A generated project enables these transitively via the
+# `espforge-runtime` feature list in its manifest; the crate re-exports what the
+# app needs under `#[cfg(feature = "...")]`.
+ssd1306 = { version = "*", optional = true }
+
+[features]
+# Each capability module is its own feature, gated in `mod.rs` and named after
+# the module's folder/stem (design §19.1/§19.4). Adding a driver = one line here
+# plus one cfg-gated `pub mod` line.
+led = []
+i2c = []
+ssd1306 = ["dep:ssd1306"]

@@ -824,4 +824,69 @@ mod tests {
             Some(".".to_string())
         );
     }
+
+    // --- Conditional compilation (design §19) ---------------------------------
+    // A generated firmware project must compile only the `espforge-runtime`
+    // modules (and external crates) it actually uses. We assert on the emitted
+    // `Cargo.toml` manifest text — the unit under test for manifest policy.
+    // These tests run the published-version path (ESPFORGE_USE_LOCAL unset).
+
+    /// Run the full pipeline (parse -> validate -> resolve -> emit) on an
+    /// example spec and return the emitted `Cargo.toml` text.
+    fn emitted_cargo_toml(spec_rel: &str) -> String {
+        // Resolve the example path relative to the workspace `v2` root.
+        let v2 = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let spec = std::path::Path::new(&v2)
+            .join("../espforge-examples/examples")
+            .join(spec_rel);
+        let project = espforge::parse::parse_file(&spec)
+            .unwrap_or_else(|e| panic!("parse {}: {e:?}", spec.display()));
+        espforge::pipeline::validate(&project).expect("validate");
+        let ir = espforge::pipeline::resolve(&project);
+        let artifacts = espforge::emit::rust::emit(&ir).expect("emit");
+        artifacts
+            .into_iter()
+            .find(|a| a.path == "Cargo.toml")
+            .map(|a| a.contents)
+            .expect("Cargo.toml artifact")
+    }
+
+    #[test]
+    fn helloworld_uses_no_optional_runtime_features() {
+        let cargo = emitted_cargo_toml("01.Basics/helloworld/helloworld.yaml");
+        // No runtime features => bare dep, no `features =` clause at all.
+        assert!(
+            cargo.contains("espforge-runtime = \"0.1.0\""),
+            "expected bare espforge-runtime dep, got:\n{cargo}"
+        );
+        assert!(
+            !cargo.contains("features ="),
+            "helloworld must not request any espforge-runtime features:\n{cargo}"
+        );
+        // No driver-only external crates should appear.
+        assert!(
+            !cargo.contains("ssd1306 = "),
+            "helloworld must not depend on the ssd1306 driver crate:\n{cargo}"
+        );
+        assert!(
+            !cargo.contains("esp-wifi = "),
+            "helloworld must not depend on esp-wifi:\n{cargo}"
+        );
+    }
+
+    #[test]
+    fn display_requests_ssd1306_runtime_feature() {
+        let cargo = emitted_cargo_toml("06.Displays/display/display.yaml");
+        assert!(
+            cargo.contains("espforge-runtime = { version = \"0.1.0\", features = [\"ssd1306\"] }")
+                || cargo.contains("features = [ \"ssd1306\" ]"),
+            "display must require the ssd1306 runtime feature:\n{cargo}"
+        );
+        // The `i2c` component is also used by the display device, so it must be
+        // present too (feature union is deduped + sorted).
+        assert!(
+            cargo.contains("\"i2c\"") || cargo.contains("i2c"),
+            "display uses an i2c bus; i2c feature must be present:\n{cargo}"
+        );
+    }
 }

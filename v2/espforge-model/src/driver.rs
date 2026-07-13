@@ -62,8 +62,22 @@ pub trait Driver: Debug + Send + Sync {
     }
 
     /// Cargo features this driver requires (e.g. `["embassy"]`, `["alloc"]`).
+    /// These are *project-level* features of the generated firmware project,
+    /// distinct from `runtime_features()` (which gates `espforge-runtime`
+    /// modules). See design §19.2.
     fn required_features(&self) -> &[&str] {
         &[]
+    }
+
+    /// The `espforge-runtime` **module feature names** this driver needs
+    /// (design §19.2). Each name gates a `pub mod` in `espforge-runtime`
+    /// (`#[cfg(feature = "led")] pub mod led;`) and, for drivers that wrap an
+    /// external crate, enables the matching optional dependency. Defaults to
+    /// `[kind()]` so a plain driver is one line; override only for rare cases
+    /// where multiple `using:` kinds share one feature set (§19.9). Returned
+    /// owned to avoid lifetime gymnastics with `kind()`.
+    fn runtime_features(&self) -> Vec<String> {
+        vec![self.kind().to_string()]
     }
 
     /// Cross-cutting flags this driver forces on when present (ADR-005).
