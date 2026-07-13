@@ -344,7 +344,7 @@ use {name}::{{app, Components, Context, Devices, PeripheralRegistry, CTX}};
 #[esp_hal::main]
 fn main() -> ! {{
     esp_println::logger::init_logger_from_env();
-
+    esp_println::print!("\x1b[20h");
     let peripherals = esp_hal::init(esp_hal::Config::default());
     let registry = PeripheralRegistry::new(peripherals);
 
@@ -384,7 +384,7 @@ use {name}::{{app, Components, Context, Devices, PeripheralRegistry, CTX}};
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {{
     esp_println::logger::init_logger_from_env();
-
+    esp_println::print!("\x1b[20h");
     let peripherals = esp_hal::init(esp_hal::Config::default());
     let registry = PeripheralRegistry::new(peripherals);
 
