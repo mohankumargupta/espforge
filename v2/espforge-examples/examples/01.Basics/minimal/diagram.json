@@ -6,7 +6,7 @@
     { "type": "$board", "id": "board", "top": 0, "left": 0 }
   ],
   "connections": [
-  	[ "esp:TX", "$serialMonitor:RX", "", [] ],
-  	[ "esp:RX", "$serialMonitor:TX", "", [] ]
+  	[ "board:TX", "$serialMonitor:RX", "", [] ],
+  	[ "board:RX", "$serialMonitor:TX", "", [] ]
   ]
 }
