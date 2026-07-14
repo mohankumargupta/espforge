@@ -1,0 +1,14 @@
+espforge:
+  name: i2c_scanner
+  target: esp32c3
+  runtime: blocking
+
+esp32:
+  i2c:
+    i2c0: { i2c: 0, sda: 6, scl: 7, frequency_kHz: 100 }
+
+components:
+  - id: i2c0
+    using: i2c
+    with:
+      bus: $i2c0

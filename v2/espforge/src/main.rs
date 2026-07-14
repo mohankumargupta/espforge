@@ -174,7 +174,11 @@ fn run() -> anyhow::Result<()> {
             // overwritten in `out` (generated output).
             let project_dir = project.parent().unwrap_or_else(|| std::path::Path::new("."));
             espforge::emit::wokwi::resolve_diagram(project_dir, &out, &ir)?;
-            espforge::emit::wokwi::write_wokwi_toml(&out, &ir, profile)?;
+            // Wokwi custom chip: `setup` staged `<project>/chip/`; carry it into
+            // `out/chip/` and emit a `[[chip]]` section if present. The chip's
+            // `name` (from `chip.json`) becomes wokwi's part-type prefix.
+            let chip_name = copy_chip_to_out(project_dir, &out)?;
+            espforge::emit::wokwi::write_wokwi_toml(&out, &ir, profile, chip_name.as_deref())?;
 
             // Layer 4: carry the user-owned `src/app.rs` verbatim from the
             // project into `out/src/app.rs` so user edits are reflected in the
@@ -275,6 +279,11 @@ fn run_create(
     // ships them (build resolves placeholders and regenerates them into `out`).
     copy_asset(&example, "diagram.json", &dest)?;
     copy_asset(&example, "wokwi.toml", &dest)?;
+    // Wokwi custom-chip assets: copy only the runtime artifacts
+    // (`chip/chip.json` + `chip/chip.wasm`) into `<project>/chip/`. The Zig
+    // build sources stay in the example tree; build re-carries `chip/` into
+    // `out/` and emits the `[[chip]]` section of `wokwi.toml`.
+    copy_chip_assets(&example, &dest)?;
 
     // 5. Friendly, explicit next steps (v1 `example` behaviour).
     println!("created project `{name}` at {}", dest.display());
@@ -293,6 +302,9 @@ fn run_create(
     }
     if espforge_examples::asset(&example, "wokwi.toml").is_some() {
         println!("    {}/wokwi.toml", dest.display());
+    }
+    if espforge_examples::asset(&example, "chip.wasm").is_some() {
+        println!("    {}/chip/  (Wokwi custom chip: chip.json + chip.wasm)", dest.display());
     }
     println!();
     println!("  then build it:");
@@ -342,6 +354,31 @@ fn copy_app(example: &str, dest: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Copy a Wokwi custom chip's runtime artifacts from the embedded example tree
+/// into `<dest>/chip/`. Only `chip/chip.json` + `chip/chip.wasm` travel — the
+/// Zig build sources (`chip.zig`, `build.zig`, `justfile`, `wokwi-api.zig`) are
+/// intentionally left in the example tree (the committed `.wasm` is the build
+/// product). No-op if the example ships no chip. The chip dir is the signal
+/// `build` uses to emit the `[[chip]]` section of `wokwi.toml` and to re-carry
+/// `chip/` into `out/`.
+fn copy_chip_assets(example: &str, dest: &std::path::Path) -> anyhow::Result<()> {
+    // The runtime artifacts (`chip.json` + `chip.wasm`) live at the example
+    // root; the Zig build sources are under `chip/`. Only the artifacts travel.
+    let json = espforge_examples::asset(example, "chip.json");
+    let wasm = espforge_examples::asset(example, "chip.wasm");
+    let (Some(json), Some(wasm)) = (json, wasm) else {
+        return Ok(()); // example has no custom chip — nothing to do.
+    };
+    let chip_dir = dest.join("chip");
+    std::fs::create_dir_all(&chip_dir)
+        .map_err(|e| anyhow::anyhow!("failed to create {}: {e}", chip_dir.display()))?;
+    std::fs::write(chip_dir.join("chip.json"), json)
+        .map_err(|e| anyhow::anyhow!("failed to write chip.json: {e}"))?;
+    std::fs::write(chip_dir.join("chip.wasm"), wasm)
+        .map_err(|e| anyhow::anyhow!("failed to write chip.wasm: {e}"))?;
+    Ok(())
+}
+
 /// Minimal user-owned `app.rs` scaffold used when an example ships no
 /// `app/rust/app.rs`. The blocking `setup`/`forever` hooks match the default
 /// (non-embassy) runtime; embassy examples are expected to ship their own.
@@ -371,6 +408,51 @@ fn copy_app_to_out(project_dir: &std::path::Path, out: &std::path::Path) -> anyh
         .map_err(|e| anyhow::anyhow!("failed to create {}: {e}", dest_dir.display()))?;
     std::fs::write(dest_dir.join("app.rs"), bytes)
         .map_err(|e| anyhow::anyhow!("failed to write out/src/app.rs: {e}"))?;
+    Ok(())
+}
+
+/// Carry a Wokwi custom chip from the project into `out/chip/` (recursive, so
+/// any file `setup` staged travels). Returns the chip's `name` parsed from
+/// `chip.json` (used by `write_wokwi_toml` to emit the `[[chip]]` section), or
+/// `None` if the project has no chip. `build` uses this as the chip-presence
+/// signal.
+fn copy_chip_to_out(
+    project_dir: &std::path::Path,
+    out: &std::path::Path,
+) -> anyhow::Result<Option<String>> {
+    let src = project_dir.join("chip");
+    if !src.is_dir() {
+        return Ok(None);
+    }
+    let dst = out.join("chip");
+    std::fs::create_dir_all(&dst)
+        .map_err(|e| anyhow::anyhow!("failed to create {}: {e}", dst.display()))?;
+    copy_dir_recursive(&src, &dst)
+        .map_err(|e| anyhow::anyhow!("failed to copy chip/ into out: {e}"))?;
+    // Read the chip name (wokwi requires the diagram part type `chip-<name>`
+    // to match). Tolerate a missing/invalid json by skipping the `[[chip]]`.
+    let name = std::fs::read_to_string(src.join("chip.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()));
+    Ok(name)
+}
+
+/// Recursively copy a directory tree, preserving nested structure. Used to
+/// carry a Wokwi chip's `chip/` folder (json + wasm, and any future assets)
+/// into the build output verbatim.
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let target = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            std::fs::create_dir_all(&target)?;
+            copy_dir_recursive(&path, &target)?;
+        } else {
+            std::fs::copy(&path, &target)?;
+        }
+    }
     Ok(())
 }
 

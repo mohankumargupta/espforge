@@ -1,0 +1,14 @@
+espforge:
+  name: spi_example
+  target: esp32c3
+  runtime: blocking
+
+esp32:
+  spi:
+    spi2: { spi: 2, mosi: 7, miso: 6, sck: 8, cs: 9, mode: 0, frequency_kHz: 100 }
+
+components:
+  - id: spi0
+    using: spi
+    with:
+      bus: $spi2

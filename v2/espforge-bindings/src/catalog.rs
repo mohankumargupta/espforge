@@ -54,5 +54,21 @@ pub fn catalog() -> Vec<DriverSpec> {
             peripherals: vec![],
             flags: SpecFlags::default(),
         },
+        DriverSpec {
+            kind: "spi".to_string(),
+            tier: Tier::Component,
+            deps: vec![],
+            pins: vec![],
+            peripherals: vec!["bus".to_string()],
+            flags: SpecFlags::default(),
+        },
+        DriverSpec {
+            kind: "uart".to_string(),
+            tier: Tier::Component,
+            deps: vec![],
+            pins: vec![],
+            peripherals: vec!["bus".to_string()],
+            flags: SpecFlags::default(),
+        },
     ]
 }

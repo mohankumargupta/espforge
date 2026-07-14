@@ -364,14 +364,11 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
             kind: PeripheralKind::I2c,
             number: b.peripheral,
             field: format!("I2C{}", b.peripheral),
-            bus: Some(espforge_model::ir::BusInit {
+            bus: Some(espforge_model::ir::BusInit::I2c(espforge_model::ir::I2cInit {
                 sda: b.sda,
                 scl: b.scl,
-                mosi: b.mosi,
-                miso: b.miso,
-                sclk: b.sclk,
                 frequency_khz: b.frequency_khz,
-            }),
+            })),
             claimed_by: None,
         });
     }
@@ -381,14 +378,14 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
             kind: PeripheralKind::Spi,
             number: b.peripheral,
             field: format!("SPI{}", b.peripheral),
-            bus: Some(espforge_model::ir::BusInit {
-                sda: b.sda,
-                scl: b.scl,
+            bus: Some(espforge_model::ir::BusInit::Spi(espforge_model::ir::SpiInit {
                 mosi: b.mosi,
                 miso: b.miso,
                 sclk: b.sclk,
+                cs: b.cs,
+                mode: b.mode,
                 frequency_khz: b.frequency_khz,
-            }),
+            })),
             claimed_by: None,
         });
     }
@@ -398,14 +395,11 @@ fn collect_peripherals(esp32: &Esp32Section) -> Vec<Peripheral> {
             kind: PeripheralKind::Uart,
             number: b.peripheral,
             field: format!("UART{}", b.peripheral),
-            bus: Some(espforge_model::ir::BusInit {
-                sda: b.sda,
-                scl: b.scl,
-                mosi: b.mosi,
-                miso: b.miso,
-                sclk: b.sclk,
-                frequency_khz: b.frequency_khz,
-            }),
+            bus: Some(espforge_model::ir::BusInit::Uart(espforge_model::ir::UartInit {
+                tx: b.tx,
+                rx: b.rx,
+                baud: b.baud,
+            })),
             claimed_by: None,
         });
     }

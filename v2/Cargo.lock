@@ -782,6 +782,7 @@ name = "espforge-runtime"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
+ "embedded-io 0.6.1",
  "esp-hal",
  "log",
  "ssd1306",

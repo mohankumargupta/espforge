@@ -26,6 +26,23 @@ pub trait Backend: Debug + Send + Sync {
     /// Construct an I2C master bus from its peripheral + sda/scl pins.
     fn i2c_master(&self, i2c: &str, sda: &str, scl: &str) -> String;
 
+    /// Construct an SPI master bus from its peripheral + mosi/miso/sclk/cs pins
+    /// and mode/frequency. `cs` is attached to the master so transfers manage
+    /// the chip-select line automatically.
+    fn spi_master(
+        &self,
+        spi: &str,
+        mosi: &str,
+        miso: &str,
+        sclk: &str,
+        cs: &str,
+        mode: u8,
+        frequency_khz: u32,
+    ) -> String;
+
+    /// Construct a UART from its peripheral + tx/rx pins and baud rate.
+    fn uart(&self, uart: &str, tx: &str, rx: &str, baud: u32) -> String;
+
     /// Render a call to a runtime constructor, e.g.
     /// `espforge_runtime::components::Led::new(a, b)`.
     fn ctor(&self, tier: Tier, type_name: &str, args: &[String]) -> String;
@@ -60,6 +77,40 @@ impl Backend for Blocking {
     fn i2c_master(&self, i2c: &str, sda: &str, scl: &str) -> String {
         format!(
             "espforge_runtime::components::I2cBus::new(registry.peripherals.{i2c}, registry.peripherals.GPIO{sda}, registry.peripherals.GPIO{scl})"
+        )
+    }
+
+    fn spi_master(
+        &self,
+        spi: &str,
+        mosi: &str,
+        miso: &str,
+        sclk: &str,
+        cs: &str,
+        mode: u8,
+        frequency_khz: u32,
+    ) -> String {
+        format!(
+            "espforge_runtime::components::SpiBus::new(\
+                 registry.peripherals.{spi}, \
+                 registry.peripherals.GPIO{mosi}, \
+                 registry.peripherals.GPIO{miso}, \
+                 registry.peripherals.GPIO{sclk}, \
+                 registry.peripherals.GPIO{cs}, \
+                 {mode}, \
+                 {frequency_khz}\
+             )"
+        )
+    }
+
+    fn uart(&self, uart: &str, tx: &str, rx: &str, baud: u32) -> String {
+        format!(
+            "espforge_runtime::components::UartDevice::new(\
+                 registry.peripherals.{uart}, \
+                 registry.peripherals.GPIO{tx}, \
+                 registry.peripherals.GPIO{rx}, \
+                 {baud}\
+             )"
         )
     }
 

@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 esp-hal = {version="*", features = ["unstable"]}
 embedded-hal = "*"
+embedded-io = "*"
 log = "0.4"
 
 # Optional external driver crates, pulled only by the matching feature
@@ -22,5 +23,7 @@ ssd1306 = { version = "*", optional = true }
 led = []
 i2c = []
 button = []
+spi = []
+uart = []
 ssd1306 = ["dep:ssd1306"]
 

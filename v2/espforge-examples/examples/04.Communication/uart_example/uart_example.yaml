@@ -1,0 +1,14 @@
+espforge:
+  name: uart_example
+  target: esp32c3
+  runtime: blocking
+
+esp32:
+  uart:
+    uart1: { uart: 1, tx: 6, rx: 5, baud: 9600 }
+
+components:
+  - id: uart0
+    using: uart
+    with:
+      bus: $uart1

@@ -209,7 +209,12 @@ pub fn resolve_diagram(project_dir: &Path, out: &Path, ir: &DeviceTree) -> Resul
 /// overwrites. The binary `name` is the package name from the generated
 /// `Cargo.toml` (the real source of truth for what `cargo build` emits), not
 /// re-derived from the IR, so the path always matches the file Cargo produces.
-pub fn write_wokwi_toml(out: &Path, ir: &DeviceTree, profile: &str) -> Result<()> {
+pub fn write_wokwi_toml(
+    out: &Path,
+    ir: &DeviceTree,
+    profile: &str,
+    chip_name: Option<&str>,
+) -> Result<()> {
     let target = ir.meta.target.as_deref().unwrap_or("esp32c3");
     let triple = target_triple(target);
     let name = package_name(out).unwrap_or_else(|| {
@@ -220,13 +225,24 @@ pub fn write_wokwi_toml(out: &Path, ir: &DeviceTree, profile: &str) -> Result<()
             .replace('-', "_")
     });
     let bin = format!("target/{triple}/{profile}/{name}");
-    let content = format!(
+    let mut content = format!(
         "[wokwi]\n\
          version = 1\n\
          gdbServerPort = 3333\n\
          elf = \"{bin}\"\n\
          firmware = \"{bin}\"\n"
     );
+    // A Wokwi custom chip (carried into `out/chip/`) is referenced by a
+    // `[[chip]]` section: `name` -> part type `chip-<name>` in diagram.json,
+    // `binary` points at the wasm. The JSON pin description must share the
+    // wasm's basename, so `chip/chip.wasm` pairs with `chip/chip.json`.
+    if let Some(chip) = chip_name {
+        content.push_str(&format!(
+            "\n[[chip]]\n\
+             name = '{chip}'\n\
+             binary = 'chip/chip.wasm'\n"
+        ));
+    }
     std::fs::write(out.join("wokwi.toml"), content)
         .map_err(|e| anyhow::anyhow!("failed to write wokwi.toml: {e}"))?;
     Ok(())

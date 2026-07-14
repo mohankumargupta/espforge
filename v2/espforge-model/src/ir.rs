@@ -72,14 +72,38 @@ pub enum PeripheralKind {
     Wifi,
 }
 
+/// Bus wiring carried in the IR, precise per bus kind (model refactor C). Each
+/// variant holds only the pins/params valid for that bus, so the emitters can
+/// read typed fields instead of a flat `Option` bag.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BusInit {
+pub enum BusInit {
+    I2c(I2cInit),
+    Spi(SpiInit),
+    Uart(UartInit),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct I2cInit {
     pub sda: Option<u32>,
     pub scl: Option<u32>,
+    pub frequency_khz: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpiInit {
     pub mosi: Option<u32>,
     pub miso: Option<u32>,
     pub sclk: Option<u32>,
+    pub cs: Option<u32>,
+    pub mode: Option<u8>,
     pub frequency_khz: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UartInit {
+    pub tx: Option<u32>,
+    pub rx: Option<u32>,
+    pub baud: Option<u32>,
 }
 
 /// A resolved component or device instance. Unlike `project::Instance`, the

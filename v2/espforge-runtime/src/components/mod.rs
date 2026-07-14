@@ -10,6 +10,10 @@ pub mod i2c;
 pub mod led;
 #[cfg(feature = "button")]
 pub mod button;
+#[cfg(feature = "spi")]
+pub mod spi;
+#[cfg(feature = "uart")]
+pub mod uart;
 
 #[cfg(feature = "i2c")]
 pub use i2c::I2cBus;
@@ -17,3 +21,7 @@ pub use i2c::I2cBus;
 pub use led::Led;
 #[cfg(feature = "button")]
 pub use button::Button;
+#[cfg(feature = "spi")]
+pub use spi::SpiBus;
+#[cfg(feature = "uart")]
+pub use uart::UartDevice;

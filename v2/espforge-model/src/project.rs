@@ -59,11 +59,11 @@ pub struct Esp32Section {
     #[serde(default)]
     pub gpio: HashMap<String, GpioPin>,
     #[serde(default)]
-    pub i2c: HashMap<String, BusConfig>,
+    pub i2c: HashMap<String, I2cConfig>,
     #[serde(default)]
-    pub spi: HashMap<String, BusConfig>,
+    pub spi: HashMap<String, SpiConfig>,
     #[serde(default)]
-    pub uart: HashMap<String, BusConfig>,
+    pub uart: HashMap<String, UartConfig>,
     #[serde(default)]
     pub wifi: Option<WifiConfig>,
     #[serde(default)]
@@ -91,26 +91,64 @@ pub enum Direction {
     Output,
 }
 
+/// I2C bus configuration (`esp32.i2c`).
+///
+/// `deny_unknown_fields` so a typo like `scll` is rejected at parse time —
+/// this is what lets the future VS Code addon validate the YAML structurally.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BusConfig {
-    /// Hardware peripheral index, e.g. `0` for `I2C0`/`SPI0`. The YAML key is
-    /// `i2c`/`spi`/`uart` depending on the section (aliased here so a single
-    /// struct serves all three bus kinds).
-    #[serde(alias = "i2c", alias = "spi", alias = "uart")]
+#[serde(deny_unknown_fields)]
+pub struct I2cConfig {
+    /// Hardware peripheral index, e.g. `0` for `I2C0`. YAML key `i2c`.
+    #[serde(alias = "i2c")]
     pub peripheral: u32,
     #[serde(default)]
     pub sda: Option<u32>,
     #[serde(default)]
     pub scl: Option<u32>,
+    /// Bus clock frequency in kHz.
+    #[serde(default, rename = "frequency_kHz", alias = "frequency")]
+    pub frequency_khz: Option<u32>,
+}
+
+/// SPI bus configuration (`esp32.spi`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpiConfig {
+    /// Hardware peripheral index, e.g. `2` for `SPI2`. YAML key `spi`.
+    #[serde(alias = "spi")]
+    pub peripheral: u32,
     #[serde(default)]
     pub mosi: Option<u32>,
     #[serde(default)]
     pub miso: Option<u32>,
-    #[serde(default)]
+    /// Clock pin. Accepts `sclk` or `sck` (Wokwi/v1 spelling).
+    #[serde(default, alias = "sck")]
     pub sclk: Option<u32>,
+    /// Chip-select pin (managed by the runtime as an `Output`).
+    #[serde(default)]
+    pub cs: Option<u32>,
+    /// SPI mode (0–3).
+    #[serde(default)]
+    pub mode: Option<u8>,
     /// Bus clock frequency in kHz.
     #[serde(default, rename = "frequency_kHz", alias = "frequency")]
     pub frequency_khz: Option<u32>,
+}
+
+/// UART configuration (`esp32.uart`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UartConfig {
+    /// Hardware peripheral index, e.g. `1` for `UART1`. YAML key `uart`.
+    #[serde(alias = "uart")]
+    pub peripheral: u32,
+    #[serde(default)]
+    pub tx: Option<u32>,
+    #[serde(default)]
+    pub rx: Option<u32>,
+    /// Baud rate. Accepts `baud` or `frequency_kHz` (kept for schema parity).
+    #[serde(default, alias = "baud", rename = "frequency_kHz")]
+    pub baud: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
