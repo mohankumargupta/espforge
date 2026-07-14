@@ -185,11 +185,24 @@ fn run() -> anyhow::Result<()> {
             // build. Always overwritten (it is user input, not generated code).
             copy_app_to_out(project_dir, &out)?;
 
+            // Report the features actually emitted into the generated manifest:
+            // `required_features` are project-level (embassy/alloc/wifi) and
+            // `runtime_features` are the `espforge-runtime` module features
+            // gating the components in use. The earlier log only printed
+            // `required_features`, which is empty for blocking examples and made
+            // the gating look broken. Each driver's `runtime_features()`
+            // defaults to `[kind()]` (see `driver.rs`), so the instance kind is
+            // exactly the emitted module feature.
+            let mut runtime_features: std::collections::BTreeSet<String> =
+                std::collections::BTreeSet::new();
+            for inst in &ir.instances {
+                runtime_features.insert(inst.kind.clone());
+            }
             println!(
-                "build: wrote project to {} — {} instance(s), features {:?}",
+                "build: wrote project to {} — {} instance(s), runtime features {:?}",
                 out.display(),
                 ir.instances.len(),
-                ir.required_features
+                runtime_features
             );
             println!("  (run `cargo build` in that dir with an esp toolchain to compile)");
         }

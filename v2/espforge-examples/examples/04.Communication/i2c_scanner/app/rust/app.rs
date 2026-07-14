@@ -1,10 +1,9 @@
 use crate::{component, Context};
-use embedded_hal::i2c::I2c;
 
 pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
     let delay = ctx.delay;
-    let i2c = component!(i2c0);
+    let i2c = component!(ctx, i2c0);
 
     logger.info("I2C Scanner Example");
 
@@ -12,7 +11,7 @@ pub fn setup(ctx: &mut Context) {
     // there is a device there. The I2cBus exposes the underlying esp-hal bus
     // via `bus()`.
     for address in 1..127 {
-        match i2c.bus().write(address, &[]) {
+        match i2c.bus_mut().write(address, &[]) {
             Ok(_) => {
                 logger.info(format_args!("Found device at address 0x{:02x}", address));
             }
