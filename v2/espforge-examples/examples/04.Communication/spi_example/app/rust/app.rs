@@ -1,11 +1,10 @@
 #![allow(unused_variables)]
 
 use crate::{component, Context};
-use embedded_hal::spi::SpiBus;
 
 pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
-    let spi = component!(spi0);
+    let spi = component!(ctx, spi0);
     
     logger.info("SPI Example");
     

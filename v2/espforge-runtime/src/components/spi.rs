@@ -4,12 +4,12 @@
 //! transfer asserts/releases `cs` automatically (the wokwi chip expects active
 //! low CS). Devices borrow `&SpiBus` (shared access) to talk on the same bus.
 
-use esp_hal::spi::master::{Config, Spi, SpiDma};
-use esp_hal::spi::SpiMode;
+use esp_hal::spi::master::{Config, Spi};
+use esp_hal::spi::Mode;
 use esp_hal::gpio::{InputPin, OutputPin};
 
 pub struct SpiBus {
-    bus: SpiDma<'static, esp_hal::Blocking>,
+    bus: Spi<'static, esp_hal::Blocking>,
 }
 
 impl SpiBus {
@@ -28,39 +28,39 @@ impl SpiBus {
         frequency_khz: u32,
     ) -> Self {
         let spi_mode = match mode {
-            0 => SpiMode::Mode0,
-            1 => SpiMode::Mode1,
-            2 => SpiMode::Mode2,
-            3 => SpiMode::Mode3,
-            _ => SpiMode::Mode0,
+            0 => Mode::_0,
+            1 => Mode::_1,
+            2 => Mode::_2,
+            3 => Mode::_3,
+            _ => Mode::_0,
         };
         let config = Config::default()
             .with_frequency(esp_hal::time::Rate::from_khz(frequency_khz))
-            .with_spi_mode(spi_mode);
+            .with_mode(spi_mode);
         let bus = Spi::new(spi, config)
+            .unwrap()
             .with_sck(sclk)
             .with_mosi(mosi)
             .with_miso(miso)
-            .with_cs(cs)
-            .into_dma();
+            .with_cs(cs);
         SpiBus { bus }
     }
 
-    /// Shared access to the underlying bus (esp-hal `SpiDma`), which implements
+    /// Shared access to the underlying bus (esp-hal `Spi`), which implements
     /// `embedded_hal::spi::SpiBus` so callers can use `transfer_in_place`, etc.
-    pub fn bus(&self) -> &SpiDma<'static, esp_hal::Blocking> {
+    pub fn bus(&self) -> &Spi<'static, esp_hal::Blocking> {
         &self.bus
     }
 
     /// Mutable access to the underlying bus.
-    pub fn bus_mut(&mut self) -> &mut SpiDma<'static, esp_hal::Blocking> {
+    pub fn bus_mut(&mut self) -> &mut Spi<'static, esp_hal::Blocking> {
         &mut self.bus
     }
 
     /// Transfer `data` in place on the bus (full-duplex), managing CS. Mirrors
     /// `embedded_hal::spi::SpiBus::transfer_in_place` so example code reads
     /// naturally as `spi.transfer_in_place(&mut buf)`.
-    pub fn transfer_in_place(&mut self, data: &mut [u8]) -> Result<(), embedded_hal::spi::ErrorKind> {
+    pub fn transfer_in_place(&mut self, data: &mut [u8]) -> Result<(), esp_hal::spi::Error> {
         embedded_hal::spi::SpiBus::transfer_in_place(&mut self.bus, data)
     }
 }

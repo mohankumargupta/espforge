@@ -4,7 +4,7 @@ use crate::{component, Context};
 
 pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
-    let uart = component!(uart0);
+    let uart = component!(ctx, uart0);
 
     logger.info("UART Example");
     uart.write("Hello\n");
@@ -13,7 +13,7 @@ pub fn setup(ctx: &mut Context) {
 pub fn forever(ctx: &mut Context) {
     let logger = ctx.logger;
     let delay = ctx.delay;
-    let uart = component!(uart0);
+    let uart = component!(ctx, uart0);
 
     // buffer_until_newline() returns the number of bytes buffered so far; a
     // non-zero count means a line arrived.

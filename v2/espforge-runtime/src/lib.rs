@@ -10,10 +10,14 @@
 
 #![no_std]
 
-// Capability modules are compiled in only when the generated project enables
-// their feature (design §19.1). A `helloworld` project that lists no features
-// compiles neither `components` nor `devices`.
-#[cfg(any(feature = "led", feature = "i2c", feature = "button"))]
+// The `components` namespace is always present; individual capability modules
+// are gated per-sub-module in `components/mod.rs` (design §19.1). Gating the
+// whole namespace on `any(feature = ...)` here caused the module to be silently
+// compiled out (and `espforge_runtime::components::X` to fail to resolve) when a
+// new component feature was added but forgotten in the list — so we keep the
+// namespace unconditionally compiled and let the per-struct `#[cfg]` gates do
+// the real selection. The emitter only ever references a component whose
+// feature is enabled, so there is no dead-code cost.
 pub mod components;
 #[cfg(feature = "ssd1306")]
 pub mod devices;
