@@ -9,7 +9,6 @@
 
 use esp_hal::gpio::{InputPin, OutputPin};
 use esp_hal::uart::{Config, Uart};
-use esp_hal::Uart as _; // pull in the esp-hal Uart inherent/extension methods.
 
 /// Size of the internal line buffer (bytes). Matches wokwi's typical UART line
 /// length for these course examples.
@@ -30,9 +29,11 @@ impl UartDevice {
         rx: impl InputPin + 'static,
         baud: u32,
     ) -> Self {
-        let config = Config::default()
-            .with_baudrate(esp_hal::time::Rate::from_hz(baud));
-        let uart = Uart::new(uart, config, tx, rx).unwrap();
+        let config = Config::default().with_baudrate(baud);
+        let uart = Uart::new(uart, config)
+            .unwrap()
+            .with_tx(tx)
+            .with_rx(rx);
         UartDevice {
             uart,
             buf: [0u8; BUF_LEN],

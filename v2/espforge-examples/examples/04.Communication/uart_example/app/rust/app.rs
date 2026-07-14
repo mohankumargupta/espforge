@@ -7,7 +7,7 @@ pub fn setup(ctx: &mut Context) {
     let uart = component!(ctx, uart0);
 
     logger.info("UART Example");
-    uart.write("Hello\n");
+    uart.write("Hello\n").expect("uart write failed");
 }
 
 pub fn forever(ctx: &mut Context) {
