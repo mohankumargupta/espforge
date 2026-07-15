@@ -15,6 +15,8 @@ use esp_hal::gpio::{InputPin, Output, OutputPin};
 use esp_hal::spi::master::{Config, Spi};
 use esp_hal::spi::Mode;
 
+use crate::Delay;
+
 /// A `Copy` handle to a shared SPI master bus (v1-style, ADR-003).
 #[derive(Clone, Copy)]
 pub struct SpiBus {
@@ -79,17 +81,17 @@ impl SpiBus {
 pub struct SpiDevice {
     bus: SpiBus,
     cs: Output<'static>,
-    delay: espforge_runtime::Delay,
+    delay: Delay,
 }
 
 impl SpiDevice {
-    pub fn new(bus: SpiBus, cs: Output<'static>, delay: espforge_runtime::Delay) -> Self {
+    pub fn new(bus: SpiBus, cs: Output<'static>, delay: Delay) -> Self {
         SpiDevice { bus, cs, delay }
     }
 
     /// `Delay` is `Copy`, so the device can take its own clone for the driver's
     /// `&mut impl DelayNs` init argument without moving it out of the handle.
-    pub fn delay_clone(&self) -> espforge_runtime::Delay {
+    pub fn delay_clone(&self) -> Delay {
         self.delay
     }
 }
@@ -109,17 +111,28 @@ impl embedded_hal::spi::SpiDevice for SpiDevice {
         let result = (|| {
             for op in operations.iter_mut() {
                 match op {
-                    Operation::Read(buf) => self.bus.bus().borrow_mut().read(buf)?,
-                    Operation::Write(buf) => self.bus.bus().borrow_mut().write(buf)?,
+                    Operation::Read(buf) => {
+                        embedded_hal::spi::SpiBus::read(&mut self.bus.bus().borrow_mut(), buf)?
+                    }
+                    Operation::Write(buf) => {
+                        embedded_hal::spi::SpiBus::write(&mut self.bus.bus().borrow_mut(), buf)?
+                    }
                     Operation::Transfer(read, write) => {
-                        self.bus.bus().borrow_mut().transfer(read, write)?
+                        embedded_hal::spi::SpiBus::transfer(
+                            &mut self.bus.bus().borrow_mut(),
+                            read,
+                            write,
+                        )?
                     }
                     Operation::TransferInPlace(buf) => {
-                        self.bus.bus().borrow_mut().transfer_in_place(buf)?
+                        embedded_hal::spi::SpiBus::transfer_in_place(
+                            &mut self.bus.bus().borrow_mut(),
+                            buf,
+                        )?
                     }
-                    Operation::DelayNs(ns) => self
-                        .delay
-                        .delay_ns((*ns).try_into().unwrap_or(u32::MAX)),
+                    Operation::DelayNs(ns) => {
+                        self.delay.delay_ns((*ns).try_into().unwrap_or(u32::MAX))
+                    }
                 }
             }
             Ok(())

@@ -155,8 +155,12 @@ fn run() -> anyhow::Result<()> {
             let text = std::fs::read_to_string(&project)
                 .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", project.display()))?;
             let proj = espforge::parse::parse_str(&text)?;
-            espforge::pipeline::validate(&proj)
-                .map_err(|diags| anyhow::anyhow!("validation failed: {} error(s)", diags.len()))?;
+            if let Err(diags) = espforge::pipeline::validate(&proj) {
+                for d in &diags {
+                    eprintln!("{}", d.render(&text));
+                }
+                anyhow::bail!("validation failed: {} error(s)", diags.len());
+            }
             let ir = espforge::pipeline::resolve(&proj);
 
             // Layer 1: standard Espressif scaffold (esp-generate), merged without
