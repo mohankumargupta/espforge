@@ -19,6 +19,12 @@
 // the real selection. The emitter only ever references a component whose
 // feature is enabled, so there is no dead-code cost.
 pub mod components;
+// Software-service capabilities (Http, future mqtt/websockets) live in
+// `services/` (ADR-013): hardware-backed components live in `components/`, and
+// the two are kept apart internally. `services` is always compiled; individual
+// modules are per-feature gated, and re-exported into `components` so the
+// generated `ctx.components.http` accessor is uniform.
+pub mod services;
 // The `devices` namespace is always present, mirroring `components` above;
 // individual device submodules are gated per-sub-module in `devices/mod.rs`
 // (design §19.1). Gating the whole namespace here caused the module to be

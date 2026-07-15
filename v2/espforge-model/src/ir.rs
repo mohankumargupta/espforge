@@ -30,6 +30,10 @@ pub struct DeviceTree {
     pub required_features: Vec<String>,
     /// Cross-cutting flags derived during resolve (ADR-005).
     pub flags: Flags,
+    /// Top-level `esp32.wifi` config, if declared. Consumed by the emitter to
+    /// build the singleton Stack (ADR-012); the Stack is implicit infrastructure,
+    /// not a claimed peripheral.
+    pub wifi: Option<crate::project::WifiConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

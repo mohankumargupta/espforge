@@ -47,6 +47,8 @@ pub struct DepSpec {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SpecFlags {
     #[serde(default)]
+    pub is_embassy: bool,
+    #[serde(default)]
     pub has_alloc: bool,
     #[serde(default)]
     pub has_wifi: bool,

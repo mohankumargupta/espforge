@@ -188,6 +188,26 @@ pub fn validate(project: &Project) -> Result<(), Vec<Diag>> {
         }
     }
 
+    // A stack-consuming (network) instance requires the top-level `esp32.wifi`
+    // block to exist (ADR-012: Stack is built from it; `http` does not claim it).
+    let has_wifi_block = project.esp32.wifi.is_some();
+    if !has_wifi_block {
+        for inst in project.components.iter().chain(project.devices.iter()) {
+            if let Some(spec) = by_kind.get(inst.kind.as_str()) {
+                if spec.flags.needs_stack {
+                    diags.push(
+                        Diag::error(format!(
+                            "component `{}` (using: {}) requires network, but no `esp32.wifi` block is declared",
+                            inst.id, inst.kind
+                        ))
+                        .at(inst.span)
+                        .hint("add a top-level `esp32.wifi:` block with `ssid:` and `password:`"),
+                    );
+                }
+            }
+        }
+    }
+
     if diags.iter().any(|d| d.level == Level::Error) {
         return Err(diags);
     }
@@ -249,6 +269,7 @@ pub fn resolve(project: &Project) -> DeviceTree {
                 }
             }
             let f = &spec.flags;
+            if f.is_embassy { flags.is_embassy = true; }
             if f.has_alloc { flags.has_alloc = true; }
             if f.has_wifi { flags.has_wifi = true; }
             if f.needs_delay { flags.needs_delay = true; }
@@ -301,6 +322,7 @@ pub fn resolve(project: &Project) -> DeviceTree {
         init_order,
         required_features,
         flags,
+        wifi: project.esp32.wifi.clone(),
     }
 }
 

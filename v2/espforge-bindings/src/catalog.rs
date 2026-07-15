@@ -82,5 +82,22 @@ pub fn catalog() -> Vec<DriverSpec> {
             peripherals: vec![],
             flags: SpecFlags { needs_delay: true, ..Default::default() },
         },
+        // `http` is a software-service component (ADR-012): it claims no
+        // peripheral and takes no `with:` bus — it consumes the implicit Stack
+        // built from `esp32.wifi`. It forces Embassy + network stack + alloc.
+        DriverSpec {
+            kind: "http".to_string(),
+            tier: Tier::Component,
+            deps: vec![],
+            pins: vec![],
+            peripherals: vec![],
+            flags: SpecFlags {
+                is_embassy: true,
+                has_wifi: true,
+                needs_stack: true,
+                has_alloc: true,
+                ..Default::default()
+            },
+        },
     ]
 }

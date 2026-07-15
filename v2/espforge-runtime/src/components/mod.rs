@@ -27,3 +27,8 @@ pub use spi::SpiBus;
 pub use spi::SpiDevice;
 #[cfg(feature = "uart")]
 pub use uart::UartDevice;
+// Software-service components are re-exported here so the generated
+// `ctx.components.http` accessor is uniform with hardware components (ADR-013).
+// Re-exported from `services/`, where they actually live.
+#[cfg(feature = "http")]
+pub use crate::services::Http;

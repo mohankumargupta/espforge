@@ -107,6 +107,7 @@ pub trait Driver: Debug + Send + Sync {
 /// Flags a driver can assert about the whole project when it is present.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DriverFlags {
+    pub is_embassy: bool,
     pub has_alloc: bool,
     pub has_wifi: bool,
     pub needs_delay: bool,

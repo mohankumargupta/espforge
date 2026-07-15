@@ -29,6 +29,56 @@ Wiring is a DAG: components may be consumed by components and devices; **devices
 are terminal** (no device-on-device). Bus-sharing lives at the component tier
 (one `I2cDevice` shared by reference by many devices).
 
+### 2b. Networking model (ADR-012, decided 2026-07-16)
+
+Networking follows **esphome's shape**, not the per-instance-claim shape used
+for buses. There is **no `tcp` component** — the TCP/IP `Stack` is implicit
+infrastructure built once from the top-level `esp32.wifi` block, exactly as
+esphome's `http_request:` presumes a global network link and never references a
+named `wifi:` instance by id.
+
+- **`esp32.wifi` is a top-level *peripheral block*** carrying `ssid`/`password`/
+  `auth` (already in the schema, §17.4). It is **not claimed by any instance**;
+  the emitter consumes it directly when `needs_stack` is set. This keeps the
+  `claimed_by` invariant clean (no instance owns the singleton network resource).
+- **`http` is a software-service `Component`** (`using: http` in `components:`),
+  declared like any other component but asserting the cross-cutting flags
+  `is_embassy`, `has_wifi`, `needs_stack`, `has_alloc`. It **claims no
+  peripheral** and takes no `with: { bus: $wifi }`.
+- **HW vs SW distinction is user-invisible (ADR-013):** no separate `services:`
+  YAML key; a single unified `components:` namespace and a single unified
+  generated `ctx.components.*`. The `nature` is **derived** — `Service` iff the
+  instance declares no `pins`/`peripherals` (only flags) — and exists only
+  *internally*: as a `espforge-runtime/src/services/` code folder and as a
+  validator rule (`Service ⇒ no pins/peripherals`).
+- The **Stack singleton** (one `embassy_net::Stack` + its `StackResources`,
+  spawned `connection` + `net_task` tasks, `wait_config_up()`) is built **inline
+  in generated `main.rs`** from the `esp32.wifi` block when `needs_stack` is set.
+  It is exposed to components as a `&'static Stack` (emitter-named global,
+  e.g. `NET_STACK`).
+- **`http`'s runtime wrapper** (`espforge-runtime::components::Http`) receives
+  `&'static Stack` as an explicit constructor arg (`Http::new(NET_STACK)`) — same
+  `ctor`/move-by-value convention as `ssd1306`/`i2c`. Internally it wraps
+  `edge_http` (`edge_http::io::client::Connection`) and hides the buffer/read-loop
+  boilerplate behind ergonomic `async get/post -> Result<String>`. The app never
+  names `edge_http`, `Connection`, or `Stack`.
+- **Bridge:** `edge_nal_embassy` provides the `edge_nal::TcpConnect + Dns` impl
+  for `&embassy_net::Stack` that `edge_http` requires (one feature-gated runtime
+  dep).
+- **WiFi crate:** the network path targets **`esp-radio` / `esp_radio::wifi`**
+  (current/maintained line, matching the canonical esp-hal 1.1 example), *not*
+  the older `esp-wifi`. The generated Cargo `esp-wifi = "*"` line is superseded
+  by `esp-radio` for the network path. `has_wifi` stays the crate-agnostic flag
+  name.
+- **Scope:** first implementation = **plaintext HTTP only** (port 80). TLS/HTTPS,
+  `mqtt`, and `websockets` are **planned future work** (same Stack + `edge_nal`
+  bridge; `edge-mqtt`, `edge-ws` / `tokio-tungstenite` + `rustls`/esp-tls for
+  HTTPS) — not non-goals, just deferred. UDP is out of scope.
+- **Validation guards:** if `http` is present but `esp32.wifi` is absent, `validate`
+  fails with a span-aware `Diag`. If `runtime: blocking` is declared with `http`,
+  `resolve` **auto-upgrades to Embassy** (any instance asserting `is_embassy`
+  wins), so no blocking network path exists.
+
 ## 3. Ubiquitous language
 | Term | Meaning |
 |---|---|
@@ -89,6 +139,11 @@ are terminal** (no device-on-device). Bus-sharing lives at the component tier
   the component/device distinction that esphome blurs.
 - Per driver: 2 files — generate-impl in `espforge-bindings`, runtime-impl in
   `espforge-runtime` (under its `components` or `devices` module as appropriate).
+- Within `espforge-runtime/src/components/`, hardware drivers and software-
+  service drivers are further separated into `components/` and `services/`
+  subfolders **internally only** (ADR-013) — this is code organization, not a
+  user- or app-visible distinction, and does not change the unified `components:`
+  YAML key or the generated `ctx.components.*` accessor.
 
 ## 8b. Crate publishing & local override
 
@@ -195,7 +250,9 @@ peripherals **by value** into generated per-project `Components::new(...)` /
 `Devices::new(...)` signatures (produced by the IR) — **no `RefCell`, no `Option`,
 no `take().unwrap()`**. The compiler statically forbids double-claim. Embassy
 `Stack<'static>` passed as a borrow; `needs_stack` flag (IR) is the single source
-for whether it's threaded.
+for whether it's threaded. The Stack is built **inline in `main.rs`** from the
+top-level `esp32.wifi` block (not claimed by any instance) and exposed to
+components as a `&'static Stack` (emitter-named global `NET_STACK`), per ADR-012.
 
 ## 13. Validation & diagnostics
 Single `validate` stage before `resolve`, gating `compile`. Errors are
@@ -447,9 +504,14 @@ The old `Driver::required_features()` conflated two concepts. They are split:
   permitted but discouraged (rare case: two `using:` drivers sharing one feature
   set / external dep — the union dedups).
 - **`DriverFlags`** (existing, `driver.rs`) carries the cross-cutting
-  **project-level** flags (`has_alloc`, `has_wifi`, `needs_delay`,
+  **project-level** flags (`has_alloc`, `has_wifi`, `needs_delay`, `is_embassy`,
   `needs_stack`) via `ir.flags`. These map to project deps (see §19.3), not to
-  `espforge-runtime` module features.
+  `espforge-runtime` module features. **`is_embassy` must also be added to
+  `SpecFlags`** (the per-driver catalog flags) and consulted in `resolve`, so a
+  software-service component like `http` can force Embassy even when the YAML
+  says `runtime: blocking` (auto-upgrade, ADR-012). Currently `DriverFlags.
+  is_embassy` exists but the resolve loop only reads `SpecFlags.{has_wifi,
+  needs_stack}` — this gap must be closed at implementation time.
 - **`required_features()`** is repurposed/dropped to remove the ambiguity.
 
 ### 19.3 Manifest emission
@@ -457,10 +519,16 @@ The old `Driver::required_features()` conflated two concepts. They are split:
 `emit_cargo_toml` is rewritten to be driven purely by `ir.flags` plus the
 **union of `runtime_features()`** over `ir.instances`:
 
-- `is_embassy` → `embassy-executor` + esp-hal `"embassy"` feature.
+- `is_embassy` → `embassy-executor` + esp-hal `"embassy"` feature. Asserted by
+  `http` (ADR-012); `resolve` auto-upgrades from `runtime: blocking`.
 - `has_alloc` → `embedded-alloc`.
-- `has_wifi` → `esp-wifi` (+ esp-hal wifi feature). *(new)*
+- `has_wifi` → `esp-radio` (+ `esp-radio/wifi` feature). *(supersedes the older
+  `esp-wifi = "*"` line in `emit/rust.rs`; the network path targets the
+  maintained `esp_radio::wifi` API, ADR-012.)*
 - `needs_stack` → `embassy-net`. *(new)*
+- network software-services (`http`) → `edge-http`, `edge-nal-embassy`,
+  `edge-nal` (feature-gated runtime deps; bridge `embassy_net::Stack` → the
+  `edge_nal` traits `edge_http` requires, ADR-012).
 - drivers → `espforge-runtime = { …, features = [<union>] }`.
 - `Logger` / `Delay` stay unconditionally compiled (shared, negligible);
   `needs_delay` remains a marker, not a separate dep.
@@ -503,4 +571,11 @@ Two complementary checks:
 
 ### 19.6 Status
 
-Design-only. Not yet implemented. No code changed in the grilling session.
+Networking design **decided** (ADR-012, grilling session 2026-07-16): no `tcp`
+component; `esp32.wifi` is a top-level block; Stack built inline in `main.rs`;
+`http` is a wrapped runtime component (`ctx.components.http`) over `edge_http` +
+`edge_nal_embassy` on an `esp_radio`/`embassy_net` stack; plaintext only (HTTPS/
+mqtt/websockets deferred to future work, same Stack + `edge_nal` bridge). Not yet
+implemented — open `implement` items: add `is_embassy` to `SpecFlags` + wire into
+`resolve`; swap `esp-wifi` → `esp-radio` in `emit/rust.rs`; add `Http` runtime
+component + manifest deps.
