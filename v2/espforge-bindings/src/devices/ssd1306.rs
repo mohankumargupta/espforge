@@ -43,10 +43,23 @@ impl Driver for Ssd1306Driver {
             .find(|d| d.kind == DepKind::Instance)
             .map(|d| codegen::sanitize(&d.name))
             .unwrap_or_else(|| "unreachable!()".to_string());
+        // `address` is a `with` value (e.g. 0x3C); default to the common SSD1306
+        // address if absent.
+        let address = inst
+            .with
+            .get("address")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0x3C) as u8;
         Construction::for_instance(
             inst,
-            ctx.backend
-                .ctor(Tier::Device, "Ssd1306", &[format!("components.{component_field}")]),
+            ctx.backend.ctor(
+                Tier::Device,
+                "Ssd1306",
+                &[
+                    format!("components.{component_field}"),
+                    format!("{address}_u8"),
+                ],
+            ),
         )
     }
 }

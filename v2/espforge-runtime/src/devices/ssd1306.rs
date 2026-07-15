@@ -30,8 +30,11 @@ impl Ssd1306 {
     /// `bus` is the I2C bus component, moved in by value (matches v1's
     /// `SSD1306Device::new(i2c)` — no reset/DC lines on the I2C variant). `I2cBus`
     /// is a `Copy` handle, so this is a pointer bitcopy, not a peripheral move.
-    pub fn new(bus: I2cBus) -> Self {
-        let interface = I2CInterface::new(bus);
+    /// `address` is the 7-bit SSD1306 I2C slave address (e.g. 0x3C).
+    pub fn new(bus: I2cBus, address: u8) -> Self {
+        // `data_byte` is the SSD1306 control/Co-DC byte; 0x40 sets the D/C bit
+        // (data), the library clears it for command bytes.
+        let interface = I2CInterface::new(bus, address, 0x40);
         let display = Ssd1306Driver::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
             .into_buffered_graphics_mode();
         let text_style = MonoTextStyleBuilder::new()
