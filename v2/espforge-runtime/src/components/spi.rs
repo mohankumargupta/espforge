@@ -38,12 +38,12 @@ impl SpiBus {
     /// generated wiring; the result is parked in a `StaticCell<RefCell<_>>`
     /// and surfaced via `from_ref`.
     #[allow(clippy::too_many_arguments)]
-    pub fn build<CS: OutputPin + 'static>(
+    pub fn build(
         spi: esp_hal::peripherals::SPI2<'static>,
         mosi: impl OutputPin + 'static,
         miso: impl InputPin + 'static,
         sclk: impl OutputPin + 'static,
-        cs: Option<CS>,
+        cs: Option<Output<'static>>,
         mode: u8,
         frequency_khz: u32,
     ) -> Spi<'static, esp_hal::Blocking> {
