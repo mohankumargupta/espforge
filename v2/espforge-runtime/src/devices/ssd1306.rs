@@ -2,8 +2,9 @@
 //! component by value (ADR-008). Uses the same external crates v1 used
 //! (`ssd1306` + `embedded-graphics`; see `espforge_devices::devices::ssd1306`).
 
+use display_interface_i2c::I2cInterface;
 use embedded_graphics::{
-    mono_font::{ascii::FONT_6X10, MonoTextStyleBuilder},
+    mono_font::{ascii::FONT_6X10, MonoTextStyle, MonoTextStyleBuilder},
     pixelcolor::BinaryColor,
     prelude::*,
     text::{Baseline, Text},
@@ -16,7 +17,7 @@ use ssd1306::{
 use crate::components::i2c::I2cBus;
 
 type Ssd1306Display = Ssd1306Driver<
-    I2CDisplayInterface<I2cBus>,
+    I2CDisplayInterface,
     DisplaySize128x64,
     BufferedGraphicsMode<DisplaySize128x64>,
 >;
@@ -31,7 +32,7 @@ impl Ssd1306 {
     /// `SSD1306Device::new(i2c)` — no reset/DC lines on the I2C variant). `I2cBus`
     /// is a `Copy` handle, so this is a pointer bitcopy, not a peripheral move.
     pub fn new(bus: I2cBus) -> Self {
-        let interface = I2CDisplayInterface::new(bus);
+        let interface = I2CDisplayInterface::new(I2cInterface::new(bus));
         let display = Ssd1306Driver::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
             .into_buffered_graphics_mode();
         let text_style = MonoTextStyleBuilder::new()

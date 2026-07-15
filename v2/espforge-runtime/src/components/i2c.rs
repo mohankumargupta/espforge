@@ -58,6 +58,18 @@ impl embedded_hal::i2c::I2c for I2cBus {
         address: u8,
         operations: &mut [embedded_hal::i2c::Operation<'_>],
     ) -> Result<(), Self::Error> {
-        self.bus.borrow_mut().transaction(address, operations)
+        // `embedded_hal::i2c::Operation` and `esp_hal::i2c::master::Operation`
+        // are distinct enums, and esp-hal's `I2c` doesn't implement the
+        // embedded-hal `I2c` trait. Bridge each op to the peripheral's
+        // `write`/`read` methods directly (I2C displays issue discrete
+        // Write/Read ops, no combined-transaction semantics needed).
+        let mut bus = self.bus.borrow_mut();
+        for op in operations.iter_mut() {
+            match op {
+                embedded_hal::i2c::Operation::Write(buffer) => bus.write(address, buffer)?,
+                embedded_hal::i2c::Operation::Read(buffer) => bus.read(address, buffer)?,
+            }
+        }
+        Ok(())
     }
 }
