@@ -1,32 +1,50 @@
 //! `spi` component: an SPI master bus (ADR-003/008 bus-sharing).
 //!
-//! Wraps the esp-hal SPI master and attaches the chip-select pin so that every
-//! transfer asserts/releases `cs` automatically (the wokwi chip expects active
-//! low CS). Devices borrow `&SpiBus` (shared access) to talk on the same bus.
+//! Mirrors v1's `espforge_components::components::spi::SPI`: a `Copy` handle
+//! around a `&'static RefCell<Spi>`. The actual peripheral is allocated once in
+//! a `StaticCell` by the generated wiring (the `spi` driver's `construct`), so
+//! this type is cheap to move into devices — copying the handle is a pointer
+//! bitcopy, never a move of the peripheral (no double-move, ADR-008).
+//!
+//! A bus-level chip-select is attached only when the `esp32.spi` declaration
+//! provides one (some buses, e.g. the `ili9341` example, share a bus across
+//! devices that each own a private CS pin instead — see `SpiDevice` below).
 
+use core::cell::RefCell;
+use esp_hal::gpio::{InputPin, Output, OutputPin};
 use esp_hal::spi::master::{Config, Spi};
 use esp_hal::spi::Mode;
-use esp_hal::gpio::{InputPin, OutputPin};
 
+/// A `Copy` handle to a shared SPI master bus (v1-style, ADR-003).
+#[derive(Clone, Copy)]
 pub struct SpiBus {
-    bus: Spi<'static, esp_hal::Blocking>,
+    bus: &'static RefCell<Spi<'static, esp_hal::Blocking>>,
 }
 
 impl SpiBus {
-    /// `spi` is the SPI peripheral moved in by value; `mosi`/`miso`/`sclk`/`cs`
-    /// are the bus pins moved in by value. `mode` is the SPI mode (0–3) and
-    /// `frequency_khz` the bus clock. The CS pin is attached to the master so
-    /// transfers manage it automatically.
+    /// Wrap a `&'static RefCell<Spi>` allocated by the wiring code. The `spi`
+    /// component driver builds the inner `Spi` once and hands out `Copy`
+    /// handles to every device that shares this bus.
+    pub fn from_ref(bus: &'static RefCell<Spi<'static, esp_hal::Blocking>>) -> Self {
+        SpiBus { bus }
+    }
+
+    /// Build the owned esp-hal `Spi` master from its peripheral + pins and
+    /// mode/frequency. `cs`, if present, is attached to the master so transfers
+    /// manage it automatically; pass `None` when devices sharing the bus
+    /// provide their own CS (wrap them with `SpiDevice`). Called once by the
+    /// generated wiring; the result is parked in a `StaticCell<RefCell<_>>`
+    /// and surfaced via `from_ref`.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn build<CS: OutputPin + 'static>(
         spi: esp_hal::peripherals::SPI2<'static>,
         mosi: impl OutputPin + 'static,
         miso: impl InputPin + 'static,
         sclk: impl OutputPin + 'static,
-        cs: impl OutputPin + 'static,
+        cs: Option<CS>,
         mode: u8,
         frequency_khz: u32,
-    ) -> Self {
+    ) -> Spi<'static, esp_hal::Blocking> {
         let spi_mode = match mode {
             0 => Mode::_0,
             1 => Mode::_1,
@@ -37,30 +55,76 @@ impl SpiBus {
         let config = Config::default()
             .with_frequency(esp_hal::time::Rate::from_khz(frequency_khz))
             .with_mode(spi_mode);
-        let bus = Spi::new(spi, config)
+        let mut bus = Spi::new(spi, config)
             .unwrap()
             .with_sck(sclk)
             .with_mosi(mosi)
-            .with_miso(miso)
-            .with_cs(cs);
-        SpiBus { bus }
+            .with_miso(miso);
+        if let Some(cs) = cs {
+            bus = bus.with_cs(cs);
+        }
+        bus
     }
 
-    /// Shared access to the underlying bus (esp-hal `Spi`), which implements
-    /// `embedded_hal::spi::SpiBus` so callers can use `transfer_in_place`, etc.
-    pub fn bus(&self) -> &Spi<'static, esp_hal::Blocking> {
-        &self.bus
+    /// Shared access to the underlying bus.
+    pub fn bus(&self) -> &'static RefCell<Spi<'static, esp_hal::Blocking>> {
+        self.bus
+    }
+}
+
+/// A single device on a shared SPI bus with its own chip-select pin — the
+/// move-by-value analog of v1's `espforge_platform::bus::SpiDevice`. Used by
+/// devices (like `ili9341`) that need `embedded_hal::spi::SpiDevice` (CS
+/// managed per-transaction) rather than the bus-level CS `SpiBus` offers.
+pub struct SpiDevice {
+    bus: SpiBus,
+    cs: Output<'static>,
+    delay: espforge_runtime::Delay,
+}
+
+impl SpiDevice {
+    pub fn new(bus: SpiBus, cs: Output<'static>, delay: espforge_runtime::Delay) -> Self {
+        SpiDevice { bus, cs, delay }
     }
 
-    /// Mutable access to the underlying bus.
-    pub fn bus_mut(&mut self) -> &mut Spi<'static, esp_hal::Blocking> {
-        &mut self.bus
+    /// `Delay` is `Copy`, so the device can take its own clone for the driver's
+    /// `&mut impl DelayNs` init argument without moving it out of the handle.
+    pub fn delay_clone(&self) -> espforge_runtime::Delay {
+        self.delay
     }
+}
 
-    /// Transfer `data` in place on the bus (full-duplex), managing CS. Mirrors
-    /// `embedded_hal::spi::SpiBus::transfer_in_place` so example code reads
-    /// naturally as `spi.transfer_in_place(&mut buf)`.
-    pub fn transfer_in_place(&mut self, data: &mut [u8]) -> Result<(), esp_hal::spi::Error> {
-        embedded_hal::spi::SpiBus::transfer_in_place(&mut self.bus, data)
+impl embedded_hal::spi::ErrorType for SpiDevice {
+    type Error = esp_hal::spi::Error;
+}
+
+impl embedded_hal::spi::SpiDevice for SpiDevice {
+    fn transaction(
+        &mut self,
+        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
+    ) -> Result<(), Self::Error> {
+        use embedded_hal::delay::DelayNs;
+        use embedded_hal::spi::{Operation, SpiBus as _};
+        self.cs.set_low();
+        let result = (|| {
+            for op in operations.iter_mut() {
+                match op {
+                    Operation::Read(buf) => self.bus.bus().borrow_mut().read(buf)?,
+                    Operation::Write(buf) => self.bus.bus().borrow_mut().write(buf)?,
+                    Operation::Transfer(read, write) => {
+                        self.bus.bus().borrow_mut().transfer(read, write)?
+                    }
+                    Operation::TransferInPlace(buf) => {
+                        self.bus.bus().borrow_mut().transfer_in_place(buf)?
+                    }
+                    Operation::DelayNs(ns) => self
+                        .delay
+                        .delay_ns((*ns).try_into().unwrap_or(u32::MAX)),
+                }
+            }
+            Ok(())
+        })();
+        self.cs.set_high();
+        result
     }
 }

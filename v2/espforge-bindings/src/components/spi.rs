@@ -48,12 +48,12 @@ impl Driver for SpiDriver {
                 espforge_model::ir::BusInit::Spi(s) => Some(s),
                 _ => None,
             })
-            .map(|s| {
+            .map(|s: &espforge_model::ir::SpiInit| {
                 (
                     s.mosi.unwrap_or(0).to_string(),
                     s.miso.unwrap_or(0).to_string(),
                     s.sclk.unwrap_or(0).to_string(),
-                    s.cs.unwrap_or(0).to_string(),
+                    s.cs,
                     s.mode.unwrap_or(0) as u32,
                     s.frequency_khz.unwrap_or(100).to_string(),
                 )
@@ -63,15 +63,28 @@ impl Driver for SpiDriver {
                     "0".to_string(),
                     "0".to_string(),
                     "0".to_string(),
-                    "0".to_string(),
+                    None,
                     0u32,
                     "100".to_string(),
                 )
             });
-        Construction::for_instance(
-            inst,
-            ctx.backend
-                .spi_master(&field, &mosi, &miso, &sclk, &cs, mode as u8, freq.parse().unwrap_or(100)),
-        )
+        let cs = cs.map(|n| n.to_string());
+        let build = ctx.backend.spi_master(
+            &field,
+            &mosi,
+            &miso,
+            &sclk,
+            cs.as_deref(),
+            mode as u8,
+            freq.parse().unwrap_or(100),
+        );
+        // Allocate the owned `Spi` once in a static `RefCell` (v1 idiom, ADR-008)
+        // and surface a `Copy` `SpiBus` handle into the `Components` field.
+        let cell = format!(
+            "{{ static {id}_SPI_CELL: static_cell::StaticCell<core::cell::RefCell<esp_hal::spi::master::Spi<'static, esp_hal::Blocking>>> = static_cell::StaticCell::new(); espforge_runtime::components::SpiBus::from_ref({id}_SPI_CELL.init(core::cell::RefCell::new({build}))) }}",
+            id = codegen::sanitize(&inst.id),
+            build = build,
+        );
+        Construction::for_instance(inst, cell)
     }
 }

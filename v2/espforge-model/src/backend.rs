@@ -27,15 +27,19 @@ pub trait Backend: Debug + Send + Sync {
     fn i2c_master(&self, i2c: &str, sda: &str, scl: &str) -> String;
 
     /// Construct an SPI master bus from its peripheral + mosi/miso/sclk/cs pins
-    /// and mode/frequency. `cs` is attached to the master so transfers manage
-    /// the chip-select line automatically.
+    /// and mode/frequency. `cs` is only attached at the bus level when the
+    /// `esp32.spi` declaration provides one; devices that need a private,
+    /// per-instance chip-select (e.g. `ili9341` sharing a bus) claim their own
+    /// pin and wrap it with `espforge_runtime::components::SpiDevice` instead.
+    /// The returned snippet is the inner `SpiBus::build(...)` call — the
+    /// binding wraps it in a per-instance `StaticCell<RefCell<_>>` (ADR-008).
     fn spi_master(
         &self,
         spi: &str,
         mosi: &str,
         miso: &str,
         sclk: &str,
-        cs: &str,
+        cs: Option<&str>,
         mode: u8,
         frequency_khz: u32,
     ) -> String;
@@ -76,7 +80,7 @@ impl Backend for Blocking {
 
     fn i2c_master(&self, i2c: &str, sda: &str, scl: &str) -> String {
         format!(
-            "espforge_runtime::components::I2cBus::new(registry.peripherals.{i2c}, registry.peripherals.GPIO{sda}, registry.peripherals.GPIO{scl})"
+            "espforge_runtime::components::I2cBus::build(registry.peripherals.{i2c}, registry.peripherals.GPIO{sda}, registry.peripherals.GPIO{scl})"
         )
     }
 
@@ -86,17 +90,21 @@ impl Backend for Blocking {
         mosi: &str,
         miso: &str,
         sclk: &str,
-        cs: &str,
+        cs: Option<&str>,
         mode: u8,
         frequency_khz: u32,
     ) -> String {
+        let cs_arg = match cs {
+            Some(cs) => format!("Some(registry.peripherals.GPIO{cs})"),
+            None => "None".to_string(),
+        };
         format!(
-            "espforge_runtime::components::SpiBus::new(\
+            "espforge_runtime::components::SpiBus::build(\
                  registry.peripherals.{spi}, \
                  registry.peripherals.GPIO{mosi}, \
                  registry.peripherals.GPIO{miso}, \
                  registry.peripherals.GPIO{sclk}, \
-                 registry.peripherals.GPIO{cs}, \
+                 {cs_arg}, \
                  {mode}, \
                  {frequency_khz}\
              )"

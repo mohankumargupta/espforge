@@ -55,9 +55,14 @@ impl Driver for I2cDriver {
                 )
             })
             .unwrap_or_else(|| ("0".to_string(), "0".to_string()));
-        Construction::for_instance(
-            inst,
-            ctx.backend.i2c_master(&field, &sda, &scl),
-        )
+        let build = ctx.backend.i2c_master(&field, &sda, &scl);
+        // Allocate the owned `I2c` once in a static `RefCell` (v1 idiom, ADR-008)
+        // and surface a `Copy` `I2cBus` handle into the `Components` field.
+        let cell = format!(
+            "{{ static {id}_I2C_CELL: static_cell::StaticCell<core::cell::RefCell<esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>> = static_cell::StaticCell::new(); espforge_runtime::components::I2cBus::from_ref({id}_I2C_CELL.init(core::cell::RefCell::new({build}))) }}",
+            id = codegen::sanitize(&inst.id),
+            build = build,
+        );
+        Construction::for_instance(inst, cell)
     }
 }

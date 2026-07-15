@@ -394,6 +394,12 @@ fn main() -> ! {{
     let peripherals = esp_hal::init(esp_hal::Config::default());
     let registry = PeripheralRegistry::new(peripherals);
 
+    // Hoisted above the component/device wiring because some drivers
+    // (ili9341, and components flagged `needs_delay`) take `&ctx.delay` at
+    // construct time (ADR-008).
+    let logger = espforge_runtime::Logger::new();
+    let delay = espforge_runtime::Delay::new();
+
     // Components are wired move-by-value from the registry (ADR-008).
     let components = Components {{
 {component_inits}
@@ -402,8 +408,6 @@ fn main() -> ! {{
 {device_inits}
     }};
 
-    let logger = espforge_runtime::Logger::new();
-    let delay = espforge_runtime::Delay::new();
     let ctx = Context {{ logger, delay, components, devices }};
     let ctx = CTX.init(ctx);
     app::setup(ctx);
@@ -438,6 +442,11 @@ async fn main(spawner: Spawner) {{
     let timg0 = TimerGroup::new(registry.peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
 
+    // Hoisted above the component/device wiring because some drivers take
+    // `&ctx.delay` at construct time (ADR-008).
+    let logger = espforge_runtime::Logger::new();
+    let delay = espforge_runtime::Delay::new();
+
     let components = Components {{
 {component_inits}
     }};
@@ -445,8 +454,6 @@ async fn main(spawner: Spawner) {{
 {device_inits}
     }};
 
-    let logger = espforge_runtime::Logger::new();
-    let delay = espforge_runtime::Delay::new();
     let ctx = Context {{ logger, delay, components, devices }};
     let ctx = CTX.init(ctx);
     app::setup(ctx, spawner).await;

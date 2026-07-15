@@ -38,11 +38,11 @@ pub fn catalog() -> Vec<DriverSpec> {
             kind: "ssd1306".to_string(),
             tier: Tier::Device,
             deps: vec![DepSpec {
-                key: "bus".to_string(),
+                key: "component".to_string(),
                 kind: DepKind::Instance,
                 access: Access::Shared,
             }],
-            pins: vec!["reset".to_string(), "dc".to_string()],
+            pins: vec![],
             peripherals: vec![],
             flags: SpecFlags::default(),
         },
@@ -69,6 +69,18 @@ pub fn catalog() -> Vec<DriverSpec> {
             pins: vec![],
             peripherals: vec!["bus".to_string()],
             flags: SpecFlags::default(),
+        },
+        DriverSpec {
+            kind: "ili9341".to_string(),
+            tier: Tier::Device,
+            deps: vec![DepSpec {
+                key: "spi".to_string(),
+                kind: DepKind::Instance,
+                access: Access::Shared,
+            }],
+            pins: vec!["dc".to_string(), "rst".to_string(), "cs".to_string()],
+            peripherals: vec![],
+            flags: SpecFlags { needs_delay: true, ..Default::default() },
         },
     ]
 }

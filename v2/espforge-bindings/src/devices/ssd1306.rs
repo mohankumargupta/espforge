@@ -32,27 +32,21 @@ impl Driver for Ssd1306Driver {
     }
 
     fn construct(&self, inst: &ResolvedInstance, ctx: &GenContext) -> Construction {
-        // with: { bus: $i2c_bus, reset: $GPIO16, dc: $GPIO5 }
-        // `bus` is a shared component -> borrow its field by reference; reset/dc
-        // are control pins moved in by value (wrapped as Output by the backend).
-        let bus_field = inst
+        // with: { component: $i2c_master, address: 0x3C, width: 128, height: 64 }
+        // `component` is moved by value into the device (SSD1306 owns the bus
+        // exclusively over I2C, matching v1's `SSD1306Device::new(i2c)`).
+        // `I2cBus` is a `Copy` handle, so this is a pointer bitcopy (ADR-008).
+        let _ = ctx; // no pins needed for this driver
+        let component_field = inst
             .deps
             .iter()
             .find(|d| d.kind == DepKind::Instance)
             .map(|d| codegen::sanitize(&d.name))
             .unwrap_or_else(|| "unreachable!()".to_string());
-        // Control pins are always active-high in this device, so render them
-        // with the backend (polarity-aware) at idle-low (ADR-003). Resolve the
-        // `$gpioN` ref through the peripheral table to its esp_hal field.
-        let reset = ctx.backend.gpio_output(&codegen::gpio_field_from_with(ctx, inst, "reset"), false);
-        let dc = ctx.backend.gpio_output(&codegen::gpio_field_from_with(ctx, inst, "dc"), false);
         Construction::for_instance(
             inst,
-            ctx.backend.ctor(
-                Tier::Device,
-                "Ssd1306",
-                &[format!("components.{bus_field}.bus()"), reset, dc],
-            ),
+            ctx.backend
+                .ctor(Tier::Device, "Ssd1306", &[format!("components.{component_field}")]),
         )
     }
 }

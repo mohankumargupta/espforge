@@ -14,7 +14,7 @@ esp32:
 
 components:
   main_spi:
-    using: SpiDevice
+    using: spi
     with:
       spi: $spi2
 

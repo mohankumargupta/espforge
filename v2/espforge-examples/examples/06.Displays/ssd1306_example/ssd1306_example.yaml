@@ -10,9 +10,9 @@ esp32:
 # 2. Component Layer
 components:
   i2c_master:
-    using: I2cDevice
+    using: i2c
     with:
-      i2c: $i2c0
+      bus: $i2c0
 
 # 3. Device Layer
 devices:
