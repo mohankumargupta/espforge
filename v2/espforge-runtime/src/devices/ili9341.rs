@@ -23,11 +23,12 @@ impl Ili9341 {
     /// see `espforge_runtime::components::SpiDevice`), `dc`/`rst` are control
     /// pins moved in by value.
     pub fn new(spi: SpiDevice, dc: Output<'static>, rst: Output<'static>) -> Self {
+        let mut delay = spi.delay_clone();
         let interface = SPIInterface::new(spi, dc);
         let display = Ili9341Driver::new(
             interface,
             rst,
-            &mut spi.delay_clone(),
+            &mut delay,
             Orientation::Portrait,
             DisplaySize240x320,
         )
