@@ -82,7 +82,7 @@ impl Driver for SpiDriver {
         // and surface a `Copy` `SpiBus` handle into the `Components` field.
         let cell = format!(
             "{{ static {id}_SPI_CELL: static_cell::StaticCell<core::cell::RefCell<esp_hal::spi::master::Spi<'static, esp_hal::Blocking>>> = static_cell::StaticCell::new(); espforge_runtime::components::SpiBus::from_ref({id}_SPI_CELL.init(core::cell::RefCell::new({build}))) }}",
-            id = codegen::sanitize(&inst.id),
+            id = codegen::sanitize(&inst.id).to_uppercase(),
             build = build,
         );
         Construction::for_instance(inst, cell)
