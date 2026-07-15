@@ -23,5 +23,7 @@ pub use led::Led;
 pub use button::Button;
 #[cfg(feature = "spi")]
 pub use spi::SpiBus;
+#[cfg(feature = "spi")]
+pub use spi::SpiDevice;
 #[cfg(feature = "uart")]
 pub use uart::UartDevice;
