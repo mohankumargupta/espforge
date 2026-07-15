@@ -106,29 +106,22 @@ impl embedded_hal::spi::SpiDevice for SpiDevice {
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), Self::Error> {
         use embedded_hal::delay::DelayNs;
-        use embedded_hal::spi::{Operation, SpiBus as _};
+        use embedded_hal::spi::Operation;
         self.cs.set_low();
         let result = (|| {
+            // Borrow the shared peripheral once; `&mut Spi` implements
+            // `embedded_hal::spi::SpiBus` (via `impl SpiBus for &mut T`).
+            let mut bus = self.bus.bus().borrow_mut();
+            let spi = &mut *bus;
             for op in operations.iter_mut() {
                 match op {
-                    Operation::Read(buf) => {
-                        embedded_hal::spi::SpiBus::read(&mut self.bus.bus().borrow_mut(), buf)?
-                    }
-                    Operation::Write(buf) => {
-                        embedded_hal::spi::SpiBus::write(&mut self.bus.bus().borrow_mut(), buf)?
-                    }
+                    Operation::Read(buf) => embedded_hal::spi::SpiBus::read(spi, buf)?,
+                    Operation::Write(buf) => embedded_hal::spi::SpiBus::write(spi, buf)?,
                     Operation::Transfer(read, write) => {
-                        embedded_hal::spi::SpiBus::transfer(
-                            &mut self.bus.bus().borrow_mut(),
-                            read,
-                            write,
-                        )?
+                        embedded_hal::spi::SpiBus::transfer(spi, read, write)?
                     }
                     Operation::TransferInPlace(buf) => {
-                        embedded_hal::spi::SpiBus::transfer_in_place(
-                            &mut self.bus.bus().borrow_mut(),
-                            buf,
-                        )?
+                        embedded_hal::spi::SpiBus::transfer_in_place(spi, buf)?
                     }
                     Operation::DelayNs(ns) => {
                         self.delay.delay_ns((*ns).try_into().unwrap_or(u32::MAX))
