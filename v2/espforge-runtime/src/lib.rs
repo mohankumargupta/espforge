@@ -19,7 +19,14 @@
 // the real selection. The emitter only ever references a component whose
 // feature is enabled, so there is no dead-code cost.
 pub mod components;
-#[cfg(feature = "ssd1306")]
+// The `devices` namespace is always present, mirroring `components` above;
+// individual device submodules are gated per-sub-module in `devices/mod.rs`
+// (design §19.1). Gating the whole namespace here caused the module to be
+// silently compiled out (and `espforge_runtime::devices::X` to fail to
+// resolve) when a device feature was enabled but forgotten from the list — so
+// we keep the namespace unconditionally compiled and let the per-struct
+// `#[cfg]` gates do the real selection. The emitter only ever references a
+// device whose feature is enabled, so there is no dead-code cost.
 pub mod devices;
 
 /// Logging handle stored on the `Context` (ADR-008 stable API). Forwards to the
