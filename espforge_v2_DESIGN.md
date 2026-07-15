@@ -522,13 +522,21 @@ The old `Driver::required_features()` conflated two concepts. They are split:
 - `is_embassy` → `embassy-executor` + esp-hal `"embassy"` feature. Asserted by
   `http` (ADR-012); `resolve` auto-upgrades from `runtime: blocking`.
 - `has_alloc` → `embedded-alloc`.
-- `has_wifi` → `esp-radio` (+ `esp-radio/wifi` feature). *(supersedes the older
-  `esp-wifi = "*"` line in `emit/rust.rs`; the network path targets the
+- `esp-hal` → pinned to `1` (NOT `"*"`), else the resolver falls back to the
+  old esp-hal 0.17 cluster.
+- `has_wifi` → `esp-radio = "1"` (+ `esp-radio/wifi` feature). *(supersedes the
+  older `esp-wifi = "*"` line in `emit/rust.rs`; the network path targets the
   maintained `esp_radio::wifi` API, ADR-012.)*
-- `needs_stack` → `embassy-net`. *(new)*
-- network software-services (`http`) → `edge-http`, `edge-nal-embassy`,
-  `edge-nal` (feature-gated runtime deps; bridge `embassy_net::Stack` → the
-  `edge_nal` traits `edge_http` requires, ADR-012).
+- `needs_stack` → `embassy-net = "0.9"`. *(new)*
+- network software-services (`http`) → `edge-http = "0.8"`, `edge-nal = "0.7"`,
+  `edge-nal-embassy = "0.9"`, `embassy-time = "0.5"` (feature-gated runtime
+  deps; bridge `embassy_net::Stack` → the `edge_nal` traits `edge_http`
+  requires, ADR-012). **All pinned, not `"*"`** — `edge-http` 0.4's
+  `Connection::new(buf, &Stack, addr)` blanket-impl API was replaced in 0.8 by
+  `edge_nal_embassy::{Tcp, Dns}` wrapper types requiring a TCP buffer pool
+  (`TcpBuffers`); the runtime `Http` wrapper (`services/http.rs`) is written for
+  this pinned cluster. Do not loosen these to `"*"` or the resolver re-locks the
+  incompatible old cluster (esp-hal 0.17 + embassy-net 0.5 + edge-http 0.4).
 - drivers → `espforge-runtime = { …, features = [<union>] }`.
 - `Logger` / `Delay` stay unconditionally compiled (shared, negligible);
   `needs_delay` remains a marker, not a separate dep.

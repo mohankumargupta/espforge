@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-esp-hal = {version="*", features = ["unstable"]}
+esp-hal = {version="1", features = ["unstable"]}
 embedded-hal = "*"
 embedded-io = "*"
 log = "0.4"
@@ -28,10 +28,10 @@ display-interface-spi = { version = "0.5.0", optional = true }
 # Network software-services (ADR-012). `edge-http` is the HTTP protocol layer;
 # `edge-nal-embassy` provides the `edge_nal::TcpConnect + Dns` impl for
 # `&embassy_net::Stack`; `embassy-net` is the generated project's network stack.
-embassy-net = { version = "*", optional = true }
-edge-http = { version = "*", optional = true }
-edge-nal = { version = "*", optional = true }
-edge-nal-embassy = { version = "*", optional = true }
+embassy-net = { version = "0.9", optional = true }
+edge-http = { version = "0.8", optional = true }
+edge-nal = { version = "0.7", optional = true }
+edge-nal-embassy = { version = "0.9", optional = true }
 
 [features]
 # Each capability module is its own feature, gated in `mod.rs` and named after

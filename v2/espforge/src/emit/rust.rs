@@ -230,16 +230,19 @@ fn emit_cargo_toml(ir: &DeviceTree, rt_features: &BTreeSet<String>) -> Result<St
     // WiFi uses `esp-radio` (current maintained line; ADR-012), not the older
     // `esp-wifi`. Network software-services (e.g. `http`) additionally need the
     // `edge` HTTP stack + its `embassy_net::Stack` bridge.
-    let wifi = if ir.flags.has_wifi { "esp-radio = \"*\"\n" } else { "" };
+    let wifi = if ir.flags.has_wifi { "esp-radio = \"1\"\n" } else { "" };
     let stack = if ir.flags.needs_stack {
         // NOTE: `static_cell` is emitted unconditionally below (line 263) for
         // every project (it backs the `CTX` global), so do not add it here or
         // the generated Cargo.toml gets a duplicate-key parse error.
-        "embassy-net = \"*\"\n\
-         edge-http = \"*\"\n\
-         edge-nal = \"*\"\n\
-         edge-nal-embassy = \"*\"\n\
-         embassy-time = \"*\"\n"
+        // Pinned to the current (esp-hal 1.x) cluster: `*` would let the
+        // resolver fall back to the mutually-compatible old cluster
+        // (esp-hal 0.17 + embassy-net 0.5 + edge-http 0.4), ADR-012.
+        "embassy-net = \"0.9\"\n\
+         edge-http = \"0.8\"\n\
+         edge-nal = \"0.7\"\n\
+         edge-nal-embassy = \"0.9\"\n\
+         embassy-time = \"0.5\"\n"
     } else {
         ""
     };
@@ -259,7 +262,7 @@ edition = "2021"
 
 [dependencies]
 {runtime_dep}
-esp-hal = {{ version = "*", features = ["{hal_feats}"] }}
+esp-hal = {{ version = "1", features = ["{hal_feats}"] }}
 esp-backtrace = {{ version = "*", features = ["{chip}", "println", "panic-handler"] }}
 esp-println = {{ version = "*", features = ["{chip}", "log-04"] }}
 static_cell = "*"
