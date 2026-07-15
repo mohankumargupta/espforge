@@ -20,7 +20,42 @@ pub fn scaffold(ir: &DeviceTree, out_dir: &Path) -> Result<()> {
     let name = ir.meta.name.clone().unwrap_or_else(|| "espforge-project".into());
     let project_name = name.replace('-', "_");
 
-    println!("scaffolding via esp-generate (chip: {chip})");
+    // Build the esp-generate argument list explicitly so we can both execute
+    // it and print the exact command (with every `-o` option). Design note:
+    // the user asked to see the precise invocation espforge runs, not a hint.
+    let mut args: Vec<String> = vec![
+        "--headless".into(),
+        "--chip".into(),
+        chip.clone(),
+        "-o".into(),
+        "log".into(),
+        "-o".into(),
+        "unstable-hal".into(),
+        "-o".into(),
+        "alloc".into(),
+        "-o".into(),
+        "esp-backtrace".into(),
+        "-o".into(),
+        "wokwi".into(),
+        "-o".into(),
+        "vscode".into(),
+    ];
+    if ir.flags.is_embassy {
+        args.push("-o".into());
+        args.push("embassy".into());
+    }
+    if ir.flags.has_wifi {
+        args.push("-o".into());
+        args.push("wifi".into());
+    }
+    args.push(project_name.clone());
+
+    // Render the command the way the user would type it (binary + every arg
+    // quoted so paths/options survive shell parsing), and echo it up front so
+    // the build is reproducible.
+    let rendered = render_command("esp-generate", &args);
+    println!("scaffolding via: {rendered}");
+
     let temp_base = std::env::temp_dir().join(format!(
         "espforge_{}",
         SystemTime::now()
@@ -31,31 +66,7 @@ pub fn scaffold(ir: &DeviceTree, out_dir: &Path) -> Result<()> {
     fs::create_dir_all(&temp_base).context("failed to create temp dir")?;
 
     let mut cmd = Command::new("esp-generate");
-    cmd.current_dir(&temp_base)
-        .args([
-            "--headless",
-            "--chip",
-            &chip,
-            "-o",
-            "log",
-            "-o",
-            "unstable-hal",
-            "-o",
-            "alloc",
-            "-o",
-            "esp-backtrace",
-            "-o",
-            "wokwi",
-            "-o",
-            "vscode",
-        ]);
-    if ir.flags.is_embassy {
-        cmd.arg("-o").arg("embassy");
-    }
-    if ir.flags.has_wifi {
-        cmd.arg("-o").arg("wifi");
-    }
-    cmd.arg(&project_name);
+    cmd.current_dir(&temp_base).args(&args);
 
     let output = cmd
         .output()
@@ -72,6 +83,16 @@ pub fn scaffold(ir: &DeviceTree, out_dir: &Path) -> Result<()> {
     merge_directories(&generated_dir, out_dir)?;
     let _ = fs::remove_dir_all(&temp_base);
     Ok(())
+}
+
+/// Render a command line for display: `binary` followed by each argument,
+/// space-separated. Used so the user sees the exact `esp-generate` invocation
+/// espforge runs. Arguments here are simple tokens (chip names, options, a
+/// project name), so no shell quoting is needed.
+fn render_command(binary: &str, args: &[String]) -> String {
+    let mut parts: Vec<String> = vec![binary.to_string()];
+    parts.extend(args.iter().cloned());
+    parts.join(" ")
 }
 
 /// Copy files from `src` into `dst`, but never overwrite a file that already

@@ -208,7 +208,7 @@ fn run() -> anyhow::Result<()> {
                 ir.instances.len(),
                 runtime_features
             );
-            println!("  (run `cargo build` in that dir with an esp toolchain to compile)");
+            println!("  (the scaffold step above printed the exact `esp-generate` command used)");
         }
     }
     Ok(())
