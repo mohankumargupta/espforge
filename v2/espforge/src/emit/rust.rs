@@ -232,11 +232,13 @@ fn emit_cargo_toml(ir: &DeviceTree, rt_features: &BTreeSet<String>) -> Result<St
     // `edge` HTTP stack + its `embassy_net::Stack` bridge.
     let wifi = if ir.flags.has_wifi { "esp-radio = \"*\"\n" } else { "" };
     let stack = if ir.flags.needs_stack {
+        // NOTE: `static_cell` is emitted unconditionally below (line 263) for
+        // every project (it backs the `CTX` global), so do not add it here or
+        // the generated Cargo.toml gets a duplicate-key parse error.
         "embassy-net = \"*\"\n\
          edge-http = \"*\"\n\
          edge-nal = \"*\"\n\
          edge-nal-embassy = \"*\"\n\
-         static_cell = \"*\"\n\
          embassy-time = \"*\"\n"
     } else {
         ""

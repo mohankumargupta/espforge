@@ -33,7 +33,7 @@ fn emitted_cargo_toml(spec_rel: &str) -> String {
 /// says `runtime: blocking` (auto-upgrade, Q1/Q12).
 #[test]
 fn http_requests_network_deps_and_http_feature() {
-    let cargo = emitted_cargo_toml("wifi/http_example/http_example.yaml");
+    let cargo = emitted_cargo_toml("05.Networking/wifi/http_example/http_example.yaml");
     // WiFi crate is `esp-radio` (not the older `esp-wifi`, ADR-012).
     assert!(
         cargo.contains("esp-radio = "),
