@@ -16,7 +16,7 @@ components:
   main_spi:
     using: spi
     with:
-      spi: $spi2
+      bus: $spi2
 
 devices:
   display:
