@@ -169,7 +169,7 @@ fn run() -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!("scaffold failed: {e}"))?;
 
             // Layer 2: espforge's wiring layers + manifest.
-            let artifacts = espforge::emit::generate(&ir)?;
+            let artifacts = espforge::emit::generate(&ir, &out)?;
             espforge::emit::write(&out, &artifacts)?;
 
             // Layer 3: wokwi simulation assets. `diagram.json` is copied from
@@ -941,7 +941,21 @@ mod tests {
             .unwrap_or_else(|e| panic!("parse {}: {e:?}", spec.display()));
         espforge::pipeline::validate(&project).expect("validate");
         let ir = espforge::pipeline::resolve(&project);
-        let artifacts = espforge::emit::rust::emit(&ir).expect("emit");
+        // Option B (ADR-012): `emit` merges into an esp-generate base Cargo.toml
+        // in `out_dir`. Seed a temp dir with a minimal base so the unit path
+        // produces a valid manifest.
+        let out = std::env::temp_dir().join(format!(
+            "espforge_main_{}_{}",
+            std::process::id(),
+            spec_rel.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect::<String>()
+        ));
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(
+            out.join("Cargo.toml"),
+            "[package]\nname = \"espforge_project\"\nversion = \"0.1.0\"\n\n[dependencies]\n",
+        )
+        .unwrap();
+        let artifacts = espforge::emit::rust::emit(&ir, &out).expect("emit");
         artifacts
             .into_iter()
             .find(|a| a.path == "Cargo.toml")

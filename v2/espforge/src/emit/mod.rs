@@ -17,8 +17,8 @@ use manifest::{emit_manifest, emit_readme, owned_paths};
 
 /// Run all emitters against the resolved IR and return every artifact espforge
 /// owns (plus the manifest). Does not touch the filesystem.
-pub fn generate(ir: &DeviceTree) -> Result<Vec<Artifact>> {
-    let mut out = rust::emit(ir)?;
+pub fn generate(ir: &DeviceTree, out_dir: &Path) -> Result<Vec<Artifact>> {
+    let mut out = rust::emit(ir, out_dir)?;
     let owned = owned_paths(&out);
     out.push(Artifact::owned("README.txt", emit_readme(ir, &owned)));
     out.push(emit_manifest(&out)?);

@@ -151,7 +151,7 @@ fn normalize(p: &Path) -> String {
         .to_string()
 }
 
-pub fn emit(ir: &DeviceTree) -> Result<Vec<Artifact>> {
+pub fn emit(ir: &DeviceTree, out_dir: &Path) -> Result<Vec<Artifact>> {
     let catalog = espforge_bindings::registry();
     let ctx = espforge_model::driver::GenContext {
         target: ir.meta.target.clone(),
@@ -196,7 +196,7 @@ pub fn emit(ir: &DeviceTree) -> Result<Vec<Artifact>> {
     let mut out = Vec::new();
     out.push(Artifact::owned(
         "Cargo.toml",
-        emit_cargo_toml(ir, &rt_features)?,
+        emit_cargo_toml(&rt_features, out_dir)?,
     ));
     out.push(Artifact::owned("src/generated.rs", emit_generated(ir, &catalog)));
     out.push(Artifact::owned("src/lib.rs", emit_lib(ir)));
@@ -215,74 +215,57 @@ fn project_name(ir: &DeviceTree) -> String {
         .replace('-', "_")
 }
 
-//produces Cargo.toml
-fn emit_cargo_toml(ir: &DeviceTree, rt_features: &BTreeSet<String>) -> Result<String> {
-    let name = project_name(ir);
-    let chip = ir
-        .meta
-        .target
-        .clone()
-        .unwrap_or_else(|| "esp32c3".to_string());
-    let embassy = if ir.flags.is_embassy { "embassy-executor = \"*\"\n" } else { "" };
-    let alloc = if ir.flags.has_alloc { "embedded-alloc = \"*\"\n" } else { "" };
-    // Network deps are pulled only when the project actually needs them
-    // (design §19.3).
-    // WiFi uses `esp-radio` (current maintained line; ADR-012), not the older
-    // `esp-wifi`. Network software-services (e.g. `http`) additionally need the
-    // `edge` HTTP stack + its `embassy_net::Stack` bridge.
-    let wifi = if ir.flags.has_wifi { "esp-radio = \"1\"\n" } else { "" };
-    let stack = if ir.flags.needs_stack {
-        // NOTE: `static_cell` is emitted unconditionally below (line 263) for
-        // every project (it backs the `CTX` global), so do not add it here or
-        // the generated Cargo.toml gets a duplicate-key parse error.
-        // Pinned to the current (esp-hal 1.x) cluster: `*` would let the
-        // resolver fall back to the mutually-compatible old cluster
-        // (esp-hal 0.17 + embassy-net 0.5 + edge-http 0.4), ADR-012.
-        "embassy-net = \"0.9\"\n\
-         edge-http = \"0.8\"\n\
-         edge-nal = \"0.7\"\n\
-         edge-nal-embassy = \"0.9\"\n\
-         embassy-time = \"0.5\"\n"
-    } else {
-        ""
-    };
+//produces Cargo.toml (by merging espforge-runtime into esp-generate's base)
+fn emit_cargo_toml(rt_features: &BTreeSet<String>, out_dir: &Path) -> Result<String> {
+    // Option B (ADR-012): espforge does NOT author the esp-hal / esp-rtos /
+    // embassy-net / esp-radio / edge stack. `esp-generate` (Layer 1, scaffold)
+    // already produced a correct, version-locked `Cargo.toml` for the chosen
+    // chip + options. Here we only MERGE in espforge's own dependency:
+    // `espforge-runtime` (+ the resolved module features). All driver/network
+    // crates the runtime needs (edge-http, edge-nal, edge-nal-embassy) arrive
+    // transitively through `espforge-runtime`'s own feature graph — the
+    // generated project names none of them directly.
     let runtime_dep = espforge_dep("espforge-runtime", &rt_features.iter().cloned().collect::<Vec<_>>());
-    // esp-hal + friends need the chip feature enabled (e.g. "esp32c3"); esp-hal
-    // also needs "embassy" when using the async runtime (ADR-008 flags).
-    let mut hal_feats = vec![chip.clone()];
-    if ir.flags.is_embassy {
-        hal_feats.push("embassy".to_string());
+    merge_runtime_dep(out_dir, &runtime_dep)
+}
+
+/// Merge a `espforge-runtime = ...` dependency line into the `Cargo.toml` that
+/// `esp-generate` scaffolded into `out_dir`. Preserves esp-generate's exact
+/// pins/format (including multi-line feature arrays) by doing a targeted
+/// string edit rather than re-serializing the whole manifest.
+fn merge_runtime_dep(out_dir: &Path, runtime_dep: &str) -> Result<String> {
+    let path = out_dir.join("Cargo.toml");
+    // Option B (ADR-012): the base manifest comes from `esp-generate` (Layer 1
+    // scaffold), which the caller runs before emit and writes into `out_dir`.
+    // When it isn't present yet (e.g. the pure `emit` unit path, or a manual
+    // invocation), fall back to a minimal base so the merge still yields a
+    // valid manifest — the project will be fleshed out by esp-generate when
+    // built through the real pipeline.
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+        "[package]\nname = \"espforge_project\"\nversion = \"0.1.0\"\n\n[dependencies]\n".to_string()
+    });
+    let base = raw;
+
+    // Drop any existing espforge-runtime line (re-merge on every build).
+    let without = base
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("espforge-runtime"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Insert the new line right after `[dependencies]` (or append the section
+    // if esp-generate ever omits it).
+    if let Some(idx) = without.find("[dependencies]") {
+        let insert_at = idx + "[dependencies]".len();
+        let mut s = String::with_capacity(without.len() + runtime_dep.len() + 1);
+        s.push_str(&without[..insert_at]);
+        s.push('\n');
+        s.push_str(runtime_dep);
+        s.push_str(&without[insert_at..]);
+        Ok(s)
+    } else {
+        Ok(format!("{without}\n\n[dependencies]\n{runtime_dep}\n"))
     }
-    let hal_feats = hal_feats.join("\", \"");
-    Ok(format!(
-        r#"[package]
-name = "{name}"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-{runtime_dep}
-esp-hal = {{ version = "1", features = ["{hal_feats}"] }}
-esp-backtrace = {{ version = "*", features = ["{chip}", "println", "panic-handler"] }}
-esp-println = {{ version = "*", features = ["{chip}", "log-04"] }}
-static_cell = "*"
-{embassy}{alloc}{wifi}{stack}
-
-# Name the binary explicitly so it matches the package name (and the path
-# wokwi.toml points at). Without this, Cargo names the binary after the
-# `src/bin/main.rs` file stem ("main"), producing no `blink` binary.
-[[bin]]
-name = "{name}"
-path = "src/bin/main.rs"
-
-[profile.release]
-debug = true
-
-# Standalone workspace root: keeps this generated project self-contained and
-# prevents cargo from walking up to a parent workspace (ADR-008 generated output).
-[workspace]
-"#
-    ))
 }
 
 //produces src/generated.rs

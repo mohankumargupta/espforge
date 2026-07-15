@@ -516,40 +516,50 @@ The old `Driver::required_features()` conflated two concepts. They are split:
 
 ### 19.3 Manifest emission
 
-`emit_cargo_toml` is rewritten to be driven purely by `ir.flags` plus the
-**union of `runtime_features()`** over `ir.instances`:
+**Option B (ADR-012): espforge does NOT author the esp-hal / esp-rtos /
+embassy-net / esp-radio / edge stack.** `esp-generate` (Layer 1 scaffold) runs
+first and writes a correct, version-locked `Cargo.toml` for the chosen chip +
+options into `out_dir`. `emit_cargo_toml` then only **MERGES** `espforge-runtime`
+(+ the resolved module features) into that base via `merge_runtime_dep`:
 
-- `is_embassy` → `embassy-executor` + esp-hal `"embassy"` feature. Asserted by
-  `http` (ADR-012); `resolve` auto-upgrades from `runtime: blocking`.
-- `has_alloc` → `embedded-alloc`.
-- `esp-hal` → pinned to `1` (NOT `"*"`), else the resolver falls back to the
-  old esp-hal 0.17 cluster.
-- `has_wifi` → `esp-radio = "1"` (+ `esp-radio/wifi` feature). *(supersedes the
-  older `esp-wifi = "*"` line in `emit/rust.rs`; the network path targets the
-  maintained `esp_radio::wifi` API, ADR-012.)*
-- `needs_stack` → `embassy-net = "0.9"`. *(new)*
-- network software-services (`http`) → `edge-http = "0.8"`, `edge-nal = "0.7"`,
-  `edge-nal-embassy = "0.9"`, `embassy-time = "0.5"` (feature-gated runtime
-  deps; bridge `embassy_net::Stack` → the `edge_nal` traits `edge_http`
-  requires, ADR-012). **All pinned, not `"*"`** — `edge-http` 0.4's
-  `Connection::new(buf, &Stack, addr)` blanket-impl API was replaced in 0.8 by
-  `edge_nal_embassy::{Tcp, Dns}` wrapper types requiring a TCP buffer pool
-  (`TcpBuffers`); the runtime `Http` wrapper (`services/http.rs`) is written for
-  this pinned cluster. Do not loosen these to `"*"` or the resolver re-locks the
-  incompatible old cluster (esp-hal 0.17 + embassy-net 0.5 + edge-http 0.4).
-- drivers → `espforge-runtime = { …, features = [<union>] }`.
-- `Logger` / `Delay` stay unconditionally compiled (shared, negligible);
-  `needs_delay` remains a marker, not a separate dep.
-- The flag→dep mapping is **centralized in the emit step**, not scattered into
-  driver declarations.
+- It reads `out_dir/Cargo.toml` (esp-generate's output). If absent (pure `emit`
+  unit path / manual invocation), it synthesizes a minimal base so the merge
+  still yields a valid manifest.
+- It strips any pre-existing `espforge-runtime` line (idempotent re-merge on
+  every build) and inserts the espforge dep right after `[dependencies]`.
+- The espforge dep is `espforge-runtime = { …, features = [<union of
+  runtime_features() over ir.instances>] }`. All driver/network crates the
+  runtime needs (`edge-http`, `edge-nal`, `edge-nal-embassy`, `esp-radio`,
+  `embassy-net`, `embassy-executor`, …) arrive **transitively** through
+  `espforge-runtime`'s own feature graph — the generated project names none of
+  them directly.
+- When the feature union is **empty the dep is emitted bare**
+  (`espforge-runtime = "0.1.0"`), matching the minimal-project output.
+
+The `ir.flags` → dep mapping that previously lived in the emit step is now the
+**runtime's** concern (its `Cargo.toml` feature graph + `esp-generate`'s base),
+not espforge's. espforge only resolves which `espforge-runtime` features to ask
+for; it no longer version-pins or authors the network/edge stack. This replaced
+the earlier draft that hardcoded version pins per-flag (Option C, rescinded):
+hardcoding versions in the generator duplicated `esp-generate`'s job and drifted
+from the version-locked base.
+
+Note: under this model the runtime's own `Cargo.toml` keeps the version pins
+(esp-hal `~1.1`, esp-radio `1`, embassy-net `0.9`, edge-http `0.8`,
+edge-nal `0.7`, edge-nal-embassy `0.9`, embassy-time `0.5`) so the resolved
+cluster stays coherent — `edge-http` 0.4's `Connection::new(buf, &Stack, addr)`
+blanket-impl API was replaced in 0.8 by `edge_nal_embassy::{Tcp, Dns}` wrapper
+types requiring a TCP buffer pool (`TcpBuffers`); `services/http.rs` is written
+for this cluster (ADR-012).
 
 ### 19.4 Plumbing
 
 `emit()` computes the feature-union in `BTreeSet<String>` (deduped + sorted for
 **deterministic manifests**, which matters for drift detection, §5.1) and passes
-it **explicitly** to `emit_cargo_toml(ir, &rt_features)`. It is *not* stored back
-into `DeviceTree` (the IR stays driver-agnostic, ADR-006). Both the published
-`"0.1.0"` form and the `ESPFORGE_USE_LOCAL` path-dep form carry `features = […]`;
+it **explicitly** to `merge_runtime_dep(out_dir, &runtime_dep)` (Option B merge
+into esp-generate's base). It is *not* stored back into `DeviceTree` (the IR
+stays driver-agnostic, ADR-006). Both the published `"0.1.0"` form and the
+`ESPFORGE_USE_LOCAL` path-dep form carry `features = […]`;
 when the set is **empty the dep is emitted bare** (`espforge-runtime = "0.1.0"`),
 matching the current minimal-project output.
 

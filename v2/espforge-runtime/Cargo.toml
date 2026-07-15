@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-esp-hal = {version="1", features = ["unstable"]}
+esp-hal = {version="~1.1", features = ["unstable"]}
 embedded-hal = "*"
 embedded-io = "*"
 log = "0.4"
