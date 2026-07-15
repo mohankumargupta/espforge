@@ -1,0 +1,16 @@
+espforge:
+  name: wifi_http_example
+  target: esp32c3
+  runtime: embassy
+
+esp32:
+  wifi:
+    ssid: Wokwi-GUEST
+    password: ""
+    auth: open
+
+components:
+  http:
+    using: http
+
+devices: []
