@@ -10,6 +10,12 @@
 
 #![no_std]
 
+// `alloc` is available in generated projects that enable the `has_alloc` flag
+// (e.g. the `http` software-service, ADR-012); this lets runtime modules use
+// `String`/`Vec`. The global allocator is provided by the generated project
+// (esp-alloc), not by this crate.
+extern crate alloc;
+
 // The `components` namespace is always present; individual capability modules
 // are gated per-sub-module in `components/mod.rs` (design §19.1). Gating the
 // whole namespace on `any(feature = ...)` here caused the module to be silently

@@ -14,13 +14,16 @@
 //! the `embassy_net::Stack` plus a TCP socket-buffer pool
 //! (`TcpBuffers`). DNS is resolved separately via `edge_nal_embassy::Dns`.
 
+use alloc::string::String;
+
 use core::net::SocketAddr;
 use core::net::IpAddr;
+use embedded_io_async::{Read, Write};
 
 use edge_http::io::client::Connection;
 use edge_http::Method;
 use edge_nal::{AddrType, Dns as _};
-use edge_nal_embassy::{Dns as EmbassyDns, Tcp, TcpBuffers, TcpError};
+use edge_nal_embassy::{Dns as EmbassyDns, Tcp, TcpBuffers};
 
 /// Reusable scratch buffer size for request/response headers + body.
 const BUF_LEN: usize = 8192;
@@ -85,24 +88,17 @@ impl Http {
             .map_err(HttpError::Http)?;
 
         if !body.is_empty() {
-            use embedded_io_async::Write;
-            conn.write_all(body)
-                .await
-                .map_err(|e| HttpError::Io(e.kind()))?;
+            conn.write_all(body).await.map_err(HttpError::Io)?;
         }
 
         conn.initiate_response().await.map_err(HttpError::Http)?;
 
         // Drain the response body into a heap-allocated `String` (alloc is
         // guaranteed by the `has_alloc` flag, ADR-012).
-        use embedded_io_async::Read;
         let mut out = String::new();
         let mut chunk = [0u8; 1024];
         loop {
-            let len = conn
-                .read(&mut chunk)
-                .await
-                .map_err(|e| HttpError::Io(e.kind()))?;
+            let len = conn.read(&mut chunk).await.map_err(HttpError::Io)?;
             if len == 0 {
                 break;
             }
@@ -130,5 +126,5 @@ pub enum HttpError {
     Utf8,
     Dns(edge_nal_embassy::DnsError),
     Http(edge_http::io::Error<edge_nal_embassy::TcpError>),
-    Io(embedded_io_async::ErrorKind),
+    Io(edge_http::io::Error<edge_nal_embassy::TcpError>),
 }

@@ -589,11 +589,18 @@ Two complementary checks:
 
 ### 19.6 Status
 
-Networking design **decided** (ADR-012, grilling session 2026-07-16): no `tcp`
-component; `esp32.wifi` is a top-level block; Stack built inline in `main.rs`;
-`http` is a wrapped runtime component (`ctx.components.http`) over `edge_http` +
-`edge_nal_embassy` on an `esp_radio`/`embassy_net` stack; plaintext only (HTTPS/
-mqtt/websockets deferred to future work, same Stack + `edge_nal` bridge). Not yet
-implemented — open `implement` items: add `is_embassy` to `SpecFlags` + wire into
-`resolve`; swap `esp-wifi` → `esp-radio` in `emit/rust.rs`; add `Http` runtime
-component + manifest deps.
+Networking design **decided and implemented** (ADR-012, grilling session
+2026-07-16): no `tcp` component; `esp32.wifi` is a top-level block; Stack built
+inline in `main.rs`; `http` is a wrapped runtime component (`ctx.components.http`)
+over `edge_http` + `edge_nal_embassy` on an `esp_radio`/`embassy_net` stack;
+plaintext only (HTTPS/mqtt/websockets deferred to future work, same Stack +
+`edge_nal` bridge).
+
+Implementation notes (2026-07-16):
+- The runtime `Http` service returns heap-allocated `String`s, so the runtime is
+  `#![no_std]` + `extern crate alloc`, and the generated `lib.rs` always emits
+  `extern crate alloc;` (the global allocator is wired only when `has_alloc`).
+- `espforge-runtime` depends on `embedded-io-async = "0.7"` (pinned to match
+  `edge_http` 0.8's version); the service imports `Read`/`Write` from it.
+- Under Option B (§19.3), `edge_http`/`edge-nal`/`edge-nal-embassy` are transitive
+  via `espforge-runtime`'s feature graph — the project names none directly.
