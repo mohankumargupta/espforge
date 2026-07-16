@@ -10,6 +10,8 @@ embedded-hal = "*"
 embedded-io = "*"
 embedded-io-async = "0.7"
 log = "0.4"
+critical-section = "1.2"
+embassy-time = { version = "0.5", features = ["generic-queue-64"], optional = true }
 
 # Optional external driver crates, pulled only by the matching feature
 # (design §19.1/§19.3). A generated project enables these transitively via the
@@ -46,4 +48,7 @@ uart = []
 http = ["dep:embassy-net", "dep:edge-http", "dep:edge-nal", "dep:edge-nal-embassy"]
 ssd1306 = ["dep:ssd1306", "dep:display-interface-i2c", "dep:embedded-graphics"]
 ili9341 = ["dep:ili9341", "dep:display-interface-spi", "dep:embedded-graphics"]
+# Embassy runtime. Selects the async `Delay` impl (yields via `embassy_time`)
+# so the same `ctx.delay` field works in both blocking and embassy projects.
+embassy = ["dep:embassy-time"]
 

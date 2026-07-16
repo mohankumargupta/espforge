@@ -61,22 +61,46 @@ impl Logger {
     }
 }
 
-/// Delay handle stored on the `Context`. Own type wrapping `esp_hal::delay::Delay`
-/// (v1 style), implementing `embedded-hal`'s `DelayNs`.
+/// Delay handle stored on the `Context` (ADR-008 stable API).
+///
+/// The *type* is always `espforge_runtime::Delay`; its behaviour is selected by
+/// the `embassy` feature so the same `ctx.delay.delay_ms(..)` call site works in
+/// both runtimes:
+/// - **blocking** (default): wraps `esp_hal::delay::Delay`; `delay_ms` blocks the
+///   current thread (v1 style, implements `embedded_hal::delay::DelayNs`).
+/// - **embassy** (`feature = "embassy"`): `delay_ms` is `async` and yields via
+///   `embassy_time::Timer`, so it must be `.await`ed in `app.rs`. This lets a
+///   single `Context` field serve both runtimes without regenerating the struct.
 #[derive(Clone, Copy)]
 pub struct Delay {
+    #[cfg(not(feature = "embassy"))]
     inner: esp_hal::delay::Delay,
 }
 
 impl Delay {
     pub fn new() -> Self {
-        Delay { inner: esp_hal::delay::Delay::new() }
+        Delay {
+            #[cfg(not(feature = "embassy"))]
+            inner: esp_hal::delay::Delay::new(),
+        }
     }
+
+    /// Blocking millisecond delay. Present in the default (blocking) build.
+    #[cfg(not(feature = "embassy"))]
     pub fn delay_ms(&self, ms: u32) {
         self.inner.delay_millis(ms);
     }
+
+    /// Async millisecond delay. Present only when `feature = "embassy"`; call
+    /// with `ctx.delay.delay_ms(ms).await` from an async context (e.g. a spawned
+    /// embassy task or the `forever` loop).
+    #[cfg(feature = "embassy")]
+    pub async fn delay_ms(&self, ms: u32) {
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(ms as u64)).await;
+    }
 }
 
+#[cfg(not(feature = "embassy"))]
 impl embedded_hal::delay::DelayNs for Delay {
     fn delay_ns(&mut self, ns: u32) {
         self.inner.delay_ns(ns);

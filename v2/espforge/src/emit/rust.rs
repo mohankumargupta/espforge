@@ -193,6 +193,13 @@ pub fn emit(ir: &DeviceTree, out_dir: &Path) -> Result<Vec<Artifact>> {
         }
     }
 
+    // The `embassy` runtime feature selects the async `Delay` impl in
+    // `espforge-runtime` (so `ctx.delay.delay_ms(ms).await` is available). It is
+    // not a per-driver feature, so add it whenever the project uses embassy.
+    if ir.flags.is_embassy {
+        rt_features.insert("embassy".into());
+    }
+
     let mut out = Vec::new();
     out.push(Artifact::owned(
         "Cargo.toml",

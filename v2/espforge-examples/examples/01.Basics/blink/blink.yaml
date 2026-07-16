@@ -1,16 +1,31 @@
+# Blink two LEDs at independent rates using the embassy async runtime.
+#
+# - `red_led`   blinks every 500ms
+# - `green_led` blinks every 1000ms
+#
+# The intervals live in `app/rust/app.rs`: each LED is driven by its own
+# spawned embassy task. Because `runtime: embassy`, `ctx.delay.delay_ms(ms)`
+# is the async variant and must be `.await`ed.
 espforge:
   name: blink
   target: esp32c3
-  runtime: blocking
+  runtime: embassy
 
 esp32:
   gpio:
     gpio2: { pin: 18, direction: output }
+    gpio3: { pin: 3, direction: output }
 
 components:
   red_led:
     using: led
     with:
       pin: $gpio2
+      active_low: false
+  blue_led:
+    using: led
+    with:
+      pin: $gpio3
+      active_low: false
 
-devices: []
+devices: {}
