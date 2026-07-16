@@ -6,7 +6,7 @@
 // concurrently. `Led::toggle` takes `&self` (interior mutability in
 // `espforge_runtime`), so a task can hold a shared `&'static Led`.
 
-use blink_async::{Context, Delay, Led};
+use crate::{Context, Delay, Led};
 use embassy_executor::Spawner;
 
 /// Drive one LED with a fixed blink period. Spawned as its own embassy task so
@@ -27,12 +27,8 @@ async fn blink_led(led: &'static Led, delay: Delay, period_ms: u32) {
 /// independent blink tasks here.
 pub async fn setup(ctx: &'static Context, spawner: Spawner) {
     let delay = ctx.delay;
-    spawner
-        .spawn(blink_led(&ctx.components.red_led, delay, 500))
-        .unwrap();
-    spawner
-        .spawn(blink_led(&ctx.components.blue_led, delay, 1000))
-        .unwrap();
+    spawner.spawn(blink_led(&ctx.components.red_led, delay, 500).unwrap());
+    spawner.spawn(blink_led(&ctx.components.blue_led, delay, 1000).unwrap());
 }
 
 /// Reserved for per-tick work. The blink tasks above own the LEDs, so this loop

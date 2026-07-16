@@ -254,6 +254,21 @@ for whether it's threaded. The Stack is built **inline in `main.rs`** from the
 top-level `esp32.wifi` block (not claimed by any instance) and exposed to
 components as a `&'static Stack` (emitter-named global `NET_STACK`), per ADR-012.
 
+**`app.rs` import rule (strict, per ADR-008).** User-owned `app.rs` may only name
+two things via `use`:
+- `crate::{...}` — every type the app references (`Context`, `Delay`, `Led`, and any
+  other component/runtime type) is **re-exported at the generated crate root**
+  (the emitter emits e.g. `pub use espforge_runtime::{Delay, Led};`), so
+  `use crate::{Context, Delay, Led};` resolves;
+- `embassy_executor::Spawner` — the only external crate the app may name directly
+  (required to spawn embassy tasks).
+
+No `use espforge_runtime::...`, no `use <project_name>::...`, and no other external
+crate paths. If an example needs a new runtime/component type, the **emitter** adds
+the `pub use` at the crate root — `app.rs` never names the runtime crate. This keeps
+`app.rs` portable across projects and insulated from `espforge-runtime`'s internal
+module layout.
+
 ## 13. Validation & diagnostics
 Single `validate` stage before `resolve`, gating `compile`. Errors are
 **span-aware, structured `Diag`** (file:line:col + field path + fix hint) — not

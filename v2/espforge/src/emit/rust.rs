@@ -351,6 +351,11 @@ pub mod app;
 
 pub use generated::{Components, Devices, PeripheralRegistry};
 
+// Re-export the component/runtime types `app.rs` references so user code can
+// write `use crate::{Delay, Led}` (the only `use` forms allowed in `app.rs`
+// are `crate::` and `embassy_executor::Spawner`).
+pub use espforge_runtime::{Delay, Led};
+
 /// Access a component from a `Context`'s generated `Components` struct.
 /// Usage: `component!(ctx, my_led)`
 #[macro_export]

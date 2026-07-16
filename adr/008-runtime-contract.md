@@ -15,6 +15,20 @@ passed as a borrow alongside owned peripherals.
 accessors }` — app code shape unchanged even though internal wiring signatures are
 generated per-project.
 
+**`app.rs` import rule (strict).** User-owned `app.rs` may only `use` two things:
+- `crate::{...}` — every type the app references (`Context`, `Delay`, `Led`, and
+  any other component/runtime type) is re-exported at the generated crate root
+  (e.g. `pub use espforge_runtime::{Delay, Led};`), so `use crate::{Context, Delay, Led}`
+  resolves;
+- `embassy_executor::Spawner` — the only external crate the app is allowed to name
+  directly, needed to spawn tasks.
+
+No `use espforge_runtime::...`, no `use blink::...`, no other crate paths. The
+emitter guarantees every app-referenced type is reachable via `crate::`; if the
+app needs a new type, the emitter adds the `pub use` (it does not fall back to
+naming the runtime crate). This keeps `app.rs` portable across projects and
+isolates it from the runtime crate's internal module layout.
+
 **Bus-sharing stays at the component tier:** an `I2cDevice`/`SpiDevice` component is
 shared by reference by many devices; the registry itself need not support sharing.
 
