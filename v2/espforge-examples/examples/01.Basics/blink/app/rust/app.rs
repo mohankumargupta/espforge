@@ -4,8 +4,8 @@ pub fn setup(_ctx: &mut crate::Context) {
     // espforge wired your components/devices; access them via `crate::component!`/`crate::device!`.
 }
 
-pub fn forever(mut ctx: &mut crate::Context) {
-    let mut led = crate::component!(ctx, red_led);
+pub fn forever(ctx: &mut crate::Context) {
+    let led = crate::component!(ctx, red_led);
     loop {
         led.toggle();
         ctx.delay.delay_ms(1000);

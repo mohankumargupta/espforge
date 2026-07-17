@@ -246,13 +246,19 @@ fn emit_cargo_toml(rt_features: &BTreeSet<String>, out_dir: &Path) -> Result<Str
         "[package]\nname = \"espforge_project\"\nversion = \"0.1.0\"\n\n[dependencies]\n".to_string()
     });
     let merged = merge_runtime_dep(&raw, &runtime_dep);
-    Ok(merge_runtime_dep(&merged, STATIC_CELL_DEP))
+    let merged = merge_runtime_dep(&merged, STATIC_CELL_DEP);
+    Ok(merge_runtime_dep(&merged, ESP_ALLOC_DEP))
 }
 
 /// Dependency line for `static_cell`, always required by the generated project
 /// (the `CTX` global in `lib.rs` and the wifi Stack singletons use it). Version
 /// matches esp-generate's embassy base so the lock stays consistent.
 const STATIC_CELL_DEP: &str = "static_cell      = \"2.1.1\"";
+
+/// Dependency line for `esp_alloc`, required by every generated project because
+/// the emitted `#[global_allocator]` (`esp_alloc::EspHeap`) backs the heap that
+/// esp-hal / embassy-time pull in. Version matches esp-generate's base.
+const ESP_ALLOC_DEP: &str = "esp_alloc        = \"0.10\"";
 
 /// Merge a dependency line into a `Cargo.toml` string. Preserves
 /// esp-generate's exact pins/format (including multi-line feature arrays) by
@@ -421,20 +427,20 @@ extern crate alloc;
 #[global_allocator]
 static HEAP: esp_alloc::EspHeap = esp_alloc::EspHeap::empty();
 
-extern "C" {
+extern "C" {{
     static _heap_start: u8;
     static _heap_end: u8;
-}
+}}
 
 /// Initialise the global allocator from the linker-provided heap region. Call
 /// once, before any allocation (e.g. at the top of the entry point).
-pub fn init_heap() {
-    unsafe {
+pub fn init_heap() {{
+    unsafe {{
         let start = core::ptr::addr_of!(_heap_start) as usize;
         let end = core::ptr::addr_of!(_heap_end) as usize;
         HEAP.init(start, end - start);
-    }
-}
+    }}
+}}
 
 pub mod generated;
 
@@ -486,6 +492,7 @@ fn main() -> ! {{
     esp_println::logger::init_logger_from_env();
     esp_println::print!("\x1b[20h");
     let peripherals = esp_hal::init(esp_hal::Config::default());
+    {name}::init_heap();
     let registry = PeripheralRegistry::new(peripherals);
 
     // Hoisted above the component/device wiring because some drivers
@@ -567,6 +574,7 @@ async fn main(spawner: Spawner) {{
     esp_println::logger::init_logger_from_env();
     esp_println::print!("\x1b[20h");
     let peripherals = esp_hal::init(esp_hal::Config::default());
+    {name}::init_heap();
     let registry = PeripheralRegistry::new(peripherals);
 
     let sw_int = SoftwareInterruptControl::new(registry.peripherals.SW_INTERRUPT);
