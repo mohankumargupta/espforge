@@ -235,21 +235,6 @@ fn emit_cargo_toml(rt_features: &BTreeSet<String>, out_dir: &Path) -> Result<Str
     // `espforge-runtime`'s own feature graph — the generated project names
     // none of them directly.
     let runtime_dep = espforge_dep("espforge-runtime", &rt_features.iter().cloned().collect::<Vec<_>>());
-    merge_runtime_dep(out_dir, &runtime_dep)?;
-    merge_runtime_dep(out_dir, STATIC_CELL_DEP)
-}
-
-/// Dependency line for `static_cell`, always required by the generated project
-/// (the `CTX` global in `lib.rs` and the wifi Stack singletons use it). Version
-/// matches esp-generate's embassy base so the lock stays consistent.
-const STATIC_CELL_DEP: &str = "static_cell      = \"2.1.1\"";
-
-/// Merge a dependency line into the `Cargo.toml` that `esp-generate` scaffolded
-/// into `out_dir`. Preserves esp-generate's exact pins/format (including
-/// multi-line feature arrays) by doing a targeted string edit rather than
-/// re-serializing the whole manifest. Idempotent: if the line's crate name is
-/// already present it is left untouched.
-fn merge_runtime_dep(out_dir: &Path, runtime_dep: &str) -> Result<String> {
     let path = out_dir.join("Cargo.toml");
     // Option B (ADR-012): the base manifest comes from `esp-generate` (Layer 1
     // scaffold), which the caller runs before emit and writes into `out_dir`.
@@ -260,21 +245,35 @@ fn merge_runtime_dep(out_dir: &Path, runtime_dep: &str) -> Result<String> {
     let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| {
         "[package]\nname = \"espforge_project\"\nversion = \"0.1.0\"\n\n[dependencies]\n".to_string()
     });
-    let base = raw;
+    let merged = merge_runtime_dep(&raw, &runtime_dep);
+    Ok(merge_runtime_dep(&merged, STATIC_CELL_DEP))
+}
+
+/// Dependency line for `static_cell`, always required by the generated project
+/// (the `CTX` global in `lib.rs` and the wifi Stack singletons use it). Version
+/// matches esp-generate's embassy base so the lock stays consistent.
+const STATIC_CELL_DEP: &str = "static_cell      = \"2.1.1\"";
+
+/// Merge a dependency line into a `Cargo.toml` string. Preserves
+/// esp-generate's exact pins/format (including multi-line feature arrays) by
+/// doing a targeted string edit rather than re-serializing the whole manifest.
+/// Idempotent: if the line's crate name is already present it is left untouched.
+/// Operates purely on the in-memory `manifest` so successive merges compose.
+fn merge_runtime_dep(manifest: &str, runtime_dep: &str) -> String {
+    let crate_name = runtime_dep.split_whitespace().next().unwrap_or("");
+
+    // If the crate is already present (e.g. esp-generate's embassy base ships
+    // `static_cell`), leave the manifest as-is.
+    if manifest.lines().any(|l| l.trim_start().starts_with(crate_name)) {
+        return manifest.to_string();
+    }
 
     // Drop any existing line for this crate (re-merge on every build).
-    let crate_name = runtime_dep.split_whitespace().next().unwrap_or("");
-    let without = base
+    let without = manifest
         .lines()
         .filter(|l| !l.trim_start().starts_with(crate_name))
         .collect::<Vec<_>>()
         .join("\n");
-
-    // If the crate is already present (e.g. esp-generate's embassy base ships
-    // `static_cell`), leave the manifest as-is.
-    if base.lines().any(|l| l.trim_start().starts_with(crate_name)) {
-        return Ok(base);
-    }
 
     // Insert the new line right after `[dependencies]` (or append the section
     // if esp-generate ever omits it).
@@ -285,9 +284,9 @@ fn merge_runtime_dep(out_dir: &Path, runtime_dep: &str) -> Result<String> {
         s.push('\n');
         s.push_str(runtime_dep);
         s.push_str(&without[insert_at..]);
-        Ok(s)
+        s
     } else {
-        Ok(format!("{without}\n\n[dependencies]\n{runtime_dep}\n"))
+        format!("{without}\n\n[dependencies]\n{runtime_dep}\n")
     }
 }
 
@@ -414,6 +413,28 @@ macro_rules! device {
 // and macros like `format!`. The global allocator itself is wired by the
 // emitter only when the project needs it (`has_alloc` flag, e.g. `http`).
 extern crate alloc;
+
+// Every generated embedded project links crates (esp-hal, embassy-time, …)
+// that use the heap, so a `#[global_allocator]` is always required. The heap
+// region symbols `_heap_start`/`_heap_end` are provided by esp-generate's
+// linker script (`memory.x`) in the scaffolded base.
+#[global_allocator]
+static HEAP: esp_alloc::EspHeap = esp_alloc::EspHeap::empty();
+
+extern "C" {
+    static _heap_start: u8;
+    static _heap_end: u8;
+}
+
+/// Initialise the global allocator from the linker-provided heap region. Call
+/// once, before any allocation (e.g. at the top of the entry point).
+pub fn init_heap() {
+    unsafe {
+        let start = core::ptr::addr_of!(_heap_start) as usize;
+        let end = core::ptr::addr_of!(_heap_end) as usize;
+        HEAP.init(start, end - start);
+    }
+}
 
 pub mod generated;
 

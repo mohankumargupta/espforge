@@ -33,4 +33,6 @@ pub async fn setup(ctx: &'static Context, spawner: Spawner) {
 
 /// Reserved for per-tick work. The blink tasks above own the LEDs, so this loop
 /// has nothing to do.
-pub async fn forever(_ctx: &'static Context) {}
+pub async fn forever(_ctx: &'static Context) {
+	ctx.delay.delay_ms(1000).await;
+}
