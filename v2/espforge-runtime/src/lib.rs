@@ -42,6 +42,12 @@ pub mod services;
 // device whose feature is enabled, so there is no dead-code cost.
 pub mod devices;
 
+/// Re-exported under the `signal` feature so the generated project's `signal!`
+/// macro (emitted by the generator) can name `embassy_sync::signal::Signal`
+/// without the project adding `embassy-sync` itself.
+#[cfg(feature = "signal")]
+pub use embassy_sync;
+
 /// Logging handle stored on the `Context` (ADR-008 stable API). Forwards to the
 /// `log` facade; the generated project installs the sink (e.g. `esp-println`).
 #[derive(Clone, Copy)]

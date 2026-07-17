@@ -12,6 +12,7 @@ embedded-io-async = "0.7"
 log = "0.4"
 critical-section = "1.2"
 embassy-time = { version = "0.5", features = ["generic-queue-64"], optional = true }
+embassy-sync = { version = "0.6", optional = true }
 
 # Optional external driver crates, pulled only by the matching feature
 # (design §19.1/§19.3). A generated project enables these transitively via the
@@ -51,6 +52,10 @@ ili9341 = ["dep:ili9341", "dep:display-interface-spi", "dep:embedded-graphics"]
 # Embassy runtime. Selects the async `Delay` impl (yields via `embassy_time`)
 # so the same `ctx.delay` field works in both blocking and embassy projects.
 embassy = ["dep:embassy-time"]
+# Cross-task signaling primitive used by async examples (e.g. `button_async`):
+# enables `embassy_sync` and the `signal!` macro the generator emits. Requires
+# `embassy` because the async `wait_for_pressed` + `Signal` are embassy-only.
+signal = ["dep:embassy-sync", "embassy"]
 alloc = []
 
 

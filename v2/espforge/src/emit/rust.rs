@@ -198,6 +198,11 @@ pub fn emit(ir: &DeviceTree, out_dir: &Path) -> Result<Vec<Artifact>> {
     // not a per-driver feature, so add it whenever the project uses embassy.
     if ir.flags.is_embassy {
         rt_features.insert("embassy".into());
+        // The `signal` feature enables `embassy_sync` + the `signal!` macro
+        // (emitted below). Any embassy project may use `signal!` in its app, so
+        // the feature is enabled for all embassy projects (mirrors how the
+        // async `Delay` is always available under embassy).
+        rt_features.insert("signal".into());
     }
 
     if ir.flags.has_alloc {
@@ -394,6 +399,27 @@ macro_rules! component {
 macro_rules! device {
     ($ctx:expr, $name:ident) => {
         &mut $ctx.devices.$name
+    };
+}
+
+/// Declare a cross-task `embassy_sync` signal usable from async embassy tasks.
+/// Requires the `signal` feature (enabled for all embassy projects), which
+/// pulls in `embassy_sync`. The signal carries no payload; it is a pure
+/// notification, matching the v1 `signal!`/`BUTTON_PRESSED` pattern.
+///
+/// Usage (in `app.rs`):
+/// ```ignore
+/// crate::signal!(BUTTON_PRESSED);
+/// // producer task:  BUTTON_PRESSED.signal(());
+/// // consumer task:  BUTTON_PRESSED.wait().await;
+/// ```
+#[macro_export]
+macro_rules! signal {
+    ($name:ident) => {
+        static $name: espforge_runtime::embassy_sync::signal::Signal<
+            espforge_runtime::embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+            (),
+        > = espforge_runtime::embassy_sync::signal::Signal::new();
     };
 }"#;
 
