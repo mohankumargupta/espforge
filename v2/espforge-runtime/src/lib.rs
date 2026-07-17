@@ -14,6 +14,7 @@
 // (e.g. the `http` software-service, ADR-012); this lets runtime modules use
 // `String`/`Vec`. The global allocator is provided by the generated project
 // (esp-alloc), not by this crate.
+#[cfg(feature = "alloc")]
 extern crate alloc;
 
 // The `components` namespace is always present; individual capability modules

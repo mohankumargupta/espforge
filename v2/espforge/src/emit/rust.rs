@@ -200,6 +200,10 @@ pub fn emit(ir: &DeviceTree, out_dir: &Path) -> Result<Vec<Artifact>> {
         rt_features.insert("embassy".into());
     }
 
+    if ir.flags.has_alloc {
+        rt_features.insert("alloc".into());
+    }
+
     let mut out = Vec::new();
     out.push(Artifact::owned(
         "Cargo.toml",

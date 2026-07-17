@@ -45,10 +45,12 @@ i2c = []
 button = []
 spi = []
 uart = []
-http = ["dep:embassy-net", "dep:edge-http", "dep:edge-nal", "dep:edge-nal-embassy"]
+http = ["dep:embassy-net", "dep:edge-http", "dep:edge-nal", "dep:edge-nal-embassy", "alloc"]
 ssd1306 = ["dep:ssd1306", "dep:display-interface-i2c", "dep:embedded-graphics"]
 ili9341 = ["dep:ili9341", "dep:display-interface-spi", "dep:embedded-graphics"]
 # Embassy runtime. Selects the async `Delay` impl (yields via `embassy_time`)
 # so the same `ctx.delay` field works in both blocking and embassy projects.
 embassy = ["dep:embassy-time"]
+alloc = []
+
 
