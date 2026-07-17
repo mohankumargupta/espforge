@@ -5,12 +5,12 @@ espforge:
 
 esp32:
   gpio:
-    gpio2: { pin: 18, direction: output }
+    gpio18: { pin: 18, direction: output }
 
 components:
   red_led:
     using: led
     with:
-      pin: $gpio2
+      pin: $gpio18
 
 devices: []
