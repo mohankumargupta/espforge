@@ -13,7 +13,7 @@ use embassy_executor::Spawner;
 /// each LED's timing is independent of the others. `delay` is taken by value
 /// because `Delay` is `Copy` — that avoids borrowing `ctx` for the task's
 /// lifetime.
-#[embassy_executor::task]
+#[embassy_executor::task(pool_size = 2)]
 async fn blink_led(led: &'static Led, delay: Delay, period_ms: u32) {
     loop {
         led.toggle();
