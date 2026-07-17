@@ -255,10 +255,10 @@ fn emit_cargo_toml(rt_features: &BTreeSet<String>, out_dir: &Path) -> Result<Str
 /// matches esp-generate's embassy base so the lock stays consistent.
 const STATIC_CELL_DEP: &str = "static_cell      = \"2.1.1\"";
 
-/// Dependency line for `esp_alloc`, required by every generated project because
+/// Dependency line for `esp-alloc`, required by every generated project because
 /// the emitted `#[global_allocator]` (`esp_alloc::EspHeap`) backs the heap that
 /// esp-hal / embassy-time pull in. Version matches esp-generate's base.
-const ESP_ALLOC_DEP: &str = "esp_alloc        = \"0.10\"";
+const ESP_ALLOC_DEP: &str = "esp-alloc        = \"0.10\"";
 
 /// Merge a dependency line into a `Cargo.toml` string. Preserves
 /// esp-generate's exact pins/format (including multi-line feature arrays) by
