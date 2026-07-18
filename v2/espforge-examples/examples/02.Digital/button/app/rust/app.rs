@@ -1,6 +1,6 @@
 #[warn(unused_variables)]
 
-use crate::{component, Context};
+use crate::{Context};
 
 pub fn setup(ctx: &mut Context) {
   let logger = ctx.logger;
