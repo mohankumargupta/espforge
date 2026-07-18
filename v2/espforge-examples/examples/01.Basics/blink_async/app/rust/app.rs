@@ -27,8 +27,10 @@ async fn blink_led(led: &'static Led, delay: Delay, period_ms: u32) {
 /// independent blink tasks here.
 pub async fn setup(ctx: &'static Context, spawner: Spawner) {
     let delay = ctx.delay;
-    spawner.spawn(blink_led(&ctx.components.red_led, delay, 500).unwrap());
-    spawner.spawn(blink_led(&ctx.components.blue_led, delay, 1000).unwrap());
+    let red_led = component!(ctx, red_led);
+    let blue_led = component!(ctx, blue_led);
+    spawner.spawn(blink_led(red_led, delay, 500).unwrap());
+    spawner.spawn(blink_led(blue_led, delay, 1000).unwrap());
 }
 
 /// Reserved for per-tick work. The blink tasks above own the LEDs, so this loop
