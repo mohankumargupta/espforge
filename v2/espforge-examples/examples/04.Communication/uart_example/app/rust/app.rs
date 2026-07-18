@@ -6,7 +6,7 @@ pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
     let uart = component!(ctx, uart0);
 
-    logger.info("UART Example");
+    uart.with_buffered_string(|s| logger.info(s));
     uart.write("Hello\n").expect("uart write failed");
 }
 

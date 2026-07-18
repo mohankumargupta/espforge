@@ -385,11 +385,14 @@ fn emit_lib(ir: &DeviceTree, catalog: &espforge_model::driver::Registry) -> Stri
     let reexports = reexports.join("\n");
 
     const MACROS: &str = r#"/// Access a component from a `Context`'s generated `Components` struct.
+/// Every component/device uses interior mutability (`RefCell`, ADR-008), so
+/// this always yields a shared reference — the same macro works whether
+/// `ctx` is `&mut Context` (blocking) or `&'static Context` (async/Embassy).
 /// Usage: `component!(ctx, my_led)`
 #[macro_export]
 macro_rules! component {
     ($ctx:expr, $name:ident) => {
-        &mut $ctx.components.$name
+        &$ctx.components.$name
     };
 }
 
@@ -398,7 +401,7 @@ macro_rules! component {
 #[macro_export]
 macro_rules! device {
     ($ctx:expr, $name:ident) => {
-        &mut $ctx.devices.$name
+        &$ctx.devices.$name
     };
 }
 

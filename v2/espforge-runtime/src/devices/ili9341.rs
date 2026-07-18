@@ -1,6 +1,12 @@
 //! `ili9341` device: a terminal SPI TFT driver (ADR-003). Uses the same
 //! external crates v1 used (`ili9341` + `display-interface-spi` +
 //! `embedded-graphics`; see `espforge_devices::devices::ili9341`).
+//!
+//! Held behind a `RefCell` (see `ssd1306.rs` for the rationale) so every
+//! drawing method takes `&self`, matching the shared reference the `device!`
+//! macro now hands out uniformly across blocking and Embassy contexts.
+
+use core::cell::RefCell;
 
 use display_interface_spi::SPIInterface;
 use embedded_graphics::{
@@ -15,7 +21,7 @@ use ili9341::{DisplaySize240x320, Ili9341 as Ili9341Driver, Orientation};
 use crate::components::spi::SpiDevice;
 
 pub struct Ili9341 {
-    display: Ili9341Driver<SPIInterface<SpiDevice, Output<'static>>, Output<'static>>,
+    display: RefCell<Ili9341Driver<SPIInterface<SpiDevice, Output<'static>>, Output<'static>>>,
 }
 
 impl Ili9341 {
@@ -33,20 +39,27 @@ impl Ili9341 {
             DisplaySize240x320,
         )
         .unwrap();
-        Ili9341 { display }
+        Ili9341 { 
+            display: RefCell::new(display), 
+        }
     }
 
-    pub fn clear(&mut self) {
-        let _ = self.display.clear(Rgb565::BLACK);
+    pub fn clear(&self) {
+        critical_section::with(|_cs| {
+            let _ = self.display.borrow_mut().clear(Rgb565::BLACK);
+        });
     }
 
-    pub fn print(&mut self, x: i32, y: i32, text: &str) {
+    pub fn print(&self, x: i32, y: i32, text: &str) {
         let style = MonoTextStyleBuilder::new()
             .font(&FONT_10X20)
             .text_color(Rgb565::WHITE)
             .background_color(Rgb565::BLACK)
             .build();
-        let _ = Text::with_baseline(text, Point::new(x, y), style, Baseline::Top)
-            .draw(&mut self.display);
+        critical_section::with(|_cs| {
+            let mut disp = self.display.borrow_mut();
+            let _ = Text::with_baseline(text, Point::new(x, y), style, Baseline::Top)
+                .draw(&mut *disp);
+        });
     }
 }

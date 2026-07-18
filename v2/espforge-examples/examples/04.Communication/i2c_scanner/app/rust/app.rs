@@ -11,7 +11,7 @@ pub fn setup(ctx: &mut Context) {
     // there is a device there. The I2cBus exposes the underlying esp-hal bus
     // via `bus()`.
     for address in 1..127 {
-        match i2c.bus_mut().write(address, &[]) {
+        match i2c.bus().borrow_mut().write(address, &[]) {
             Ok(_) => {
                 logger.info(format_args!("Found device at address 0x{:02x}", address));
             }
