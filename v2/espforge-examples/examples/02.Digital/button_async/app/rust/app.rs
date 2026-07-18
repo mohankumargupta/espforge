@@ -10,7 +10,7 @@
 // both use interior mutability, so a shared `&'static Context` is enough to
 // call `wait_for_pressed().await` and `toggle()` from the task.
 
-use crate::{Button, Context, Led};
+use crate::{Context};
 use embassy_executor::Spawner;
 
 // Cross-task signal (requires the `signal` feature, on for all embassy
