@@ -35,8 +35,8 @@ async fn monitor_task(ctx: &'static Context) {
 }
 
 pub async fn setup(ctx: &'static Context, spawner: Spawner) {
-    spawner.spawn(transfer_task(ctx));
-    spawner.spawn(monitor_task(ctx));
+    spawner.spawn(transfer_task(ctx).expect("transfer task failed"));
+    spawner.spawn(monitor_task(ctx).expect("monitor task failed"));
 }
 
 pub async fn forever(ctx: &'static Context) {
