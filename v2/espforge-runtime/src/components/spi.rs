@@ -14,7 +14,7 @@
 
 use core::cell::RefCell;
 use esp_hal::gpio::{InputPin, Output, OutputPin};
-use esp_hal::spi::master::{Config as EspConfig, Error as EspError, Spi};
+use esp_hal::spi::master::{Config as EspConfig, Spi};
 use esp_hal::spi::Mode;
 #[cfg(not(feature = "embassy"))]
 use esp_hal::Blocking;
@@ -51,11 +51,13 @@ impl From<SpiConfig> for EspConfig {
     }
 }
 
-/// Unified SPI error surfaced to examples. (`ConfigError` lacks `Eq`.)
+/// Unified SPI error surfaced to examples. (`ConfigError` lacks `Eq`, and the
+/// esp-hal bus `Error` is private, so `Bus` carries no payload — examples only
+/// ever match on `Err(_)`.)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpiError {
     Config(esp_hal::spi::master::ConfigError),
-    Bus(EspError),
+    Bus,
 }
 
 impl embedded_hal::spi::Error for SpiError {
@@ -88,9 +90,9 @@ pub struct SpiBus<Dm: DriverMode + 'static> {
 #[cfg(not(feature = "embassy"))]
 impl SpiBus<Blocking> {
     /// Build the owned esp-hal `Spi` master, park it in a `static` cell, return
-    /// a `Copy` `SpiBus` handle. esp-hal 1.1: `new(config)` only — pins attached
-    /// via `with_sck`/`with_mosi`/`with_miso`; **no `clocks` arg, no bus-level
-    /// CS** (§20.1/§20.5). Fallible per §20.7.
+    /// a `Copy` `SpiBus` handle. esp-hal 1.1: `Spi::new(spi, config)` takes the
+    /// peripheral + config; pins attached via `with_sck`/`with_mosi`/`with_miso`;
+    /// **no `clocks` arg, no bus-level CS** (§20.1/§20.5). Fallible per §20.7.
     pub fn build(
         spi: SPI2<'static>,
         sclk: impl OutputPin + 'static,
@@ -100,7 +102,7 @@ impl SpiBus<Blocking> {
     ) -> Result<SpiBus<Blocking>, esp_hal::spi::master::ConfigError> {
         static CELL: static_cell::StaticCell<RefCell<Spi<'static, Blocking>>> =
             static_cell::StaticCell::new();
-        let esp = Spi::new(EspConfig::from(config))?
+        let esp = Spi::new(spi, EspConfig::from(config))?
             .with_sck(sclk)
             .with_mosi(mosi)
             .with_miso(miso);
@@ -128,7 +130,7 @@ impl SpiBus<Async> {
                 RefCell<Spi<'static, Async>>,
             >,
         > = static_cell::StaticCell::new();
-        let esp = Spi::new(EspConfig::from(config))?
+        let esp = Spi::new(spi, EspConfig::from(config))?
             .with_sck(sclk)
             .with_mosi(mosi)
             .with_miso(miso)
@@ -207,7 +209,7 @@ impl embedded_hal::spi::SpiDevice for SpiDevice<Blocking> {
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), Self::Error> {
         let mut bus = self.bus.inner.borrow_mut();
-        run_ops(&mut *bus, &mut self.cs.clone(), &self.delay, operations)
+        run_ops(&mut *bus, &mut self.cs, &self.delay, operations)
     }
 }
 
@@ -218,6 +220,6 @@ impl embedded_hal_async::spi::SpiDevice for SpiDevice<Async> {
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), Self::Error> {
         let mut guard = self.bus.inner.lock().await;
-        run_ops(&mut *guard.borrow_mut(), &mut self.cs.clone(), &self.delay, operations)
+        run_ops(&mut *guard.borrow_mut(), &mut self.cs, &self.delay, operations)
     }
 }
