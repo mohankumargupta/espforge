@@ -20,7 +20,9 @@
 use core::cell::RefCell;
 use esp_hal::gpio::{InputPin, OutputPin};
 use esp_hal::uart::{Config as EspConfig, DataBits, Parity, StopBits, Uart};
-use esp_hal::{Blocking, DriverMode};
+#[cfg(not(feature = "embassy"))]
+use esp_hal::Blocking;
+use esp_hal::DriverMode;
 #[cfg(feature = "embassy")]
 use esp_hal::Async;
 
@@ -54,8 +56,6 @@ impl From<UartConfig> for EspConfig {
         // 8N1 (esp-hal `Config::default()`). `with_baudrate` is the
         // builder_lite setter (doc at uart/mod.rs:1974).
         let mut cfg = EspConfig::default().with_baudrate(c.baudrate);
-        // Apply explicit framing only when it differs from the default, so we
-        // don't depend on every `with_*` setter existing in this esp-hal build.
         if c.data_bits != DataBits::DataBits8 {
             cfg = cfg.with_data_bits(c.data_bits);
         }
@@ -77,13 +77,27 @@ pub enum UartError {
 }
 
 // ---------------------------------------------------------------------------
-// Blocking device
+// One parametric `UartDevice` struct; inner sharing primitive differs by build.
 // ---------------------------------------------------------------------------
 
+#[cfg(not(feature = "embassy"))]
 pub struct UartDevice<Dm: DriverMode + 'static> {
     inner: RefCell<Uart<'static, Dm>>,
 }
 
+#[cfg(feature = "embassy")]
+pub struct UartDevice<Dm: DriverMode + 'static> {
+    inner: embassy_sync::mutex::Mutex<
+        embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+        RefCell<Uart<'static, Dm>>,
+    >,
+}
+
+// ---------------------------------------------------------------------------
+// Blocking build + API
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "embassy"))]
 impl UartDevice<Blocking> {
     /// Build the owned esp-hal `Uart`. esp-hal 1.1: `new(config)` only — pins
     /// attached via `with_tx`/`with_rx`; **no `clocks` arg** (§20.1). Fallible
@@ -98,13 +112,6 @@ impl UartDevice<Blocking> {
         Ok(UartDevice {
             inner: RefCell::new(esp),
         })
-    }
-
-    #[cfg(feature = "embassy")]
-    pub fn into_async(self) -> UartDevice<Async> {
-        UartDevice {
-            inner: embassy_sync::mutex::Mutex::new(self.inner.into_inner().into_async()),
-        }
     }
 
     /// Write all bytes, looping over esp-hal's partial `write` (returns usize).
@@ -145,7 +152,6 @@ impl UartDevice<Blocking> {
                 if total > 0 && buf[..total].contains(&b'\n') {
                     break;
                 }
-                // Nothing available yet; yield the CPU briefly (blocking spin).
                 esp_hal::delay::Delay::new().delay_millis(1);
                 continue;
             }
@@ -169,30 +175,38 @@ impl UartDevice<Blocking> {
 }
 
 // ---------------------------------------------------------------------------
-// Async device (only under `embassy`, §20.3/§20.4)
+// Async build + API (only under `embassy`, §20.3/§20.4)
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "embassy")]
-pub struct UartDevice<Async> {
-    inner: embassy_sync::mutex::Mutex<RefCell<Uart<'static, Async>>>,
-}
-
-#[cfg(feature = "embassy")]
 impl UartDevice<Async> {
-    pub fn into_blocking(self) -> UartDevice<Blocking> {
-        UartDevice {
-            inner: RefCell::new(self.inner.into_inner().into_blocking()),
-        }
+    pub fn build(
+        uart: esp_hal::peripherals::UART0<'static>,
+        tx: impl OutputPin + 'static,
+        rx: impl InputPin + 'static,
+        config: UartConfig,
+    ) -> Result<Self, esp_hal::uart::ConfigError> {
+        let esp = Uart::new(uart, EspConfig::from(config))?
+            .with_tx(tx)
+            .with_rx(rx)
+            .into_async();
+        Ok(UartDevice {
+            inner: embassy_sync::mutex::Mutex::new(RefCell::new(esp)),
+        })
     }
 
     pub async fn write_all(&self, data: &[u8]) -> Result<(), UartError> {
         let mut uart = self.inner.lock().await;
         let mut off = 0;
         while off < data.len() {
-            let n = uart.write(&data[off..]).await.map_err(UartError::Write)?;
+            let n = uart
+                .borrow_mut()
+                .write(&data[off..])
+                .await
+                .map_err(UartError::Write)?;
             off += n;
         }
-        uart.flush().await.map_err(UartError::Write)
+        uart.borrow_mut().flush().await.map_err(UartError::Write)
     }
 
     pub async fn write_str(&self, s: &str) -> Result<(), UartError> {
@@ -203,6 +217,7 @@ impl UartDevice<Async> {
         self.inner
             .lock()
             .await
+            .borrow_mut()
             .read(buf)
             .await
             .map_err(UartError::Read)
@@ -212,6 +227,7 @@ impl UartDevice<Async> {
         self.inner
             .lock()
             .await
+            .borrow_mut()
             .read_buffered(buf)
             .await
             .map_err(UartError::Read)
@@ -223,7 +239,10 @@ impl UartDevice<Async> {
             // Release the lock between idle reads (§20.3: not held across await).
             let n = {
                 let mut uart = self.inner.lock().await;
-                uart.read_buffered(&mut buf[total..]).await.map_err(UartError::Read)?
+                uart.borrow_mut()
+                    .read_buffered(&mut buf[total..])
+                    .await
+                    .map_err(UartError::Read)?
             };
             if n == 0 {
                 if total > 0 && buf[..total].contains(&b'\n') {

@@ -16,7 +16,9 @@ use core::cell::RefCell;
 use esp_hal::gpio::{InputPin, Output, OutputPin};
 use esp_hal::spi::master::{Config as EspConfig, Error as EspError, Spi};
 use esp_hal::spi::Mode;
-use esp_hal::{Blocking, DriverMode};
+#[cfg(not(feature = "embassy"))]
+use esp_hal::Blocking;
+use esp_hal::DriverMode;
 #[cfg(feature = "embassy")]
 use esp_hal::Async;
 use esp_hal::peripherals::SPI2;
@@ -63,19 +65,32 @@ impl embedded_hal::spi::Error for SpiError {
 }
 
 // ---------------------------------------------------------------------------
-// Blocking bus
+// One parametric `SpiBus` struct; inner sharing primitive differs by build.
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy)]
+#[cfg(not(feature = "embassy"))]
 pub struct SpiBus<Dm: DriverMode + 'static> {
     inner: &'static RefCell<Spi<'static, Dm>>,
 }
 
+#[cfg(feature = "embassy")]
+pub struct SpiBus<Dm: DriverMode + 'static> {
+    inner: &'static embassy_sync::mutex::Mutex<
+        embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+        RefCell<Spi<'static, Dm>>,
+    >,
+}
+
+// ---------------------------------------------------------------------------
+// Blocking build
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "embassy"))]
 impl SpiBus<Blocking> {
-    /// Build the owned esp-hal `Spi` master, park it in a `static` cell, and
-    /// return a `Copy` `SpiBus` handle. esp-hal 1.1: `new(config)` only — pins
-    /// attached via `with_sck`/`with_mosi`/`with_miso`; **no `clocks` arg, no
-    /// bus-level CS** (§20.1/§20.5). Fallible per §20.7.
+    /// Build the owned esp-hal `Spi` master, park it in a `static` cell, return
+    /// a `Copy` `SpiBus` handle. esp-hal 1.1: `new(config)` only — pins attached
+    /// via `with_sck`/`with_mosi`/`with_miso`; **no `clocks` arg, no bus-level
+    /// CS** (§20.1/§20.5). Fallible per §20.7.
     pub fn build(
         spi: SPI2<'static>,
         sclk: impl OutputPin + 'static,
@@ -92,35 +107,34 @@ impl SpiBus<Blocking> {
         let inner = CELL.init(RefCell::new(esp));
         Ok(SpiBus { inner })
     }
-
-    #[cfg(feature = "embassy")]
-    pub fn into_async(self) -> SpiBus<Async> {
-        static CELL: static_cell::StaticCell<
-            embassy_sync::mutex::Mutex<RefCell<Spi<'static, Async>>>,
-        > = static_cell::StaticCell::new();
-        let esp = self.inner.borrow_mut().into_async();
-        let inner = CELL.init(embassy_sync::mutex::Mutex::new(RefCell::new(esp)));
-        SpiBus { inner }
-    }
 }
 
 // ---------------------------------------------------------------------------
-// Async bus (only under `embassy`, §20.3)
+// Async build (only under `embassy`)
 // ---------------------------------------------------------------------------
-
-#[cfg(feature = "embassy")]
-pub struct SpiBus<Async> {
-    inner: &'static embassy_sync::mutex::Mutex<RefCell<Spi<'static, Async>>>,
-}
 
 #[cfg(feature = "embassy")]
 impl SpiBus<Async> {
-    pub fn into_blocking(self) -> SpiBus<Blocking> {
-        static CELL: static_cell::StaticCell<RefCell<Spi<'static, Blocking>>> =
-            static_cell::StaticCell::new();
-        let esp = self.inner.into_inner().into_blocking();
-        let inner = CELL.init(RefCell::new(esp));
-        SpiBus { inner }
+    pub fn build(
+        spi: SPI2<'static>,
+        sclk: impl OutputPin + 'static,
+        mosi: impl OutputPin + 'static,
+        miso: impl InputPin + 'static,
+        config: SpiConfig,
+    ) -> Result<SpiBus<Async>, esp_hal::spi::master::ConfigError> {
+        static CELL: static_cell::StaticCell<
+            embassy_sync::mutex::Mutex<
+                embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+                RefCell<Spi<'static, Async>>,
+            >,
+        > = static_cell::StaticCell::new();
+        let esp = Spi::new(EspConfig::from(config))?
+            .with_sck(sclk)
+            .with_mosi(mosi)
+            .with_miso(miso)
+            .into_async();
+        let inner = CELL.init(embassy_sync::mutex::Mutex::new(RefCell::new(esp)));
+        Ok(SpiBus { inner })
     }
 }
 
@@ -147,34 +161,17 @@ impl<Dm: DriverMode + 'static> SpiDevice<Dm> {
     }
 }
 
-#[cfg(feature = "embassy")]
-impl SpiDevice<Blocking> {
-    /// Morph the device's bus to async (design §20.1).
-    pub fn into_async(self) -> SpiDevice<Async> {
-        SpiDevice {
-            bus: self.bus.into_async(),
-            cs: self.cs,
-            delay: self.delay,
-        }
-    }
-}
-
-impl embedded_hal::spi::ErrorType for SpiDevice<Blocking> {
-    type Error = SpiError;
-}
-
-/// Run the operations against a `&mut Spi` (works for both modes: esp-hal
-/// implements `embedded_hal::spi::SpiBus` for `Spi<'_>` in every `Dm`, §20.5).
-/// Generic over `Dm` so one body serves blocking and async.
-fn run_ops<Dm: esp_hal::DriverMode + 'static>(
+/// Run the operations against a `&mut Spi`. Generic over `Dm` so one body
+/// serves blocking and async (esp-hal implements `embedded_hal::spi::SpiBus`
+/// for `Spi<'_>` in every `Dm`, §20.5).
+fn run_ops<Dm: DriverMode + 'static>(
     bus: &mut Spi<'static, Dm>,
     cs: &mut Output<'static>,
     delay: &Delay,
     operations: &mut [embedded_hal::spi::Operation<'_, u8>],
 ) -> Result<(), SpiError> {
     use embedded_hal::delay::DelayNs;
-    use embedded_hal::spi::SpiBus as _;
-    use embedded_hal::spi::Operation;
+    use embedded_hal::spi::{Operation, SpiBus as _};
     cs.set_low();
     let result = (|| {
         for op in operations.iter_mut() {
@@ -188,7 +185,6 @@ fn run_ops<Dm: esp_hal::DriverMode + 'static>(
                     bus.transfer_in_place(buf).map_err(SpiError::Bus)?
                 }
                 Operation::DelayNs(ns) => {
-                    // esp-hal `DelayNs` takes `u32`; clamp a larger value.
                     delay.delay_ns((*ns).try_into().unwrap_or(u32::MAX));
                 }
             }
@@ -199,22 +195,28 @@ fn run_ops<Dm: esp_hal::DriverMode + 'static>(
     result
 }
 
-impl SpiDevice<Blocking> {
-    pub fn transaction(
-        &self,
+#[cfg(not(feature = "embassy"))]
+impl embedded_hal::spi::ErrorType for SpiDevice<Blocking> {
+    type Error = SpiError;
+}
+
+#[cfg(not(feature = "embassy"))]
+impl embedded_hal::spi::SpiDevice for SpiDevice<Blocking> {
+    fn transaction(
+        &mut self,
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
-    ) -> Result<(), SpiError> {
+    ) -> Result<(), Self::Error> {
         let mut bus = self.bus.inner.borrow_mut();
         run_ops(&mut *bus, &mut self.cs.clone(), &self.delay, operations)
     }
 }
 
 #[cfg(feature = "embassy")]
-impl SpiDevice<Async> {
-    pub async fn transaction(
-        &self,
+impl embedded_hal_async::spi::SpiDevice for SpiDevice<Async> {
+    async fn transaction(
+        &mut self,
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
-    ) -> Result<(), SpiError> {
+    ) -> Result<(), Self::Error> {
         let mut guard = self.bus.inner.lock().await;
         run_ops(&mut *guard.borrow_mut(), &mut self.cs.clone(), &self.delay, operations)
     }

@@ -17,7 +17,9 @@
 use core::cell::RefCell;
 use esp_hal::gpio::{InputPin, OutputPin};
 use esp_hal::i2c::master::{Config as EspConfig, Error as EspError, I2c};
-use esp_hal::{Blocking, DriverMode};
+#[cfg(not(feature = "embassy"))]
+use esp_hal::Blocking;
+use esp_hal::DriverMode;
 #[cfg(feature = "embassy")]
 use esp_hal::Async;
 use esp_hal::peripherals::I2C0;
@@ -56,28 +58,38 @@ pub enum I2cError {
 
 impl embedded_hal::i2c::Error for I2cError {
     fn kind(&self) -> embedded_hal::i2c::ErrorKind {
-        match self {
-            I2cError::Config(_) => embedded_hal::i2c::ErrorKind::Other,
-            I2cError::Bus(_) => embedded_hal::i2c::ErrorKind::Other,
-        }
+        // esp-hal's `Error` does not categorise; surface `Other`.
+        embedded_hal::i2c::ErrorKind::Other
     }
 }
 
 // ---------------------------------------------------------------------------
-// Blocking variant — owns the `RefCell<I2c>` by value (move-by-value, §12).
+// One parametric struct; the inner sharing primitive differs by build.
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy)]
+#[cfg(not(feature = "embassy"))]
 pub struct I2cBus<Dm: DriverMode + 'static> {
     inner: &'static RefCell<I2c<'static, Dm>>,
 }
 
+#[cfg(feature = "embassy")]
+pub struct I2cBus<Dm: DriverMode + 'static> {
+    inner: &'static embassy_sync::mutex::Mutex<
+        embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+        RefCell<I2c<'static, Dm>>,
+    >,
+}
+
+// ---------------------------------------------------------------------------
+// Blocking build + API
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "embassy"))]
 impl I2cBus<Blocking> {
-    /// Build the owned esp-hal `I2c` master and park it in a `static` cell,
-    /// returning a `Copy` `I2cBus` handle. Called once by the generated wiring;
-    /// the `&'static` is safe because the cell is a `static` item. **Fallible**
-    /// (design §20.7): the codegen `.expect`s the `ConfigError` in the generated
-    /// `setup` with a component-specific message.
+    /// Build the owned esp-hal `I2c` master, park it in a `static` cell, and
+    /// return a `Copy` `I2cBus` handle. Called once by the generated wiring.
+    /// **Fallible** (design §20.7): the codegen `.expect`s the `ConfigError`
+    /// with a component-specific message.
     ///
     /// esp-hal 1.1: `new(config)` only — pins attached via `with_sda`/`with_scl`;
     /// there is **no `clocks` argument** (§20.1).
@@ -93,24 +105,14 @@ impl I2cBus<Blocking> {
         let inner = CELL.init(RefCell::new(esp));
         Ok(I2cBus { inner })
     }
-
-    /// Morph this bus into its async counterpart (design §20.1). The underlying
-    /// `I2c` is moved out of the `RefCell`, morphed, and re-parked in a `static`
-    /// async cell.
-    #[cfg(feature = "embassy")]
-    pub fn into_async(self) -> I2cBus<Async> {
-        static CELL: static_cell::StaticCell<RefCell<I2c<'static, Async>>> =
-            static_cell::StaticCell::new();
-        let esp = self.inner.borrow_mut().into_async();
-        let inner = CELL.init(RefCell::new(esp));
-        I2cBus { inner }
-    }
 }
 
+#[cfg(not(feature = "embassy"))]
 impl embedded_hal::i2c::ErrorType for I2cBus<Blocking> {
     type Error = I2cError;
 }
 
+#[cfg(not(feature = "embassy"))]
 impl embedded_hal::i2c::I2c for I2cBus<Blocking> {
     fn transaction(
         &mut self,
@@ -133,6 +135,7 @@ impl embedded_hal::i2c::I2c for I2cBus<Blocking> {
 }
 
 // Convenience blocking helpers (idiomatic, transaction-style per §20.5).
+#[cfg(not(feature = "embassy"))]
 impl I2cBus<Blocking> {
     pub fn write(&self, addr: u8, bytes: &[u8]) -> Result<(), I2cError> {
         self.inner.borrow_mut().write(addr, bytes).map_err(I2cError::Bus)
@@ -149,49 +152,70 @@ impl I2cBus<Blocking> {
 }
 
 // ---------------------------------------------------------------------------
-// Async variant (only compiled under `embassy`, §20.2/§20.3)
+// Async build + API (only compiled under `embassy`, §20.2/§20.3)
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "embassy")]
-pub struct I2cBus<Async> {
-    inner: &'static embassy_sync::mutex::Mutex<RefCell<I2c<'static, Async>>>,
-}
-
-#[cfg(feature = "embassy")]
 impl I2cBus<Async> {
-    /// Morph an async bus back to blocking (design §20.1).
-    pub fn into_blocking(self) -> I2cBus<Blocking> {
-        static CELL: static_cell::StaticCell<RefCell<I2c<'static, Blocking>>> =
-            static_cell::StaticCell::new();
-        let esp = self.inner.into_inner().into_blocking();
-        let inner = CELL.init(RefCell::new(esp));
-        I2cBus { inner }
+    /// Build the owned esp-hal `I2c` master (async mode) and park it in a
+    /// mutex-backed `static` cell. **Fallible** per §20.7.
+    pub fn build(
+        i2c: I2C0<'static>,
+        sda: impl OutputPin + 'static + InputPin,
+        scl: impl OutputPin + 'static + InputPin,
+        config: I2cConfig,
+    ) -> Result<I2cBus<Async>, esp_hal::i2c::master::ConfigError> {
+        static CELL: static_cell::StaticCell<
+            embassy_sync::mutex::Mutex<
+                embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+                RefCell<I2c<'static, Async>>,
+            >,
+        > = static_cell::StaticCell::new();
+        let esp = I2c::new(i2c, EspConfig::from(config))?
+            .with_sda(sda)
+            .with_scl(scl)
+            .into_async();
+        let inner = CELL.init(embassy_sync::mutex::Mutex::new(RefCell::new(esp)));
+        Ok(I2cBus { inner })
     }
 
     /// Lock the bus and run an async transaction atomically across tasks (§20.4).
+    /// Iterates the `embedded_hal::i2c::Operation` slice and dispatches to
+    /// esp-hal's async `write_async`/`read_async` per op, holding the lock for
+    /// the whole sequence (so the transaction is atomic across tasks). This
+    /// avoids esp-hal's distinct `Operation` enum and any heap allocation.
     pub async fn transaction(
         &self,
         address: u8,
         operations: &mut [embedded_hal::i2c::Operation<'_>],
     ) -> Result<(), I2cError> {
-        let mut guard = self.inner.lock().await;
-        guard
-            .transaction_async(address, operations)
-            .await
-            .map_err(I2cError::Bus)
+        let guard = self.inner.lock().await;
+        let mut bus = guard.borrow_mut();
+        for op in operations.iter_mut() {
+            match op {
+                embedded_hal::i2c::Operation::Write(buffer) => {
+                    bus.write_async(address, buffer).await.map_err(I2cError::Bus)?
+                }
+                embedded_hal::i2c::Operation::Read(buffer) => {
+                    bus.read_async(address, buffer).await.map_err(I2cError::Bus)?
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn write(&self, addr: u8, bytes: &[u8]) -> Result<(), I2cError> {
-        let mut guard = self.inner.lock().await;
-        guard.write_async(addr, bytes).await.map_err(I2cError::Bus)
+        let guard = self.inner.lock().await;
+        guard.borrow_mut().write_async(addr, bytes).await.map_err(I2cError::Bus)
     }
     pub async fn read(&self, addr: u8, buf: &mut [u8]) -> Result<(), I2cError> {
-        let mut guard = self.inner.lock().await;
-        guard.read_async(addr, buf).await.map_err(I2cError::Bus)
+        let guard = self.inner.lock().await;
+        guard.borrow_mut().read_async(addr, buf).await.map_err(I2cError::Bus)
     }
     pub async fn write_read(&self, addr: u8, w: &[u8], r: &mut [u8]) -> Result<(), I2cError> {
-        let mut guard = self.inner.lock().await;
+        let guard = self.inner.lock().await;
         guard
+            .borrow_mut()
             .write_read_async(addr, w, r)
             .await
             .map_err(I2cError::Bus)

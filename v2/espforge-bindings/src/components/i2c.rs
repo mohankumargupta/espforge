@@ -69,10 +69,13 @@ impl Driver for I2cDriver {
             })
             .unwrap_or_else(|| ("0".to_string(), "0".to_string(), 100));
         let build = ctx.backend.i2c_master(&field, &sda, &scl, freq);
-        let mut expr = format!("{build}.expect(\"{id}: invalid I2C config (check frequency_kHz)\")", id = inst.id);
-        if ctx.is_embassy {
-            expr.push_str(".into_async()");
-        }
+        // `I2cBus::build` returns the correct `Dm` variant for this build (the
+        // `embassy` cargo feature selects the async impl), so no `.into_async()`
+        // is needed (design §20.1/§20.2).
+        let expr = format!(
+            "{build}.expect(\"{id}: invalid I2C config (check frequency_kHz)\")",
+            id = inst.id
+        );
         Construction::for_instance(inst, expr)
     }
 }

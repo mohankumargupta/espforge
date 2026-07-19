@@ -74,14 +74,13 @@ impl Driver for UartDriver {
                     "115200".to_string(),
                 )
             });
-        let mut expr = format!(
+        // `UartDevice::build` returns the correct `Dm` variant for this build
+        // (the `embassy` feature selects the async impl), so no `.into_async()`.
+        let expr = format!(
             "{build}.expect(\"{id}: invalid UART config (check baudrate)\")",
             id = inst.id,
             build = ctx.backend.uart(&field, &tx, &rx, baud.parse().unwrap_or(115_200)),
         );
-        if ctx.is_embassy {
-            expr.push_str(".into_async()");
-        }
         Construction::for_instance(inst, expr)
     }
 }

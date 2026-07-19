@@ -85,33 +85,25 @@ impl Driver for SpiDriver {
                 )
             });
         let build = ctx.backend.spi_master(&field, &mosi, &miso, &sclk, mode, freq);
-        let mut bus_expr = format!(
+        // `SpiBus::build` returns the correct `Dm` variant for this build (the
+        // `embassy` feature selects the async impl), so no `.into_async()` (§20).
+        let bus_expr = format!(
             "{build}.expect(\"{id}: invalid SPI config (check frequency_kHz/mode)\")",
             id = inst.id
         );
-        if ctx.is_embassy {
-            bus_expr.push_str(".into_async()");
-        }
         // Wrap in a `SpiDevice` when the component declares a CS pin (§20.5).
         let expr = match cs {
-            Some(cs_pin) => {
-                let device = format!(
-                    "espforge_runtime::components::SpiDevice::new(\
-                         {bus_expr}, \
-                         esp_hal::gpio::Output::new(\
-                             registry.peripherals.GPIO{cs_pin}, \
-                             esp_hal::gpio::Level::Low, \
-                             esp_hal::gpio::OutputConfig::default()\
-                         ), \
-                         ctx.delay \
-                     )"
-                );
-                if ctx.is_embassy {
-                    format!("{device}.into_async()")
-                } else {
-                    device
-                }
-            }
+            Some(cs_pin) => format!(
+                "espforge_runtime::components::SpiDevice::new(\
+                     {bus_expr}, \
+                     esp_hal::gpio::Output::new(\
+                         registry.peripherals.GPIO{cs_pin}, \
+                         esp_hal::gpio::Level::Low, \
+                         esp_hal::gpio::OutputConfig::default()\
+                     ), \
+                     ctx.delay \
+                 )"
+            ),
             None => bus_expr,
         };
         Construction::for_instance(inst, expr)
