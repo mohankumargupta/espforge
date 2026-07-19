@@ -2,7 +2,7 @@
 
 use embedded_hal::spi::Operation;
 
-use crate::{component, Context};
+use crate::Context;
 use embassy_executor::Spawner;
 
 // Two tasks each drive their own `SpiDevice` on the *same* shared
@@ -40,5 +40,5 @@ pub async fn setup(ctx: &'static Context, spawner: Spawner) {
 }
 
 pub async fn forever(_ctx: &'static Context) {
-    embassy_futures::yield_now().await;
+    embassy_time::yield_now().await;
 }

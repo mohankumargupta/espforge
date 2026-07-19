@@ -1,4 +1,4 @@
-use crate::{component, Context};
+use crate::Context;
 use embassy_executor::Spawner;
 
 // Two tasks share one `I2cBus<Async>` (design §20.4). The async mutex in the
@@ -34,11 +34,12 @@ async fn heartbeat_task(ctx: &'static Context) {
 }
 
 pub async fn setup(ctx: &'static Context, spawner: Spawner) {
-    spawner.spawn(scan_task(ctx)).unwrap();
-    spawner.spawn(heartbeat_task(ctx)).unwrap();
+    spawner.spawn(scan_task(ctx).unwrap());
+    spawner.spawn(heartbeat_task(ctx).unwrap());
 }
 
-pub async fn forever(_ctx: &'static Context) {
+pub async fn forever(ctx: &'static Context) {
     // Work happens in the spawned tasks; the main loop just yields.
-    embassy_futures::yield_now().await;
+    //embassy_time::yield_now().await;
+    ctx.delay.delay_ms(1000);
 }

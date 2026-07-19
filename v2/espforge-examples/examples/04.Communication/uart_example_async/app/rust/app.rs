@@ -1,6 +1,6 @@
 #[allow(unused_variables)]
 
-use crate::{component, Context};
+use crate::Context;
 use embassy_executor::Spawner;
 
 // UART is point-to-point, but two tasks can still contend on the same
@@ -46,5 +46,5 @@ pub async fn setup(ctx: &'static Context, spawner: Spawner) {
 }
 
 pub async fn forever(_ctx: &'static Context) {
-    embassy_futures::yield_now().await;
+    embassy_time::yield_now().await;
 }
