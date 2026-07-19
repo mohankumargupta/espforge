@@ -184,13 +184,13 @@ fn run_ops<Dm: esp_hal::DriverMode>(
     let result = (|| {
         for op in operations.iter_mut() {
             match op {
-                Operation::Read(buf) => Spi::read(bus, buf).map_err(SpiError::Bus)?,
-                Operation::Write(buf) => Spi::write(bus, buf).map_err(SpiError::Bus)?,
+                Operation::Read(buf) => bus.read(buf).map_err(SpiError::Bus)?,
+                Operation::Write(buf) => bus.write(buf).map_err(SpiError::Bus)?,
                 Operation::Transfer(read, write) => {
-                    Spi::transfer(bus, read, write).map_err(SpiError::Bus)?
+                    bus.transfer(read, write).map_err(SpiError::Bus)?
                 }
                 Operation::TransferInPlace(buf) => {
-                    Spi::transfer_in_place(bus, buf).map_err(SpiError::Bus)?
+                    bus.transfer_in_place(buf).map_err(SpiError::Bus)?
                 }
                 Operation::DelayNs(ns) => {
                     // esp-hal `DelayNs` takes `u32`; clamp a larger value.

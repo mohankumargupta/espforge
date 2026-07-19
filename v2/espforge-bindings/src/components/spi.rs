@@ -26,6 +26,20 @@ impl Driver for SpiDriver {
         "SpiBus"
     }
 
+    fn type_name_for(&self, inst: &ResolvedInstance, ctx: &GenContext) -> String {
+        let dm = if ctx.is_embassy {
+            "esp_hal::Async"
+        } else {
+            "esp_hal::Blocking"
+        };
+        let has_cs = inst.with.get("cs").and_then(|v| v.as_u64()).is_some();
+        if has_cs {
+            format!("SpiDevice<{dm}>")
+        } else {
+            format!("SpiBus<{dm}>")
+        }
+    }
+
     fn generate(&self, _inst: &ResolvedInstance, _ctx: &GenContext) -> Result<Vec<Artifact>, Diag> {
         Ok(vec![])
     }

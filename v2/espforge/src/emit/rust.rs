@@ -214,7 +214,10 @@ pub fn emit(ir: &DeviceTree, out_dir: &Path) -> Result<Vec<Artifact>> {
         "Cargo.toml",
         emit_cargo_toml(&rt_features, out_dir)?,
     ));
-    out.push(Artifact::owned("src/generated.rs", emit_generated(ir, &catalog)));
+    out.push(Artifact::owned(
+        "src/generated.rs",
+        emit_generated(ir, &catalog, &ctx),
+    ));
     out.push(Artifact::owned("src/lib.rs", emit_lib(ir, &catalog)));
     out.push(Artifact::owned(
         "src/bin/main.rs",
@@ -306,7 +309,11 @@ fn merge_runtime_dep(manifest: &str, runtime_dep: &str) -> String {
 }
 
 //produces src/generated.rs
-fn emit_generated(ir: &DeviceTree, catalog: &espforge_model::driver::Registry) -> String {
+fn emit_generated(
+    ir: &DeviceTree,
+    catalog: &espforge_model::driver::Registry,
+    ctx: &espforge_model::driver::GenContext,
+) -> String {
     let component_fields = ir
         .instances
         .iter()
@@ -315,7 +322,7 @@ fn emit_generated(ir: &DeviceTree, catalog: &espforge_model::driver::Registry) -
             let id = sanitize(&i.id);
             let ty = catalog
                 .get(&i.kind)
-                .map(|d| d.type_name().to_string())
+                .map(|d| d.type_name_for(&i, &ctx))
                 .unwrap_or_else(|| i.kind.clone());
             format!("    pub {id}: espforge_runtime::components::{ty},")
         })
@@ -330,7 +337,7 @@ fn emit_generated(ir: &DeviceTree, catalog: &espforge_model::driver::Registry) -
             let id = sanitize(&i.id);
             let ty = catalog
                 .get(&i.kind)
-                .map(|d| d.type_name().to_string())
+                .map(|d| d.type_name_for(&i, &ctx))
                 .unwrap_or_else(|| i.kind.clone());
             format!("    pub {id}: espforge_runtime::devices::{ty},")
         })

@@ -26,6 +26,15 @@ impl Driver for UartDriver {
         "UartDevice"
     }
 
+    fn type_name_for(&self, _inst: &ResolvedInstance, ctx: &GenContext) -> String {
+        let dm = if ctx.is_embassy {
+            "esp_hal::Async"
+        } else {
+            "esp_hal::Blocking"
+        };
+        format!("UartDevice<{dm}>")
+    }
+
     fn generate(&self, _inst: &ResolvedInstance, _ctx: &GenContext) -> Result<Vec<Artifact>, Diag> {
         Ok(vec![])
     }

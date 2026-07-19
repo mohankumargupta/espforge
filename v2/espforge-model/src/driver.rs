@@ -61,6 +61,15 @@ pub trait Driver: Debug + Send + Sync {
         self.kind()
     }
 
+    /// Instance-specific concrete type for the generated `Components` field
+    /// (design §20: comms types are parametric over `Dm` and SPI may wrap a
+    /// `SpiDevice` when a CS pin is declared). Defaults to `type_name()`;
+    /// drivers whose constructed type varies per-instance override this.
+    /// Must match the expression returned by `construct` exactly.
+    fn type_name_for(&self, _inst: &ResolvedInstance, _ctx: &GenContext) -> String {
+        self.type_name().to_string()
+    }
+
     /// Cargo features this driver requires (e.g. `["embassy"]`, `["alloc"]`).
     /// These are *project-level* features of the generated firmware project,
     /// distinct from `runtime_features()` (which gates `espforge-runtime`
