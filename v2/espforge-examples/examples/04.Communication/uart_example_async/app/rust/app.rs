@@ -37,8 +37,8 @@ async fn sender_task(ctx: &'static Context) {
 }
 
 pub async fn setup(ctx: &'static Context, spawner: Spawner) {
-    spawner.spawn(echo_task(ctx)).unwrap();
-    spawner.spawn(sender_task(ctx)).unwrap();
+    spawner.spawn(echo_task(ctx).unwrap());
+    spawner.spawn(sender_task(ctx).unwrap());
     component!(ctx, uart0)
         .write_str("Async UART ready\n")
         .await

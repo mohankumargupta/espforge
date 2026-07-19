@@ -202,11 +202,10 @@ impl UartDevice<Async> {
             let n = uart
                 .borrow_mut()
                 .write(&data[off..])
-                .await
                 .map_err(UartError::Write)?;
             off += n;
         }
-        uart.borrow_mut().flush().await.map_err(UartError::Write)
+        uart.borrow_mut().flush().map_err(UartError::Write)
     }
 
     pub async fn write_str(&self, s: &str) -> Result<(), UartError> {
@@ -219,7 +218,6 @@ impl UartDevice<Async> {
             .await
             .borrow_mut()
             .read(buf)
-            .await
             .map_err(UartError::Read)
     }
 
@@ -229,7 +227,6 @@ impl UartDevice<Async> {
             .await
             .borrow_mut()
             .read_buffered(buf)
-            .await
             .map_err(UartError::Read)
     }
 
@@ -241,7 +238,6 @@ impl UartDevice<Async> {
                 let mut uart = self.inner.lock().await;
                 uart.borrow_mut()
                     .read_buffered(&mut buf[total..])
-                    .await
                     .map_err(UartError::Read)?
             };
             if n == 0 {
