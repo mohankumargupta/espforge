@@ -42,10 +42,10 @@ impl Default for UartConfig {
     fn default() -> Self {
         let d = EspConfig::default();
         UartConfig {
-            baudrate: d.baudrate,
-            data_bits: d.data_bits,
-            parity: d.parity,
-            stop_bits: d.stop_bits,
+            baudrate: d.baudrate(),
+            data_bits: d.data_bits(),
+            parity: d.parity(),
+            stop_bits: d.stop_bits(),
         }
     }
 }
@@ -56,13 +56,13 @@ impl From<UartConfig> for EspConfig {
         // 8N1 (esp-hal `Config::default()`). `with_baudrate` is the
         // builder_lite setter (doc at uart/mod.rs:1974).
         let mut cfg = EspConfig::default().with_baudrate(c.baudrate);
-        if c.data_bits != DataBits::DataBits8 {
+        if c.data_bits != DataBits::_8 {
             cfg = cfg.with_data_bits(c.data_bits);
         }
         if c.parity != Parity::None {
             cfg = cfg.with_parity(c.parity);
         }
-        if c.stop_bits != StopBits::STOP1 {
+        if c.stop_bits != StopBits::_1 {
             cfg = cfg.with_stop_bits(c.stop_bits);
         }
         cfg
@@ -103,7 +103,7 @@ impl UartDevice<Blocking> {
     /// attached via `with_tx`/`with_rx`; **no `clocks` arg** (§20.1). Fallible
     /// per §20.7.
     pub fn build(
-        uart: esp_hal::peripherals::UART0<'static>,
+        uart: impl esp_hal::uart::Instance + 'static,
         tx: impl OutputPin + 'static,
         rx: impl InputPin + 'static,
         config: UartConfig,
@@ -181,7 +181,7 @@ impl UartDevice<Blocking> {
 #[cfg(feature = "embassy")]
 impl UartDevice<Async> {
     pub fn build(
-        uart: esp_hal::peripherals::UART0<'static>,
+        uart: impl esp_hal::uart::Instance + 'static,
         tx: impl OutputPin + 'static,
         rx: impl InputPin + 'static,
         config: UartConfig,
