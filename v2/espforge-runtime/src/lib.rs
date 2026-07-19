@@ -115,6 +115,14 @@ impl Delay {
     pub async fn delay_ms(&self, ms: u32) {
         embassy_time::Timer::after(embassy_time::Duration::from_millis(ms as u64)).await;
     }
+
+    /// Blocking nanosecond delay. Used by `SpiDevice` inside a transaction (the
+    /// `DelayNs` op), where awaiting is not possible. Present in both runtimes
+    /// via esp-hal's hardware blocking `Delay` (design §20.5).
+    pub fn delay_ns(&self, ns: u32) {
+        let mut d = esp_hal::delay::Delay::new();
+        embedded_hal::delay::DelayNs::delay_ns(&mut d, ns);
+    }
 }
 
 #[cfg(not(feature = "embassy"))]

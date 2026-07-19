@@ -147,21 +147,11 @@ impl SpiBus<Async> {
 // `cs`/`delay` need interior mutability so `transaction` can take `&self` —
 // espforge hands components to apps as a shared `&` (or `&'static`) ref via the
 // `component!` macro, so we can never demand `&mut` (design §20.3/ADR-008).
-#[cfg(not(feature = "embassy"))]
+// `RefCell` is enough in both modes: a given `SpiDevice` is serialised by the
+// bus `Mutex` (async) / by single-threaded execution (blocking), so `cs`/
+// `delay` are never touched concurrently with each other.
 type CsCell = RefCell<Output<'static>>;
-#[cfg(not(feature = "embassy"))]
 type DelayCell = RefCell<Delay>;
-
-#[cfg(feature = "embassy")]
-type CsCell = embassy_sync::mutex::Mutex<
-    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
-    RefCell<Output<'static>>,
->;
-#[cfg(feature = "embassy")]
-type DelayCell = embassy_sync::mutex::Mutex<
-    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
-    RefCell<Delay>,
->;
 
 pub struct SpiDevice<Dm: DriverMode + 'static> {
     bus: SpiBus<Dm>,
@@ -176,8 +166,8 @@ impl<Dm: DriverMode + 'static> SpiDevice<Dm> {
     pub fn new(bus: SpiBus<Dm>, cs: Output<'static>, delay: Delay) -> Self {
         SpiDevice {
             bus,
-            cs: CsCell::new(cs),
-            delay: DelayCell::new(delay),
+            cs: RefCell::new(cs),
+            delay: RefCell::new(delay),
         }
     }
 
@@ -195,7 +185,6 @@ fn run_ops<Dm: DriverMode + 'static>(
     delay: &mut Delay,
     operations: &mut [embedded_hal::spi::Operation<'_, u8>],
 ) -> Result<(), SpiError> {
-    use embedded_hal::delay::DelayNs;
     use embedded_hal::spi::{Operation, SpiBus};
     cs.set_low();
     let result = (|| {
@@ -245,15 +234,21 @@ impl SpiDevice<Async> {
         &self,
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), SpiError> {
-        let mut bus = self.bus.inner.lock().await;
-        let mut cs = self.cs.lock().await.borrow_mut();
-        let mut delay = self.delay.lock().await.borrow_mut();
-        run_ops(&mut *bus.borrow_mut(), &mut *cs, &mut *delay, operations)
+        let bus_guard = self.bus.inner.lock().await;
+        let mut bus = bus_guard.borrow_mut();
+        let mut cs_guard = self.cs.borrow_mut();
+        let mut delay_guard = self.delay.borrow_mut();
+        run_ops(&mut *bus, &mut *cs_guard, &mut *delay_guard, operations)
     }
 }
 
 #[cfg(not(feature = "embassy"))]
 impl embedded_hal::spi::ErrorType for SpiDevice<Blocking> {
+    type Error = SpiError;
+}
+
+#[cfg(feature = "embassy")]
+impl embedded_hal::spi::ErrorType for SpiDevice<Async> {
     type Error = SpiError;
 }
 
