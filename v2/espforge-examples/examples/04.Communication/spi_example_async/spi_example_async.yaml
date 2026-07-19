@@ -1,7 +1,7 @@
 espforge:
-  name: spi_example
+  name: spi_example_async
   target: esp32c3
-  runtime: blocking
+  runtime: embassy
 
 esp32:
   spi:

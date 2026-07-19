@@ -32,8 +32,11 @@ impl Driver for UartDriver {
 
     fn construct(&self, inst: &ResolvedInstance, ctx: &GenContext) -> Construction {
         // with: { bus: $uart1 } -> claims the UART peripheral by value. Resolve
-        // the claimed peripheral to its esp_hal field and pull tx/rx/baud from
-        // the IR (model refactor C: typed UartInit).
+        // the claimed peripheral to its esp_hal field and pull tx/rx/baudrate
+        // from the IR (model refactor C: typed UartInit). The YAML key is
+        // `baudrate` (design §20.6); the IR `UartInit.baud` carries it.
+        // `UartDevice::build` is fallible (ConfigError) -> `.expect()` here
+        // (§20.7); `.into_async()` under embassy (§20.1).
         let field = inst
             .claims
             .first()
@@ -62,10 +65,14 @@ impl Driver for UartDriver {
                     "115200".to_string(),
                 )
             });
-        Construction::for_instance(
-            inst,
-            ctx.backend
-                .uart(&field, &tx, &rx, baud.parse().unwrap_or(115_200)),
-        )
+        let mut expr = format!(
+            "{build}.expect(\"{id}: invalid UART config (check baudrate)\")",
+            id = inst.id,
+            build = ctx.backend.uart(&field, &tx, &rx, baud.parse().unwrap_or(115_200)),
+        );
+        if ctx.is_embassy {
+            expr.push_str(".into_async()");
+        }
+        Construction::for_instance(inst, expr)
     }
 }

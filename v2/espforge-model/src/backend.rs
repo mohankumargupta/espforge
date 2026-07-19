@@ -23,29 +23,31 @@ pub trait Backend: Debug + Send + Sync {
     /// `pull_up` selects `Pull::Up`; otherwise `Pull::None` (ADR-003).
     fn gpio_input(&self, gpio: &str, pull_up: bool) -> String;
 
-    /// Construct an I2C master bus from its peripheral + sda/scl pins.
-    fn i2c_master(&self, i2c: &str, sda: &str, scl: &str) -> String;
+    /// Construct an I2C master bus from its peripheral + sda/scl pins and a
+    /// `frequency_kHz`. Returns the **fallible** `I2cBus::build(...)` call
+    /// (design §20.7: `ConfigError` is surfaced by the binding in generated
+    /// `setup` via `.expect`). The `into_async()` suffix is appended by the
+    /// binding under embassy (§20.1).
+    fn i2c_master(&self, i2c: &str, sda: &str, scl: &str, frequency_khz: u32) -> String;
 
-    /// Construct an SPI master bus from its peripheral + mosi/miso/sclk/cs pins
-    /// and mode/frequency. `cs` is only attached at the bus level when the
-    /// `esp32.spi` declaration provides one; devices that need a private,
-    /// per-instance chip-select (e.g. `ili9341` sharing a bus) claim their own
-    /// pin and wrap it with `espforge_runtime::components::SpiDevice` instead.
-    /// The returned snippet is the inner `SpiBus::build(...)` call — the
-    /// binding wraps it in a per-instance `StaticCell<RefCell<_>>` (ADR-008).
+    /// Construct an SPI master bus from its peripheral + mosi/miso/sclk pins,
+    /// `mode` and `frequency_khz`. **CS is NOT attached here** — CS lives in
+    /// `SpiDevice` (design §20.5); the binding wraps the bus in a `SpiDevice`
+    /// when the component declares a `cs` pin. Returns the fallible
+    /// `SpiBus::build(...)` call.
     fn spi_master(
         &self,
         spi: &str,
         mosi: &str,
         miso: &str,
         sclk: &str,
-        cs: Option<&str>,
         mode: u8,
         frequency_khz: u32,
     ) -> String;
 
-    /// Construct a UART from its peripheral + tx/rx pins and baud rate.
-    fn uart(&self, uart: &str, tx: &str, rx: &str, baud: u32) -> String;
+    /// Construct a UART from its peripheral + tx/rx pins and `baudrate`.
+    /// Returns the fallible `UartDevice::build(...)` call.
+    fn uart(&self, uart: &str, tx: &str, rx: &str, baudrate: u32) -> String;
 
     /// Render a call to a runtime constructor, e.g.
     /// `espforge_runtime::components::Led::new(a, b)`.
@@ -78,9 +80,14 @@ impl Backend for Blocking {
         )
     }
 
-    fn i2c_master(&self, i2c: &str, sda: &str, scl: &str) -> String {
+    fn i2c_master(&self, i2c: &str, sda: &str, scl: &str, frequency_khz: u32) -> String {
         format!(
-            "espforge_runtime::components::I2cBus::build(registry.peripherals.{i2c}, registry.peripherals.GPIO{sda}, registry.peripherals.GPIO{scl})"
+            "espforge_runtime::components::I2cBus::build(\
+                 registry.peripherals.{i2c}, \
+                 registry.peripherals.GPIO{sda}, \
+                 registry.peripherals.GPIO{scl}, \
+                 espforge_runtime::components::I2cConfig {{ frequency: esp_hal::time::Rate::from_khz({frequency_khz}) }} \
+             )"
         )
     }
 
@@ -90,34 +97,30 @@ impl Backend for Blocking {
         mosi: &str,
         miso: &str,
         sclk: &str,
-        cs: Option<&str>,
         mode: u8,
         frequency_khz: u32,
     ) -> String {
-        let cs_arg = match cs {
-            Some(cs) => format!("Some(registry.peripherals.GPIO{cs})"),
-            None => "None".to_string(),
-        };
         format!(
             "espforge_runtime::components::SpiBus::build(\
                  registry.peripherals.{spi}, \
                  registry.peripherals.GPIO{mosi}, \
                  registry.peripherals.GPIO{miso}, \
                  registry.peripherals.GPIO{sclk}, \
-                 {cs_arg}, \
-                 {mode}, \
-                 {frequency_khz}\
+                 espforge_runtime::components::SpiConfig {{ \
+                     frequency: esp_hal::time::Rate::from_khz({frequency_khz}), \
+                     mode: esp_hal::spi::Mode::_{mode} \
+                 }} \
              )"
         )
     }
 
-    fn uart(&self, uart: &str, tx: &str, rx: &str, baud: u32) -> String {
+    fn uart(&self, uart: &str, tx: &str, rx: &str, baudrate: u32) -> String {
         format!(
-            "espforge_runtime::components::UartDevice::new(\
+            "espforge_runtime::components::UartDevice::build(\
                  registry.peripherals.{uart}, \
                  registry.peripherals.GPIO{tx}, \
                  registry.peripherals.GPIO{rx}, \
-                 {baud}\
+                 espforge_runtime::components::UartConfig {{ baudrate: {baudrate}, ..Default::default() }} \
              )"
         )
     }

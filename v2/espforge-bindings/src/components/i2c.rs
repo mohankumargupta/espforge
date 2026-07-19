@@ -33,13 +33,16 @@ impl Driver for I2cDriver {
     fn construct(&self, inst: &ResolvedInstance, ctx: &GenContext) -> Construction {
         // with: { bus: $i2c_master } -> claims the I2C peripheral by value.
         // Resolve the claimed peripheral to its esp_hal field (ADR-008) and pull
-        // the bus's sda/scl pin numbers from the IR.
+        // the bus's sda/scl/frequency from the IR. The runtime `I2cBus::build`
+        // returns `Result` (ConfigError); we `.expect()` in generated `setup`
+        // with a component-specific message (design §20.7) and `.into_async()`
+        // under embassy (§20.1).
         let field = inst
             .claims
             .first()
             .map(|name| codegen::peripheral_field(&ctx.peripherals, &name.name))
             .unwrap_or_else(|| "unreachable!()".to_string());
-        let (sda, scl) = inst
+        let (sda, scl, freq) = inst
             .claims
             .first()
             .and_then(|name| ctx.peripherals.iter().find(|p| p.name == name.name))
@@ -52,17 +55,15 @@ impl Driver for I2cDriver {
                 (
                     i.sda.unwrap_or(0).to_string(),
                     i.scl.unwrap_or(0).to_string(),
+                    i.frequency_khz.unwrap_or(100),
                 )
             })
-            .unwrap_or_else(|| ("0".to_string(), "0".to_string()));
-        let build = ctx.backend.i2c_master(&field, &sda, &scl);
-        // Allocate the owned `I2c` once in a static `RefCell` (v1 idiom, ADR-008)
-        // and surface a `Copy` `I2cBus` handle into the `Components` field.
-        let cell = format!(
-            "{{ static {id}_I2C_CELL: static_cell::StaticCell<core::cell::RefCell<esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>> = static_cell::StaticCell::new(); espforge_runtime::components::I2cBus::from_ref({id}_I2C_CELL.init(core::cell::RefCell::new({build}))) }}",
-            id = codegen::sanitize(&inst.id).to_uppercase(),
-            build = build,
-        );
-        Construction::for_instance(inst, cell)
+            .unwrap_or_else(|| ("0".to_string(), "0".to_string(), 100));
+        let build = ctx.backend.i2c_master(&field, &sda, &scl, freq);
+        let mut expr = format!("{build}.expect(\"{id}: invalid I2C config (check frequency_kHz)\")", id = inst.id);
+        if ctx.is_embassy {
+            expr.push_str(".into_async()");
+        }
+        Construction::for_instance(inst, expr)
     }
 }

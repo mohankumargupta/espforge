@@ -31,15 +31,16 @@ impl Driver for SpiDriver {
     }
 
     fn construct(&self, inst: &ResolvedInstance, ctx: &GenContext) -> Construction {
-        // with: { bus: $spi2 } -> claims the SPI peripheral by value. Resolve
-        // the claimed peripheral to its esp_hal field and pull the bus's
-        // pins/mode/frequency from the IR (model refactor C: typed SpiInit).
+        // with: { bus: $spi2, cs: 9 } -> claims the SPI peripheral by value and
+        // (optionally) a CS pin. The bus is built without CS; CS is device-local
+        // and lives in `SpiDevice` (design §20.5). Each component declaring a
+        // `cs` pin gets its own `SpiDevice` wrapping the shared bus.
         let field = inst
             .claims
             .first()
             .map(|name| codegen::peripheral_field(&ctx.peripherals, &name.name))
             .unwrap_or_else(|| "unreachable!()".to_string());
-        let (mosi, miso, sclk, cs, mode, freq) = inst
+        let (mosi, miso, sclk, mode, freq, cs) = inst
             .claims
             .first()
             .and_then(|name| ctx.peripherals.iter().find(|p| p.name == name.name))
@@ -53,9 +54,10 @@ impl Driver for SpiDriver {
                     s.mosi.unwrap_or(0).to_string(),
                     s.miso.unwrap_or(0).to_string(),
                     s.sclk.unwrap_or(0).to_string(),
-                    s.cs,
-                    s.mode.unwrap_or(0) as u32,
-                    s.frequency_khz.unwrap_or(100).to_string(),
+                    s.mode.unwrap_or(0),
+                    s.frequency_khz.unwrap_or(100),
+                    // CS comes from the *component* spec, not the bus (§20.5).
+                    inst.with.get("cs").and_then(|v| v.as_u64()).map(|n| n as u32),
                 )
             })
             .unwrap_or_else(|| {
@@ -63,28 +65,41 @@ impl Driver for SpiDriver {
                     "0".to_string(),
                     "0".to_string(),
                     "0".to_string(),
+                    0u8,
+                    100,
                     None,
-                    0u32,
-                    "100".to_string(),
                 )
             });
-        let cs = cs.map(|n| n.to_string());
-        let build = ctx.backend.spi_master(
-            &field,
-            &mosi,
-            &miso,
-            &sclk,
-            cs.as_deref(),
-            mode as u8,
-            freq.parse().unwrap_or(100),
+        let build = ctx.backend.spi_master(&field, &mosi, &miso, &sclk, mode, freq);
+        let mut bus_expr = format!(
+            "{build}.expect(\"{id}: invalid SPI config (check frequency_kHz/mode)\")",
+            id = inst.id
         );
-        // Allocate the owned `Spi` once in a static `RefCell` (v1 idiom, ADR-008)
-        // and surface a `Copy` `SpiBus` handle into the `Components` field.
-        let cell = format!(
-            "{{ static {id}_SPI_CELL: static_cell::StaticCell<core::cell::RefCell<esp_hal::spi::master::Spi<'static, esp_hal::Blocking>>> = static_cell::StaticCell::new(); espforge_runtime::components::SpiBus::from_ref({id}_SPI_CELL.init(core::cell::RefCell::new({build}))) }}",
-            id = codegen::sanitize(&inst.id).to_uppercase(),
-            build = build,
-        );
-        Construction::for_instance(inst, cell)
+        if ctx.is_embassy {
+            bus_expr.push_str(".into_async()");
+        }
+        // Wrap in a `SpiDevice` when the component declares a CS pin (§20.5).
+        let expr = match cs {
+            Some(cs_pin) => {
+                let device = format!(
+                    "espforge_runtime::components::SpiDevice::new(\
+                         {bus_expr}, \
+                         esp_hal::gpio::Output::new(\
+                             registry.peripherals.GPIO{cs_pin}, \
+                             esp_hal::gpio::Level::Low, \
+                             esp_hal::gpio::OutputConfig::default()\
+                         ), \
+                         ctx.delay \
+                     )"
+                );
+                if ctx.is_embassy {
+                    format!("{device}.into_async()")
+                } else {
+                    device
+                }
+            }
+            None => bus_expr,
+        };
+        Construction::for_instance(inst, expr)
     }
 }

@@ -8,10 +8,11 @@ pub fn setup(ctx: &mut Context) {
     logger.info("I2C Scanner Example");
 
     // Scan addresses 1 to 127. Try a 0-byte write to each address; if it ACKs
-    // there is a device there. The I2cBus exposes the underlying esp-hal bus
-    // via `bus()`.
+    // there is a device there. `I2cBus<Blocking>` exposes the idiomatic
+    // `write` helper (design §20.5); the underlying bus is also reachable via
+    // `bus()`.
     for address in 1..127 {
-        match i2c.bus().borrow_mut().write(address, &[]) {
+        match i2c.write(address, &[]) {
             Ok(_) => {
                 logger.info(format_args!("Found device at address 0x{:02x}", address));
             }

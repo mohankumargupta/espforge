@@ -146,8 +146,9 @@ pub struct UartConfig {
     pub tx: Option<u32>,
     #[serde(default)]
     pub rx: Option<u32>,
-    /// Baud rate. Accepts `baud` or `frequency_kHz` (kept for schema parity).
-    #[serde(default, alias = "baud", rename = "frequency_kHz")]
+    /// Baud rate. Accepts `baudrate` (preferred, design §20.6), or the legacy
+    /// aliases `baud` / `frequency_kHz`.
+    #[serde(default, alias = "baudrate", alias = "baud", rename = "frequency_kHz")]
     pub baud: Option<u32>,
 }
 
