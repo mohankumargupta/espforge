@@ -101,7 +101,7 @@ impl Driver for SpiDriver {
                          esp_hal::gpio::Level::Low, \
                          esp_hal::gpio::OutputConfig::default()\
                      ), \
-                     ctx.delay \
+                     delay \
                  )"
             ),
             None => bus_expr,

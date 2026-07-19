@@ -144,22 +144,45 @@ impl SpiBus<Async> {
 // Device (owns CS) — both modes
 // ---------------------------------------------------------------------------
 
+// `cs`/`delay` need interior mutability so `transaction` can take `&self` —
+// espforge hands components to apps as a shared `&` (or `&'static`) ref via the
+// `component!` macro, so we can never demand `&mut` (design §20.3/ADR-008).
+#[cfg(not(feature = "embassy"))]
+type CsCell = RefCell<Output<'static>>;
+#[cfg(not(feature = "embassy"))]
+type DelayCell = RefCell<Delay>;
+
+#[cfg(feature = "embassy")]
+type CsCell = embassy_sync::mutex::Mutex<
+    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+    RefCell<Output<'static>>,
+>;
+#[cfg(feature = "embassy")]
+type DelayCell = embassy_sync::mutex::Mutex<
+    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+    RefCell<Delay>,
+>;
+
 pub struct SpiDevice<Dm: DriverMode + 'static> {
     bus: SpiBus<Dm>,
-    cs: Output<'static>,
-    delay: Delay,
+    cs: CsCell,
+    delay: DelayCell,
 }
 
 impl<Dm: DriverMode + 'static> SpiDevice<Dm> {
     /// Attach a device with its own CS pin to an already-built bus. The bus is
-    /// shared; the CS is device-local (§20.5). `delay` is `Copy` (§12) and is
-    /// used for the `DelayNs` op inside a transaction.
+    /// shared; the CS is device-local (§20.5). `delay` is used for the `DelayNs`
+    /// op inside a transaction.
     pub fn new(bus: SpiBus<Dm>, cs: Output<'static>, delay: Delay) -> Self {
-        SpiDevice { bus, cs, delay }
+        SpiDevice {
+            bus,
+            cs: CsCell::new(cs),
+            delay: DelayCell::new(delay),
+        }
     }
 
     pub fn delay_clone(&self) -> Delay {
-        self.delay
+        self.delay.borrow().clone()
     }
 }
 
@@ -169,22 +192,25 @@ impl<Dm: DriverMode + 'static> SpiDevice<Dm> {
 fn run_ops<Dm: DriverMode + 'static>(
     bus: &mut Spi<'static, Dm>,
     cs: &mut Output<'static>,
-    delay: &Delay,
+    delay: &mut Delay,
     operations: &mut [embedded_hal::spi::Operation<'_, u8>],
 ) -> Result<(), SpiError> {
     use embedded_hal::delay::DelayNs;
-    use embedded_hal::spi::{Operation, SpiBus as _};
+    use embedded_hal::spi::{Operation, SpiBus};
     cs.set_low();
     let result = (|| {
         for op in operations.iter_mut() {
             match op {
-                Operation::Read(buf) => bus.read(buf).map_err(SpiError::Bus)?,
-                Operation::Write(buf) => bus.write(buf).map_err(SpiError::Bus)?,
+                Operation::Read(buf) => bus.read(buf).map_err(|_| SpiError::Bus)?,
+                Operation::Write(buf) => bus.write(buf).map_err(|_| SpiError::Bus)?,
+                // esp-hal's inherent `transfer` is in-place (1 buffer) and shadows
+                // the trait, so reach the two-buffer full-duplex method via UFCS.
                 Operation::Transfer(read, write) => {
-                    bus.transfer(read, write).map_err(SpiError::Bus)?
+                    <Spi<'_, Dm> as SpiBus>::transfer(bus, read, write)
+                        .map_err(|_| SpiError::Bus)?
                 }
                 Operation::TransferInPlace(buf) => {
-                    bus.transfer_in_place(buf).map_err(SpiError::Bus)?
+                    bus.transfer_in_place(buf).map_err(|_| SpiError::Bus)?
                 }
                 Operation::DelayNs(ns) => {
                     delay.delay_ns((*ns).try_into().unwrap_or(u32::MAX));
@@ -195,6 +221,35 @@ fn run_ops<Dm: DriverMode + 'static>(
     })();
     cs.set_high();
     result
+}
+
+/// Inherent `transaction` so apps can drive SPI through the shared `&`/`&'static`
+/// `Context` (the `component!` macro never yields `&mut`). Mirrors the trait
+/// method but takes `&self` via interior mutability on `cs`/`delay` (§20.3).
+#[cfg(not(feature = "embassy"))]
+impl SpiDevice<Blocking> {
+    pub fn transaction(
+        &self,
+        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
+    ) -> Result<(), SpiError> {
+        let mut bus = self.bus.inner.borrow_mut();
+        let mut cs = self.cs.borrow_mut();
+        let mut delay = self.delay.borrow_mut();
+        run_ops(&mut *bus, &mut *cs, &mut *delay, operations)
+    }
+}
+
+#[cfg(feature = "embassy")]
+impl SpiDevice<Async> {
+    pub async fn transaction(
+        &self,
+        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
+    ) -> Result<(), SpiError> {
+        let mut bus = self.bus.inner.lock().await;
+        let mut cs = self.cs.lock().await.borrow_mut();
+        let mut delay = self.delay.lock().await.borrow_mut();
+        run_ops(&mut *bus.borrow_mut(), &mut *cs, &mut *delay, operations)
+    }
 }
 
 #[cfg(not(feature = "embassy"))]
@@ -208,8 +263,7 @@ impl embedded_hal::spi::SpiDevice for SpiDevice<Blocking> {
         &mut self,
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), Self::Error> {
-        let mut bus = self.bus.inner.borrow_mut();
-        run_ops(&mut *bus, &mut self.cs, &self.delay, operations)
+        SpiDevice::transaction(self, operations)
     }
 }
 
@@ -219,7 +273,6 @@ impl embedded_hal_async::spi::SpiDevice for SpiDevice<Async> {
         &mut self,
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), Self::Error> {
-        let mut guard = self.bus.inner.lock().await;
-        run_ops(&mut *guard.borrow_mut(), &mut self.cs, &self.delay, operations)
+        SpiDevice::transaction(self, operations).await
     }
 }

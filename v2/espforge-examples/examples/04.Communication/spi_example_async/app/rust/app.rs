@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use embedded_hal::spi::Operation;
+use crate::embedded_hal::spi::Operation;
 
 use crate::Context;
 use embassy_executor::Spawner;

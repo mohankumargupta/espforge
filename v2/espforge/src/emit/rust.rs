@@ -387,6 +387,13 @@ fn emit_lib(ir: &DeviceTree, catalog: &espforge_model::driver::Registry) -> Stri
         reexports.push(format!("pub use espforge_runtime::{module}::{ty};"));
     }
     reexports.push("pub use espforge_runtime::Delay;".to_string());
+    // `app.rs` may only use `crate::` (ADR-008), so re-export the `embedded_hal`
+    // traits it sometimes names directly (e.g. `spi::Operation`/`SpiDevice`).
+    reexports.push("pub use espforge_runtime::embedded_hal;".to_string());
+    // The async traits only exist when the runtime is built with `embassy`.
+    if ir.flags.is_embassy {
+        reexports.push("pub use espforge_runtime::embedded_hal_async;".to_string());
+    }
     reexports.sort();
     reexports.dedup();
     let reexports = reexports.join("\n");

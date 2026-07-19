@@ -42,6 +42,16 @@ pub mod services;
 // device whose feature is enabled, so there is no dead-code cost.
 pub mod devices;
 
+/// Re-exported so generated `app.rs` files can name `embedded_hal` traits
+/// (e.g. `spi::Operation`) without adding `embedded-hal` as a direct
+/// dependency. The version is pinned by this crate, keeping app + runtime in
+/// sync (design §19.1).
+pub use embedded_hal;
+
+/// Same idea for the async traits, gated on `embassy` (design §19.1).
+#[cfg(feature = "embassy")]
+pub use embedded_hal_async;
+
 /// Re-exported under the `signal` feature so the generated project's `signal!`
 /// macro (emitted by the generator) can name `embassy_sync::signal::Signal`
 /// without the project adding `embassy-sync` itself.
