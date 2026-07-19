@@ -39,6 +39,6 @@ pub async fn setup(ctx: &'static Context, spawner: Spawner) {
     spawner.spawn(monitor_task(ctx)).unwrap();
 }
 
-pub async fn forever(_ctx: &'static Context) {
-    embassy_time::yield_now().await;
+pub async fn forever(ctx: &'static Context) {
+    ctx.delay.delay_ms(1000).await;
 }

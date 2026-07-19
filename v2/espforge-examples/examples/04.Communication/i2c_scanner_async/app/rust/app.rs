@@ -41,5 +41,5 @@ pub async fn setup(ctx: &'static Context, spawner: Spawner) {
 pub async fn forever(ctx: &'static Context) {
     // Work happens in the spawned tasks; the main loop just yields.
     //embassy_time::yield_now().await;
-    ctx.delay.delay_ms(1000);
+    ctx.delay.delay_ms(1000).await;
 }
