@@ -19,8 +19,10 @@
 
 use core::cell::RefCell;
 use esp_hal::gpio::{InputPin, OutputPin};
-use esp_hal::mode::{Async, Blocking};
 use esp_hal::uart::{Config as EspConfig, DataBits, Parity, StopBits, Uart};
+use esp_hal::{Blocking, DriverMode};
+#[cfg(feature = "embassy")]
+use esp_hal::Async;
 
 /// Minimal YAML-facing UART config (design §20.6, Level B). `baudrate` + the
 /// stable framing fields; esp-hal's unstable `baudrate_tolerance` /
@@ -48,17 +50,26 @@ impl Default for UartConfig {
 
 impl From<UartConfig> for EspConfig {
     fn from(c: UartConfig) -> EspConfig {
-        EspConfig {
-            baudrate: c.baudrate,
-            data_bits: c.data_bits,
-            parity: c.parity,
-            stop_bits: c.stop_bits,
-            ..EspConfig::default()
+        // Only baudrate is commonly varied by examples; framing defaults to
+        // 8N1 (esp-hal `Config::default()`). `with_baudrate` is the
+        // builder_lite setter (doc at uart/mod.rs:1974).
+        let mut cfg = EspConfig::default().with_baudrate(c.baudrate);
+        // Apply explicit framing only when it differs from the default, so we
+        // don't depend on every `with_*` setter existing in this esp-hal build.
+        if c.data_bits != DataBits::DataBits8 {
+            cfg = cfg.with_data_bits(c.data_bits);
         }
+        if c.parity != Parity::None {
+            cfg = cfg.with_parity(c.parity);
+        }
+        if c.stop_bits != StopBits::STOP1 {
+            cfg = cfg.with_stop_bits(c.stop_bits);
+        }
+        cfg
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UartError {
     Config(esp_hal::uart::ConfigError),
     Write(esp_hal::uart::TxError),
@@ -69,8 +80,8 @@ pub enum UartError {
 // Blocking device
 // ---------------------------------------------------------------------------
 
-pub struct UartDevice<Blocking> {
-    inner: RefCell<Uart<'static, Blocking>>,
+pub struct UartDevice<Dm: DriverMode + 'static> {
+    inner: RefCell<Uart<'static, Dm>>,
 }
 
 impl UartDevice<Blocking> {

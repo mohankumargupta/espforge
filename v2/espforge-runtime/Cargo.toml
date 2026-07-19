@@ -6,6 +6,9 @@ license.workspace = true
 
 [dependencies]
 esp-hal = {version="~1.1", features = ["unstable"]}
+# `StaticCell` parks the owned esp-hal peripheral once and hands out `&'static`
+# handles for bus-sharing (ADR-008 / design §20).
+static_cell = "2"
 embedded-hal = "*"
 embedded-io = "*"
 embedded-io-async = "0.7"

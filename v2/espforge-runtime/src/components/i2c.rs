@@ -17,7 +17,9 @@
 use core::cell::RefCell;
 use esp_hal::gpio::{InputPin, OutputPin};
 use esp_hal::i2c::master::{Config as EspConfig, Error as EspError, I2c};
-use esp_hal::mode::{Async, Blocking};
+use esp_hal::{Blocking, DriverMode};
+#[cfg(feature = "embassy")]
+use esp_hal::Async;
 use esp_hal::peripherals::I2C0;
 
 /// Minimal YAML-facing I2C config (design §20.6, Level B). esp-hal's full
@@ -32,50 +34,50 @@ impl Default for I2cConfig {
     fn default() -> Self {
         // esp-hal default is 100kHz.
         I2cConfig {
-            frequency: EspConfig::default().frequency,
+            frequency: esp_hal::time::Rate::from_khz(100),
         }
     }
 }
 
 impl From<I2cConfig> for EspConfig {
     fn from(c: I2cConfig) -> EspConfig {
-        EspConfig {
-            frequency: c.frequency,
-            ..EspConfig::default()
-        }
+        EspConfig::default().with_frequency(c.frequency)
     }
 }
 
 /// Unified error surfaced to examples. `Config` carries the `ConfigError` from
-/// `build()`; `Bus` carries the runtime transaction error.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `build()`; `Bus` carries the runtime transaction error. (`ConfigError` does
+/// not implement `Eq`, so `I2cError` cannot either.)
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum I2cError {
     Config(esp_hal::i2c::master::ConfigError),
     Bus(EspError),
 }
 
+impl embedded_hal::i2c::Error for I2cError {
+    fn kind(&self) -> embedded_hal::i2c::ErrorKind {
+        match self {
+            I2cError::Config(_) => embedded_hal::i2c::ErrorKind::Other,
+            I2cError::Bus(_) => embedded_hal::i2c::ErrorKind::Other,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Blocking variant
+// Blocking variant — owns the `RefCell<I2c>` by value (move-by-value, §12).
 // ---------------------------------------------------------------------------
 
-/// Shared I2C master bus (blocking). `Copy`-cheap via interior `RefCell`.
 #[derive(Clone, Copy)]
-pub struct I2cBus<Blocking> {
-    inner: &'static RefCell<I2c<'static, Blocking>>,
+pub struct I2cBus<Dm: DriverMode + 'static> {
+    inner: &'static RefCell<I2c<'static, Dm>>,
 }
 
 impl I2cBus<Blocking> {
-    /// Wrap a `&'static RefCell<I2c>` allocated by the generated wiring. The
-    /// `i2c` driver builds the inner `I2c` once and hands out `Copy` handles to
-    /// every device that shares this bus.
-    pub fn from_ref(bus: &'static RefCell<I2c<'static, Blocking>>) -> Self {
-        I2cBus { inner: bus }
-    }
-
-    /// Build the owned esp-hal `I2c` master. Called once by the generated
-    /// wiring; the result is parked in a `StaticCell<RefCell<_>>` and surfaced
-    /// via `from_ref`. **Fallible** (design §20.7): the codegen `.expect`s the
-    /// `ConfigError` in the generated `setup` with a component-specific message.
+    /// Build the owned esp-hal `I2c` master and park it in a `static` cell,
+    /// returning a `Copy` `I2cBus` handle. Called once by the generated wiring;
+    /// the `&'static` is safe because the cell is a `static` item. **Fallible**
+    /// (design §20.7): the codegen `.expect`s the `ConfigError` in the generated
+    /// `setup` with a component-specific message.
     ///
     /// esp-hal 1.1: `new(config)` only — pins attached via `with_sda`/`with_scl`;
     /// there is **no `clocks` argument** (§20.1).
@@ -84,29 +86,24 @@ impl I2cBus<Blocking> {
         sda: impl OutputPin + 'static + InputPin,
         scl: impl OutputPin + 'static + InputPin,
         config: I2cConfig,
-    ) -> Result<&'static RefCell<I2c<'static, Blocking>>, esp_hal::i2c::master::ConfigError> {
+    ) -> Result<I2cBus<Blocking>, esp_hal::i2c::master::ConfigError> {
+        static CELL: static_cell::StaticCell<RefCell<I2c<'static, Blocking>>> =
+            static_cell::StaticCell::new();
         let esp = I2c::new(i2c, EspConfig::from(config))?.with_sda(sda).with_scl(scl);
-        Ok(I2cBus::<Blocking>::leak(esp))
-    }
-
-    /// Park an owned `I2c` in a `StaticCell` and return the `&'static RefCell`
-    /// so `from_ref` can hand out `Copy` handles.
-    fn leak(esp: I2c<'static, Blocking>) -> &'static RefCell<I2c<'static, Blocking>> {
-        static_cell::StaticCell::<RefCell<I2c<'static, Blocking>>>::new(RefCell::new(esp))
-            .take()
-    }
-
-    /// Shared access to the underlying `RefCell<I2c>` (advanced use).
-    pub fn bus(&self) -> &'static RefCell<I2c<'static, Blocking>> {
-        self.inner
+        let inner = CELL.init(RefCell::new(esp));
+        Ok(I2cBus { inner })
     }
 
     /// Morph this bus into its async counterpart (design §20.1). The underlying
-    /// `I2c` is moved out of the `RefCell`, morphed, and re-parked.
+    /// `I2c` is moved out of the `RefCell`, morphed, and re-parked in a `static`
+    /// async cell.
     #[cfg(feature = "embassy")]
     pub fn into_async(self) -> I2cBus<Async> {
+        static CELL: static_cell::StaticCell<RefCell<I2c<'static, Async>>> =
+            static_cell::StaticCell::new();
         let esp = self.inner.borrow_mut().into_async();
-        I2cBus::<Async>::leak(esp)
+        let inner = CELL.init(RefCell::new(esp));
+        I2cBus { inner }
     }
 }
 
@@ -162,23 +159,13 @@ pub struct I2cBus<Async> {
 
 #[cfg(feature = "embassy")]
 impl I2cBus<Async> {
-    fn leak_async(esp: I2c<'static, Async>) -> &'static embassy_sync::mutex::Mutex<RefCell<I2c<'static, Async>>> {
-        static_cell::StaticCell::<
-            embassy_sync::mutex::Mutex<RefCell<I2c<'static, Async>>>,
-        >::new(embassy_sync::mutex::Mutex::new(RefCell::new(esp)))
-        .take()
-    }
-
-    pub fn from_ref(
-        bus: &'static embassy_sync::mutex::Mutex<RefCell<I2c<'static, Async>>>,
-    ) -> Self {
-        I2cBus { inner: bus }
-    }
-
     /// Morph an async bus back to blocking (design §20.1).
     pub fn into_blocking(self) -> I2cBus<Blocking> {
+        static CELL: static_cell::StaticCell<RefCell<I2c<'static, Blocking>>> =
+            static_cell::StaticCell::new();
         let esp = self.inner.into_inner().into_blocking();
-        I2cBus::<Blocking>::leak(esp)
+        let inner = CELL.init(RefCell::new(esp));
+        I2cBus { inner }
     }
 
     /// Lock the bus and run an async transaction atomically across tasks (§20.4).
