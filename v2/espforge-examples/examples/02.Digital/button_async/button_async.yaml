@@ -1,15 +1,9 @@
-# Async button example (embassy runtime).
+# Async button example.
 #
 # A button task waits (edge-triggered, no polling) for the button to be pressed
 # and signals a cross-task `Signal`. The `forever` task waits on that signal and
 # toggles an LED each time the button is pressed.
-#
-# Wiring mirrors the blocking `button` example:
-#   - `gpio7`  output  -> `red_led`   (LED indicator)
-#   - `gpio9`  input   -> `button`    (pull-up button)
-#
-# `runtime: embassy` selects the async `Delay` and enables the `signal` feature
-# (which pulls in `embassy_sync`), so `crate::signal!` is available.
+
 espforge:
   name: button_async
   target: esp32c3
@@ -32,4 +26,4 @@ components:
       pin: $gpio9
       pull_up: true
 
-devices: []
+devices: {}

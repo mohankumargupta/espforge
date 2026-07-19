@@ -13,14 +13,14 @@ espforge:
 
 esp32:
   gpio:
-    gpio2: { pin: 18, direction: output }
+    gpio18: { pin: 18, direction: output }
     gpio3: { pin: 3, direction: output }
 
 components:
   red_led:
     using: led
     with:
-      pin: $gpio2
+      pin: $gpio18
       active_low: false
   blue_led:
     using: led

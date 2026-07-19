@@ -4,7 +4,9 @@
   "editor": "wokwi",
   "refs": {
   	"gnd1": "GND.6",
-  	"gnd2": "GND.10"
+  	"gnd2": "GND.10",
+    "led": "$red_led.pin",
+    "button": "$button.pin"
   },
   "parts": [
     { "type": "$board", "id": "esp", "top": 0.0, "left": 0.0, "attrs": {} },
@@ -29,8 +31,8 @@
     [ "esp:RX", "$serialMonitor:TX", "", [] ],
     [ "esp:$gnd1", "r1:1", "black", [ "v0" ] ],
     [ "r1:2", "led1:C", "black", [ "v0" ] ],
-    [ "led1:A", "esp:7", "green", [ "v0", "h28.8", "v-48" ] ],
-    [ "btn1:2.l", "esp:9", "green", [ "h0" ] ],
+    [ "led1:A", "esp:$led", "green", [ "v0", "h28.8", "v-48" ] ],
+    [ "btn1:2.l", "esp:$button", "green", [ "h0" ] ],
     [ "esp:$gnd2", "btn1:1.l", "black", [ "h0" ] ]
   ],
   "dependencies": {}
