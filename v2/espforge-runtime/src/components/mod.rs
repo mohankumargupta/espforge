@@ -16,17 +16,15 @@ pub mod spi;
 pub mod uart;
 
 #[cfg(feature = "i2c")]
-pub use i2c::I2cBus;
+pub use i2c::{I2cBus, I2cConfig, I2cError};
 #[cfg(feature = "led")]
 pub use led::Led;
 #[cfg(feature = "button")]
 pub use button::Button;
 #[cfg(feature = "spi")]
-pub use spi::SpiBus;
-#[cfg(feature = "spi")]
-pub use spi::SpiDevice;
+pub use spi::{SpiBus, SpiConfig, SpiDevice, SpiError};
 #[cfg(feature = "uart")]
-pub use uart::UartDevice;
+pub use uart::{UartConfig, UartDevice, UartError};
 // Software-service components are re-exported here so the generated
 // `ctx.components.http` accessor is uniform with hardware components (ADR-013).
 // Re-exported from `services/`, where they actually live.

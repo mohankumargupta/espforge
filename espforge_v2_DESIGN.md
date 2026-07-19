@@ -619,3 +619,163 @@ Implementation notes (2026-07-16):
   `edge_http` 0.8's version); the service imports `Read`/`Write` from it.
 - Under Option B (§19.3), `edge_http`/`edge-nal`/`edge-nal-embassy` are transitive
   via `espforge-runtime`'s feature graph — the project names none directly.
+
+## 20. Communications redesign — I2C / SPI / UART with blocking + async (grilling session 2026-07-18)
+
+The v1/v2-current `espforge-runtime` hard-wires I2C/SPI/UART to
+`esp_hal::Blocking` and has **no async comms drivers** — async exists only for
+`Delay`, `Button::wait_for_pressed`, and `Http`. The `04.Communication` examples
+are all `runtime: blocking` with no async counterparts. This section redesigns
+the three comms components from scratch to support **both modes from the start**,
+with examples for both. All findings below were verified against the installed
+`esp-hal 1.1.1` source.
+
+### 20.1 Ground-truth: esp-hal 1.1.1 comms shape (verified)
+
+- **Mode typestate:** every comms driver is `DriverMode`-parametric —
+  `I2c<'d, Dm>`, `Spi<'d, Dm>`, `Uart<'d, Dm>` / `UartTx<'d, Dm>` / `UartRx<'d, Dm>`.
+  `Blocking` and `Async` are zero-cost unit structs implementing `DriverMode`.
+- **Construction:** `new(config) -> Result<Self, ConfigError>` (fallible). Pins
+  attached via builder methods (`with_sda`/`with_scl`, etc.) **after**
+  construction — *not* as constructor args. **No `clocks` parameter** (esp-hal 1.x
+  reads the system clock internally).
+- **Mode morphism:** `into_async(self) -> I2c<'d, Async>` / `into_blocking(self)`
+  on the `Blocking` / `Async` impls respectively. Zero-cost transform.
+- **Shared blocking API** (both modes): `write`/`read`/`write_read` (I2C),
+  `write`/`read`/`transfer`/`transfer_in_place` (SPI), `write`/`read`/`flush`/
+  `read_buffered` (UART).
+- **Async API** (`Async`-gated only): `write_async`/`read_async`/
+  `write_read_async`/`transaction_async` (I2C), `transfer_async`/
+  `transfer_in_place_async` (SPI), `write_async`/`read_async` (UART).
+- **Trait ecosystems differ by peripheral:**
+  - I2C/SPI implement `embedded_hal` traits (blocking) + `embedded_hal_async`
+    traits (`Async` only). I2C addresses are `A: Into<I2cAddress>` (incl. `u8`).
+  - UART implements `embedded_io_07::{Read, Write}` (all `Dm`) +
+    `embedded_io_async_07::{Read, Write}` (`Async` only). **Writes are partial:**
+    `write` returns `Result<usize, TxError>` (bytes written), not `()`.
+    esp-hal also implements the `_06` io versions — ignore them; bind `_07` only.
+- **`Config` is richer than a 2-field struct:** `frequency: Rate`, `timeout:
+  BusTimeout`, `software_timeout: SoftwareTimeout`, plus cfg-gated FSM timeouts.
+  Uses `builder_lite(unstable)` for some fields. `ConfigError` is returned by
+  `new` when validation (frequency/timeout vs chip) fails.
+
+### 20.2 R1 — parametric mode, pinned at codegen (NOT a runtime flag)
+
+- **Recommendation:** runtime types are parametric — `I2cBus<Dm>`, `SpiBus<Dm>`
+  (+ `SpiDevice<Dm>`), `UartDevice<Dm>` — mirroring esp-hal's `Dm`. The YAML
+  `runtime: blocking|embassy` field is known at generated-project build time, so
+  **the codegen picks `Dm`** (emits `I2c::new(...)` for blocking, or
+  `.into_async()` for async). The `espforge-runtime` crate itself stays
+  **mode-blind and generic** — compiled once, reused for both modes.
+- Invalid states are unrepresentable: `I2cBus<Blocking>` only has blocking
+  methods; `I2cBus<Async>` only has async methods. No dead `unreachable!()`
+  methods, no runtime enum/flag.
+- `component!` macro stays identical (`&ctx.components.$name`); only the *type*
+  behind that `&` differs per build. This is the same codegen-time dispatch
+  already used for `Delay` (§12), extended from `#[cfg]` to a type parameter.
+
+### 20.3 R2 — async-aware interior mutability (RefCell does NOT carry over)
+
+- **Naive `RefCell` (current pattern) FAILS for async:** esp-hal's async methods
+  take `&mut self` held *across an `.await`*. Holding a `RefCell` borrow guard
+  across an await is unsound in practice and panics (`BorrowMutError`) under
+  contention; `RefCell` is also not `Sync`, so cross-task sharing won't compile.
+  A bare `critical_section::with(...)` held across `.await` is worse — it freezes
+  the executor.
+- **Recommendation:** `I2cBus<Async>` wraps
+  `Mutex<RefCell<I2c<'static, Async>>>` using `embassy_sync`'s `CriticalSection`
+  raw mutex. `Mutex::lock().await` is async-aware: it releases while *waiting* for
+  the lock, and the `&mut` guard is only alive during actual bus use — the
+  critical section is **not** held across the I/O await. `I2cBus<Blocking>` keeps
+  plain `RefCell` (no yield ⇒ safe). The inner strategy is keyed on `Dm`, so each
+  mode is correct without cfg-spaghetti.
+- **Drop the `Copy` assumption for async:** `embassy_sync::Mutex` is not `Copy`,
+  so `<Async>` buses are `&`-only. `component!` already hands out `&`, so it
+  stays uniform.
+
+### 20.4 R3 — cross-task sharing via the async mutex
+
+- The mutex makes `I2cBus<Async>` `Sync`, so a `&'static` in the generated
+  `Context` is reachable by multiple Embassy tasks. A `transaction_async` holds
+  the lock for its whole atomic sequence ⇒ transactions are atomic across tasks
+  by construction.
+- **Primary async API is `transaction_async`** (one lock, multiple ops). Single-op
+  `write_async`/`read_async` delegate into it — otherwise two separate locked
+  calls could interleave between a write and its following read.
+- **Ship at least one async `04.Communication` example with two tasks sharing one
+  bus** to actually exercise the mutex (mirrors `02.Digital/button_async`'s
+  two-task + `signal!` proof).
+- **Document invariants:** no re-locking the same bus mutex on one call path
+  (CriticalSection mutex is non-recursive ⇒ deadlock); don't hold the lock across
+  an unrelated `.await` (serializes the bus).
+- Blocking bus keeps `RefCell`; no mutex needed (single-threaded, non-preemptive).
+
+### 20.5 R4 — uniform shell, divergent vocabulary; UART is NOT exempt from the mutex
+
+- **Uniform `<Dm>` shell + uniform async-mutex interior strategy** across all
+  three. Divergence is only in the *trait vocabulary*, not the sharing mechanism:
+  - I2C/SPI → `embedded_hal` transaction style (`transaction`/`transaction_async`).
+  - UART → `embedded_io` stream style (`write`/`read`/`flush`, **partial `usize`
+    writes**). Bind `embedded_io_07` only.
+- **UART still needs the mutex** — the misconception "UART is point-to-point so no
+  sharing ⇒ no mutex" is false. The mutex protects against **task concurrency**,
+  not multi-device topology. Because `component!` gives every task a shared `&`,
+  two tasks (e.g. logging + command) *can* contend for one UART and interleave
+  bytes. UART is simpler only in its **lack of addressing/CS**, not in concurrency.
+- **Drop the bus-level `cs: Option<Output>` in `SpiBus::build`** (current dead/
+  colliding param). CS is device-local and lives in `SpiDevice` (which owns its
+  `Output` CS + `Delay` and toggles it inside `transaction`); the bus mutex is the
+  shared resource. Two SPI devices on one bus each lock the same bus mutex but
+  assert their own CS — correct sharing.
+- **Reconsider UART's custom 128-byte ring buffer:** prefer esp-hal's
+  `read_buffered` (reads into a caller buffer, returns buffered bytes) + scan for
+  `\n`. The "can't return `&str` out of a locked guard" problem remains ⇒ keep a
+  `with_buffered_string` (or async `with_buffered_string_async`) callback shape,
+  backed by esp-hal's buffered read instead of hand-rolled state.
+- **No fake unified comms trait.** Keep three parametric types with uniform
+  sharing but idiomatic per-peripheral APIs; `component!` already hides the type
+  from the example author.
+- **Open sub-decision:** combined `Uart` vs split `UartTx`/`UartRx` in
+  `UartDevice`. Recommend keeping the combined `Uart` for v2 unless an example
+  needs TX/RX on separate tasks.
+
+### 20.6 R5 — Config exposure in YAML (owned minimal schema, Level B)
+
+- **Recommendation:** own minimal per-peripheral config structs in the
+  model/codegen and convert to esp-hal `Config` at build time — **do NOT** pass
+  esp-hal's `Config` through YAML (it has `unstable`/`cfg`-gated fields that churn
+  across 1.x). **Do NOT** over-simplify to frequency-only where SPI mode / UART
+  baud are needed.
+- **Default frequencies** when YAML omits config (I2C 100kHz; chip-default SPI;
+  115200 UART). `Config::default()` is the base.
+- **Config schema diverges per peripheral** (consistent with R4's divergent
+  vocabulary, no fake unification): I2C → `frequency`; SPI → `frequency` + `mode`;
+  UART → `baud` (or `frequency`) + `stop_bits` + `parity` + `data_bits`.
+- **No `clocks` parameter** anywhere (esp-hal 1.1 dropped it).
+- The YAML `esp32:` bus schema already uses `frequency_kHz` (§17.4); the
+  codegen maps `frequency_kHz` → `Rate::from_khz(...)` into the minimal config.
+
+### 20.7 `ConfigError` ownership (settled)
+
+- **The generated `setup` (codegen) owns `ConfigError` — never `app.rs`, never
+  silently swallowed inside the runtime's `build`.**
+- Runtime `build()` returns `Result<I2c<...>, ConfigError>` (thin, honest wrapper
+  over esp-hal's fallible `new`); it does **not** `.expect()` internally.
+- Codegen emits the `Config` construction + `new(config)` call *inside the
+  generated `setup`* (distinct from user `app.rs`) and handles the error there
+  with a **component-specific message** (e.g. `i2c0: invalid frequency 2000kHz`)
+  — naming the component and the bad field. User `app.rs` receives a fully
+  constructed, validated peripheral and writes zero config-error handling.
+- **Why:** the error is fundamentally a YAML/codegen mistake (bad frequency in the
+  spec), not a runtime condition. Localizing it at the YAML→code seam keeps
+  examples boilerplate-free (the "examples for both modes" goal) while keeping the
+  runtime honest about esp-hal's contract.
+
+### 20.8 Consistent thread
+
+The runtime crate is a **thin, generic, mode-blind wrapper**; all mode/Config
+decisions live in the **codegen**; esp-hal's volatile details (`Config` shape,
+io `_06`/`_07` versions, async traits) are isolated behind the bridge. This
+extends the §12 runtime contract (move-by-value, no hand-rolled `RefCell` for
+the comms ownership — the mutex replaces it for async) and the §19 feature-gating
+(only the needed comms modules compile).

@@ -51,7 +51,10 @@ ssd1306 = ["dep:ssd1306", "dep:display-interface-i2c", "dep:embedded-graphics"]
 ili9341 = ["dep:ili9341", "dep:display-interface-spi", "dep:embedded-graphics"]
 # Embassy runtime. Selects the async `Delay` impl (yields via `embassy_time`)
 # so the same `ctx.delay` field works in both blocking and embassy projects.
-embassy = ["dep:embassy-time"]
+# Also pulls `embassy-sync` because async comms components (I2cBus/SpiBus/
+# UartDevice <Async>) share the peripheral across tasks via
+# `embassy_sync::Mutex` (design §20.3/§20.4/§20.5).
+embassy = ["dep:embassy-time", "dep:embassy-sync"]
 # Cross-task signaling primitive used by async examples (e.g. `button_async`):
 # enables `embassy_sync` and the `signal!` macro the generator emits. Requires
 # `embassy` because the async `wait_for_pressed` + `Signal` are embassy-only.
