@@ -71,19 +71,39 @@ impl embedded_hal::spi::Error for SpiError {
 // ---------------------------------------------------------------------------
 
 #[cfg(not(feature = "embassy"))]
-#[derive(Clone, Copy)]
 pub struct SpiBus<Dm: DriverMode + 'static> {
     inner: &'static RefCell<Spi<'static, Dm>>,
 }
 
+// Manually impl Clone+Copy so Dm doesn't need to be Copy.
+// The struct only holds a &'static reference, which is always Copy.
+#[cfg(not(feature = "embassy"))]
+impl<Dm: DriverMode + 'static> Clone for SpiBus<Dm> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[cfg(not(feature = "embassy"))]
+impl<Dm: DriverMode + 'static> Copy for SpiBus<Dm> {}
+
 #[cfg(feature = "embassy")]
-#[derive(Clone, Copy)]
 pub struct SpiBus<Dm: DriverMode + 'static> {
     inner: &'static embassy_sync::mutex::Mutex<
         embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
         RefCell<Spi<'static, Dm>>,
     >,
 }
+
+// Manually impl Clone+Copy so Dm doesn't need to be Copy.
+// The struct only holds a &'static reference, which is always Copy.
+#[cfg(feature = "embassy")]
+impl<Dm: DriverMode + 'static> Clone for SpiBus<Dm> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[cfg(feature = "embassy")]
+impl<Dm: DriverMode + 'static> Copy for SpiBus<Dm> {}
 
 // ---------------------------------------------------------------------------
 // Blocking build
