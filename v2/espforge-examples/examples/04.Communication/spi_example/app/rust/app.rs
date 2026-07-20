@@ -6,7 +6,7 @@ use crate::Context;
 
 pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
-    let spi = component!(ctx, spi0);
+    let spi = component!(ctx, spi_tester);
 
     logger.info("SPI Example");
 

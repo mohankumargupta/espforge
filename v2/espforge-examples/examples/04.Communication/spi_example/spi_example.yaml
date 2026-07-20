@@ -8,7 +8,7 @@ esp32:
     spi2: { spi: 2, mosi: 7, miso: 6, sck: 8, mode: 0, frequency_kHz: 100 }
 
 components:
-  - id: spi0
+  spi_tester:
     using: spi
     with:
       bus: $spi2
