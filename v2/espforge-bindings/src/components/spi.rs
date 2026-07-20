@@ -98,7 +98,7 @@ impl Driver for SpiDriver {
                      {bus_expr}, \
                      esp_hal::gpio::Output::new(\
                          registry.peripherals.GPIO{cs_pin}, \
-                         esp_hal::gpio::Level::Low, \
+                         esp_hal::gpio::Level::High, \
                          esp_hal::gpio::OutputConfig::default()\
                      ), \
                      delay \

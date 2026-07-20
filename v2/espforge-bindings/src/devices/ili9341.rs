@@ -40,7 +40,7 @@ impl Driver for Ili9341Driver {
             .unwrap_or_else(|| "unreachable!()".to_string());
         let dc = ctx.backend.gpio_output(&codegen::gpio_field_from_with(ctx, inst, "dc"), false);
         let rst = ctx.backend.gpio_output(&codegen::gpio_field_from_with(ctx, inst, "rst"), false);
-        let cs = ctx.backend.gpio_output(&codegen::gpio_field_from_with(ctx, inst, "cs"), false);
+        let cs = ctx.backend.gpio_output(&codegen::gpio_field_from_with(ctx, inst, "cs"), true);
         // `SpiDevice::new` takes the bus `Copy` handle, the device's private CS
         // (as an `Output`), and the shared `Delay` (Copy).
         let spi_device = format!(
