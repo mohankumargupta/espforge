@@ -103,9 +103,9 @@ impl Backend for Blocking {
         format!(
             "espforge_runtime::components::SpiBus::build(\
                  registry.peripherals.{spi}, \
+                 registry.peripherals.GPIO{sclk}, \
                  registry.peripherals.GPIO{mosi}, \
                  registry.peripherals.GPIO{miso}, \
-                 registry.peripherals.GPIO{sclk}, \
                  espforge_runtime::components::SpiConfig {{ \
                      frequency: esp_hal::time::Rate::from_khz({frequency_khz}), \
                      mode: esp_hal::spi::Mode::_{mode} \
