@@ -198,13 +198,13 @@ impl<Dm: DriverMode + 'static> SpiDevice<Dm> {
     }
 }
 
-/// Run the operations against a `&mut Spi`. Generic over `Dm` so one body
-/// serves blocking and async (esp-hal implements `embedded_hal::spi::SpiBus`
-/// for `Spi<'_>` in every `Dm`, §20.5).
+/// Run the operations against a `&mut Spi` (blocking-only; async has its own
+/// inline body using `embedded_hal_async::spi::SpiBus`).
+#[cfg(not(feature = "embassy"))]
 fn run_ops<Dm: DriverMode + 'static>(
     bus: &mut Spi<'static, Dm>,
     cs: &mut Output<'static>,
-    delay: &mut Delay,
+    delay: &Delay,
     operations: &mut [embedded_hal::spi::Operation<'_, u8>],
 ) -> Result<(), SpiError> {
     use embedded_hal::spi::{Operation, SpiBus};
@@ -245,8 +245,8 @@ impl SpiDevice<Blocking> {
     ) -> Result<(), SpiError> {
         let mut bus = self.bus.inner.borrow_mut();
         let mut cs = self.cs.borrow_mut();
-        let mut delay = self.delay.borrow_mut();
-        run_ops(&mut *bus, &mut *cs, &mut *delay, operations)
+        let delay = self.delay.borrow();
+        run_ops(&mut *bus, &mut *cs, &*delay, operations)
     }
 }
 
@@ -258,9 +258,43 @@ impl SpiDevice<Async> {
     ) -> Result<(), SpiError> {
         let bus_guard = self.bus.inner.lock().await;
         let mut bus = bus_guard.borrow_mut();
-        let mut cs_guard = self.cs.borrow_mut();
-        let mut delay_guard = self.delay.borrow_mut();
-        run_ops(&mut *bus, &mut *cs_guard, &mut *delay_guard, operations)
+        let mut cs = self.cs.borrow_mut();
+        let delay = self.delay.borrow();
+
+        cs.set_low();
+        let result = async {
+            for op in operations.iter_mut() {
+                match op {
+                    embedded_hal::spi::Operation::Read(buf) => {
+                        embedded_hal_async::spi::SpiBus::read(&mut *bus, buf)
+                            .await
+                            .map_err(|_| SpiError::Bus)?
+                    }
+                    embedded_hal::spi::Operation::Write(buf) => {
+                        embedded_hal_async::spi::SpiBus::write(&mut *bus, buf)
+                            .await
+                            .map_err(|_| SpiError::Bus)?
+                    }
+                    embedded_hal::spi::Operation::Transfer(read, write) => {
+                        embedded_hal_async::spi::SpiBus::transfer(&mut *bus, read, write)
+                            .await
+                            .map_err(|_| SpiError::Bus)?
+                    }
+                    embedded_hal::spi::Operation::TransferInPlace(buf) => {
+                        embedded_hal_async::spi::SpiBus::transfer_in_place(&mut *bus, buf)
+                            .await
+                            .map_err(|_| SpiError::Bus)?
+                    }
+                    embedded_hal::spi::Operation::DelayNs(ns) => {
+                        delay.delay_ns((*ns).try_into().unwrap_or(u32::MAX));
+                    }
+                }
+            }
+            Ok(())
+        }
+        .await;
+        cs.set_high();
+        result
     }
 }
 
