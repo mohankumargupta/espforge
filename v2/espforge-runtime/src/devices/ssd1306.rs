@@ -13,6 +13,7 @@
 
 use core::cell::RefCell;
 use display_interface_i2c::I2CInterface;
+use esp_hal::Blocking;
 use embedded_graphics::{
     mono_font::{ascii::FONT_6X10, MonoTextStyle, MonoTextStyleBuilder},
     pixelcolor::BinaryColor,
@@ -26,7 +27,7 @@ use ssd1306::{
 use crate::components::i2c::I2cBus;
 
 type Ssd1306Display = Ssd1306Driver<
-    I2CInterface<I2cBus>,
+    I2CInterface<I2cBus<Blocking>>,
     DisplaySize128x64,
     BufferedGraphicsMode<DisplaySize128x64>,
 >;
@@ -40,7 +41,7 @@ impl Ssd1306 {
     /// `bus` is the I2C bus component. 
     /// `I2cBus` is a `Copy` handle, so this is a pointer bitcopy, not a peripheral move.
     /// `address` is the 7-bit SSD1306 I2C slave address (e.g. 0x3C).
-    pub fn new(bus: I2cBus, address: u8) -> Self {
+    pub fn new(bus: I2cBus<Blocking>, address: u8) -> Self {
         // `data_byte` is the SSD1306 control/Co-DC byte; 0x40 sets the D/C bit
         // (data), the library clears it for command bytes.
         let interface = I2CInterface::new(bus, address, 0x40);
@@ -66,6 +67,7 @@ impl Ssd1306 {
         critical_section::with(|_cs| {
             let _ = self.display.borrow_mut().clear(BinaryColor::Off);
         });
+    }
 
     pub fn flush(&self) {
         critical_section::with(|_cs| {
@@ -79,8 +81,6 @@ impl Ssd1306 {
             let _ = Text::with_baseline(text, Point::new(x, y), self.text_style, Baseline::Top)
                 .draw(&mut *disp);
         });
-    }
-    
     }
 }
 

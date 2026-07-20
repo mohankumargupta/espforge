@@ -16,19 +16,20 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 use esp_hal::gpio::Output;
+use esp_hal::Blocking;
 use ili9341::{DisplaySize240x320, Ili9341 as Ili9341Driver, Orientation};
 
 use crate::components::spi::SpiDevice;
 
 pub struct Ili9341 {
-    display: RefCell<Ili9341Driver<SPIInterface<SpiDevice, Output<'static>>, Output<'static>>>,
+    display: RefCell<Ili9341Driver<SPIInterface<SpiDevice<Blocking>, Output<'static>>, Output<'static>>>,
 }
 
 impl Ili9341 {
     /// `spi` is a per-device SPI handle (bus `Copy` handle + private CS + delay,
     /// see `espforge_runtime::components::SpiDevice`), `dc`/`rst` are control
     /// pins moved in by value.
-    pub fn new(spi: SpiDevice, dc: Output<'static>, rst: Output<'static>) -> Self {
+    pub fn new(spi: SpiDevice<Blocking>, dc: Output<'static>, rst: Output<'static>) -> Self {
         let mut delay = spi.delay_clone();
         let interface = SPIInterface::new(spi, dc);
         let display = Ili9341Driver::new(

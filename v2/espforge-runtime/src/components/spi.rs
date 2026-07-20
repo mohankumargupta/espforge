@@ -71,11 +71,13 @@ impl embedded_hal::spi::Error for SpiError {
 // ---------------------------------------------------------------------------
 
 #[cfg(not(feature = "embassy"))]
+#[derive(Clone, Copy)]
 pub struct SpiBus<Dm: DriverMode + 'static> {
     inner: &'static RefCell<Spi<'static, Dm>>,
 }
 
 #[cfg(feature = "embassy")]
+#[derive(Clone, Copy)]
 pub struct SpiBus<Dm: DriverMode + 'static> {
     inner: &'static embassy_sync::mutex::Mutex<
         embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,

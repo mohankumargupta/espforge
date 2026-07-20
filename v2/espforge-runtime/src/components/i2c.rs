@@ -72,6 +72,17 @@ pub struct I2cBus<Dm: DriverMode + 'static> {
     inner: &'static RefCell<I2c<'static, Dm>>,
 }
 
+// Manually impl Clone+Copy so Dm doesn't need to be Copy.
+// The struct only holds a &'static reference, which is always Copy.
+#[cfg(not(feature = "embassy"))]
+impl<Dm: DriverMode + 'static> Clone for I2cBus<Dm> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[cfg(not(feature = "embassy"))]
+impl<Dm: DriverMode + 'static> Copy for I2cBus<Dm> {}
+
 #[cfg(feature = "embassy")]
 pub struct I2cBus<Dm: DriverMode + 'static> {
     inner: &'static embassy_sync::mutex::Mutex<
@@ -79,6 +90,17 @@ pub struct I2cBus<Dm: DriverMode + 'static> {
         RefCell<I2c<'static, Dm>>,
     >,
 }
+
+// Manually impl Clone+Copy so Dm doesn't need to be Copy.
+// The struct only holds a &'static reference, which is always Copy.
+#[cfg(feature = "embassy")]
+impl<Dm: DriverMode + 'static> Clone for I2cBus<Dm> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[cfg(feature = "embassy")]
+impl<Dm: DriverMode + 'static> Copy for I2cBus<Dm> {}
 
 // ---------------------------------------------------------------------------
 // Blocking build + API

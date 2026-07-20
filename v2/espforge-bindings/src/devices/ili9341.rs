@@ -44,7 +44,7 @@ impl Driver for Ili9341Driver {
         // `SpiDevice::new` takes the bus `Copy` handle, the device's private CS
         // (as an `Output`), and the shared `Delay` (Copy).
         let spi_device = format!(
-            "espforge_runtime::components::SpiDevice::new(components.{spi_field}, {cs}, delay)"
+            "espforge_runtime::components::SpiDevice::<esp_hal::Blocking>::new(components.{spi_field}, {cs}, delay)"
         );
         Construction::for_instance(
             inst,
