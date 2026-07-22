@@ -248,6 +248,22 @@ impl SpiDevice<Blocking> {
         let delay = self.delay.borrow();
         run_ops(&mut *bus, &mut *cs, &*delay, operations)
     }
+
+    pub fn write(&self, bytes: &[u8]) -> Result<(), SpiError> {
+        self.transaction(&mut [embedded_hal::spi::Operation::Write(bytes)])
+    }
+    pub fn read(&self, buf: &mut [u8]) -> Result<(), SpiError> {
+        self.transaction(&mut [embedded_hal::spi::Operation::Read(buf)])
+    }
+    pub fn write_read(&self, w: &[u8], r: &mut [u8]) -> Result<(), SpiError> {
+        self.transaction(&mut [
+            embedded_hal::spi::Operation::Write(w),
+            embedded_hal::spi::Operation::Read(r),
+        ])
+    }
+    pub fn transfer_in_place(&self, buf: &mut [u8]) -> Result<(), SpiError> {
+        self.transaction(&mut [embedded_hal::spi::Operation::TransferInPlace(buf)])
+    }
 }
 
 #[cfg(feature = "embassy")]
@@ -296,6 +312,23 @@ impl SpiDevice<Async> {
         cs.set_high();
         result
     }
+
+pub async fn write(&self, bytes: &[u8]) -> Result<(), SpiError> {
+        self.transaction(&mut [embedded_hal::spi::Operation::Write(bytes)]).await
+    }
+    pub async fn read(&self, buf: &mut [u8]) -> Result<(), SpiError> {
+        self.transaction(&mut [embedded_hal::spi::Operation::Read(buf)]).await
+    }
+    pub async fn write_read(&self, w: &[u8], r: &mut [u8]) -> Result<(), SpiError> {
+        self.transaction(&mut [
+            embedded_hal::spi::Operation::Write(w),
+            embedded_hal::spi::Operation::Read(r),
+        ]).await
+    }
+    pub async fn transfer_in_place(&self, buf: &mut [u8]) -> Result<(), SpiError> {
+        self.transaction(&mut [embedded_hal::spi::Operation::TransferInPlace(buf)]).await
+    }
+
 }
 
 #[cfg(not(feature = "embassy"))]
