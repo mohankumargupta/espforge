@@ -1,0 +1,14 @@
+espforge:
+  name: i2c_example
+  target: esp32c3
+  runtime: blocking
+
+esp32:
+  i2c:
+    i2c0: { i2c: 0, sda: 6, scl: 7, frequency_kHz: 100 }
+
+components:
+  i2c_tester:
+    using: i2c
+    with:
+      bus: $i2c0
