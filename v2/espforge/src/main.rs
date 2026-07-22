@@ -321,7 +321,7 @@ fn run_create(
         println!("    {}/wokwi.toml", dest.display());
     }
     if espforge_examples::asset(&example, "chip.wasm").is_some() {
-        println!("    {}/chip/  (Wokwi custom chip: chip.json + chip.wasm)", dest.display());
+        println!("    {}/chip/  (Wokwi custom chip: chip.json, chip.wasm, *.zig)", dest.display());
     }
     println!();
     println!("  then build it:");
@@ -371,16 +371,15 @@ fn copy_app(example: &str, dest: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Copy a Wokwi custom chip's runtime artifacts from the embedded example tree
-/// into `<dest>/chip/`. Only `chip/chip.json` + `chip/chip.wasm` travel — the
-/// Zig build sources (`chip.zig`, `build.zig`, `justfile`, `wokwi-api.zig`) are
-/// intentionally left in the example tree (the committed `.wasm` is the build
-/// product). No-op if the example ships no chip. The chip dir is the signal
-/// `build` uses to emit the `[[chip]]` section of `wokwi.toml` and to re-carry
-/// `chip/` into `out/`.
+/// Copy a Wokwi custom chip's artifacts from the embedded example tree into
+/// `<dest>/chip/`. Runtime artifacts (`chip.json` + `chip.wasm`) live at the
+/// example root; Zig build sources (`wokwi-api.zig`, `chip.zig`, `build.zig`,
+/// `justfile`) live under `chip/`. All are carried so the user can rebuild the
+/// `.wasm` from inside the project folder when debugging/troubleshooting. No-op
+/// if the example ships no chip. The chip dir is the signal `build` uses to
+/// emit the `[[chip]]` section of `wokwi.toml` and to re-carry `chip/` into
+/// `out/`.
 fn copy_chip_assets(example: &str, dest: &std::path::Path) -> anyhow::Result<()> {
-    // The runtime artifacts (`chip.json` + `chip.wasm`) live at the example
-    // root; the Zig build sources are under `chip/`. Only the artifacts travel.
     let json = espforge_examples::asset(example, "chip.json");
     let wasm = espforge_examples::asset(example, "chip.wasm");
     let (Some(json), Some(wasm)) = (json, wasm) else {
@@ -393,6 +392,13 @@ fn copy_chip_assets(example: &str, dest: &std::path::Path) -> anyhow::Result<()>
         .map_err(|e| anyhow::anyhow!("failed to write chip.json: {e}"))?;
     std::fs::write(chip_dir.join("chip.wasm"), wasm)
         .map_err(|e| anyhow::anyhow!("failed to write chip.wasm: {e}"))?;
+    // Carry Zig build sources so the user can rebuild inside the project.
+    for zig_file in ["wokwi-api.zig", "chip.zig", "build.zig", "justfile"] {
+        if let Some(bytes) = espforge_examples::asset(example, &format!("chip/{zig_file}")) {
+            std::fs::write(chip_dir.join(zig_file), bytes)
+                .map_err(|e| anyhow::anyhow!("failed to write {zig_file}: {e}"))?;
+        }
+    }
     Ok(())
 }
 
