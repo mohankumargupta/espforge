@@ -144,30 +144,20 @@ impl I2cBus<Blocking> {
         operations: &mut [embedded_hal::i2c::Operation<'_>],
     ) -> Result<(), I2cError> {
         let mut bus = self.inner.borrow_mut();
-        for op in operations.iter_mut() {
-            match op {
-                embedded_hal::i2c::Operation::Write(buffer) => {
-                    bus.write(address, buffer).map_err(I2cError::Bus)?
-                }
-                embedded_hal::i2c::Operation::Read(buffer) => {
-                    bus.read(address, buffer).map_err(I2cError::Bus)?
-                }
-            }
-        }
-        Ok(())
+        embedded_hal::i2c::I2c::transaction(&mut *bus, address, operations).map_err(I2cError::Bus)
     }
 
     pub fn write(&self, addr: u8, bytes: &[u8]) -> Result<(), I2cError> {
-        self.inner.borrow_mut().write(addr, bytes).map_err(I2cError::Bus)
+        let mut bus = self.inner.borrow_mut();
+        embedded_hal::i2c::I2c::write(&mut *bus, addr, bytes).map_err(I2cError::Bus)
     }
     pub fn read(&self, addr: u8, buf: &mut [u8]) -> Result<(), I2cError> {
-        self.inner.borrow_mut().read(addr, buf).map_err(I2cError::Bus)
+        let mut bus = self.inner.borrow_mut();
+        embedded_hal::i2c::I2c::read(&mut *bus, addr, buf).map_err(I2cError::Bus)
     }
     pub fn write_read(&self, addr: u8, w: &[u8], r: &mut [u8]) -> Result<(), I2cError> {
-        self.inner
-            .borrow_mut()
-            .write_read(addr, w, r)
-            .map_err(I2cError::Bus)
+        let mut bus = self.inner.borrow_mut();
+        embedded_hal::i2c::I2c::write_read(&mut *bus, addr, w, r).map_err(I2cError::Bus)
     }
 }
 
@@ -224,34 +214,33 @@ impl I2cBus<Async> {
     ) -> Result<(), I2cError> {
         let guard = self.inner.lock().await;
         let mut bus = guard.borrow_mut();
-        for op in operations.iter_mut() {
-            match op {
-                embedded_hal::i2c::Operation::Write(buffer) => {
-                    bus.write_async(address, buffer).await.map_err(I2cError::Bus)?
-                }
-                embedded_hal::i2c::Operation::Read(buffer) => {
-                    bus.read_async(address, buffer).await.map_err(I2cError::Bus)?
-                }
-            }
-        }
-        Ok(())
+        embedded_hal_async::i2c::I2c::transaction(&mut *bus, address, operations)
+            .await
+            .map_err(I2cError::Bus)
     }
 
     pub async fn write(&self, addr: u8, bytes: &[u8]) -> Result<(), I2cError> {
         let guard = self.inner.lock().await;
-        guard.borrow_mut().write_async(addr, bytes).await.map_err(I2cError::Bus)
-    }
-    pub async fn read(&self, addr: u8, buf: &mut [u8]) -> Result<(), I2cError> {
-        let guard = self.inner.lock().await;
-        guard.borrow_mut().read_async(addr, buf).await.map_err(I2cError::Bus)
-    }
-    pub async fn write_read(&self, addr: u8, w: &[u8], r: &mut [u8]) -> Result<(), I2cError> {
-        let guard = self.inner.lock().await;
-        guard
-            .borrow_mut()
-            .write_read_async(addr, w, r)
+        let mut bus = guard.borrow_mut();
+        embedded_hal_async::i2c::I2c::write(&mut *bus, addr, bytes)
             .await
             .map_err(I2cError::Bus)
+    }
+
+    pub async fn read(&self, addr: u8, buf: &mut [u8]) -> Result<(), I2cError> {
+        let guard = self.inner.lock().await;
+        let mut bus = guard.borrow_mut();
+        embedded_hal_async::i2c::I2c::read(&mut *bus, addr, buf)
+            .await
+            .map_err(I2cError::Bus)
+    }
+
+    pub async fn write_read(&self, addr: u8, w: &[u8], r: &mut [u8]) -> Result<(), I2cError> {
+        let guard = self.inner.lock().await;
+        let mut bus = guard.borrow_mut();
+        embedded_hal_async::i2c::I2c::write_read(&mut *bus, addr, w, r)
+        .await
+        .map_err(I2cError::Bus)
     }
 }
 
