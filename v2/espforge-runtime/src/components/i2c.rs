@@ -92,7 +92,7 @@ impl<Dm: DriverMode + 'static> Copy for I2cBus<Dm> {}
 
 #[cfg(feature = "embassy")]
 pub struct I2cBus<Dm: DriverMode + 'static> {
-    inner: &'static embassy_sync::mutex::Mutex
+    inner: &'static embassy_sync::mutex::Mutex<
         embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
         RefCell<I2c<'static, Dm>>,
     >,
