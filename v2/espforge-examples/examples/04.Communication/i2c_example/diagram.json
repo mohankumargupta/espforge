@@ -4,13 +4,34 @@
   "editor": "wokwi",
   "parts": [
     { "type": "$board", "id": "esp", "top": -9.9, "left": -61.38, "attrs": {} },
-    { "type": "chip-chip", "id": "chip1", "top": 1.02, "left": 100.8, "attrs": {} }
+    { "type": "chip-chip", "id": "chip1", "top": 1.02, "left": 100.8, "attrs": {} },
+        {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": -42.0694580078125,
+      "left": -148.66666666666669,
+      "attrs": { "value": "4700" }
+    },
+      {
+      "type": "wokwi-resistor",
+      "id": "r2",
+      "top": 3.95,
+      "left": -153.6,
+      "attrs": { "value": "4700" }
+    }      
+
   ],
   "connections": [
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
     [ "esp:RX", "$serialMonitor:TX", "", [] ],
     [ "chip1:SDA", "esp:6", "green", [ "h-48", "v67.2" ] ],
-    [ "chip1:SCL", "esp:7", "yellow", [ "h-57.6", "v57.6" ] ]
+    [ "chip1:SCL", "esp:7", "yellow", [ "h-57.6", "v57.6" ] ],
+        [ "esp:6", "r1:2", "green", [ "h52.54", "v-115.5", "h0", "v-28.8" ] ],
+    [ "esp:7", "r2:2", "green", [ "h23.74", "v-105.9", "h-172.8", "v28.8" ] ],
+
+      [ "esp:3V3.1", "r2:1", "green", [ "h0" ] ],
+    [ "esp:3V3.1", "r1:1", "green", [ "h-70.98", "v38.1", "h-96", "v-105.6" ] ]
+
   ],
   "dependencies": {}
 }

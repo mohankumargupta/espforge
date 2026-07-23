@@ -17,13 +17,14 @@ const Chip = extern struct {
 // Called when the I2C master addresses this chip. Return true to ACK.
 export fn chip_i2c_connect(user_data: ?*anyopaque, address: u32, connect_type: u32) bool {
     _ = connect_type;
+    _ = user_data;
 
     if (address != 0x42) return false; // NACK
 
-    const chip: *Chip = @ptrCast(@alignCast(user_data.?));
+    //const chip: *Chip = @ptrCast(@alignCast(user_data.?));
     // Reset transaction state at the start of each new transaction
-    chip.current_index = 0;
-    chip.register_written = false;
+    //chip.current_index = 0;
+    //chip.register_written = false;
     return true; // ACK
 }
 
@@ -63,7 +64,9 @@ export fn chip_i2c_write(user_data: ?*anyopaque, data: u8) bool {
 // I2C Disconnect Callback
 // -------------------------------------------------------------------------
 export fn chip_i2c_disconnect(user_data: ?*anyopaque) void {
-    _ = user_data;
+    const chip: *Chip = @ptrCast(@alignCast(user_data.?));
+    chip.current_index = 0;
+    chip.register_written = false;
 }
 
 // -------------------------------------------------------------------------
