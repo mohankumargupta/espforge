@@ -18,8 +18,7 @@
 
 use anyhow::Result;
 use espforge_model::ir::DeviceTree;
-use minijinja::{Environment, context};
-use serde_json::Value;
+use minijinja::Environment;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -53,31 +52,48 @@ fn target_triple(target: &str) -> &'static str {
 }
 
 /// Build a template context from the DeviceTree containing all resolvable values.
+///
+/// Component instance fields (`.pin`/`.field`/`.gpio`) are inserted as a real
+/// nested object per instance, not a flat `"id.field"` string key: Jinja-style
+/// `{{ red_led.pin }}` resolves `red_led` as a variable and then does
+/// attribute access `.pin` on it — it does NOT look up the literal string
+/// `"red_led.pin"`. A flat map has no `red_led` key at all, so `red_led` was
+/// `Undefined` and `.pin` on `Undefined` is a hard render error under
+/// minijinja's default (non-lenient) undefined behavior.
 fn build_context(ir: &DeviceTree) -> minijinja::Value {
     let target = ir.meta.target.as_deref().unwrap_or("esp32c3");
-    let mut ctx = HashMap::new();
+    let mut ctx: HashMap<String, minijinja::Value> = HashMap::new();
 
     // Board type
-    ctx.insert("board".to_string(), board_type(target).to_string());
+    ctx.insert(
+        "board".to_string(),
+        minijinja::Value::from(board_type(target).to_string()),
+    );
 
     // Serial monitor (wokwi built-in)
-    ctx.insert("serialMonitor".to_string(), "serialMonitor".to_string());
+    ctx.insert(
+        "serialMonitor".to_string(),
+        minijinja::Value::from("serialMonitor".to_string()),
+    );
 
     // Peripheral references: $gpioN -> pin number
     for p in &ir.peripherals {
-        ctx.insert(p.name.clone(), p.number.to_string());
+        ctx.insert(p.name.clone(), minijinja::Value::from(p.number.to_string()));
     }
 
-    // Component instances: $component.pin -> pin number (or GPIO name)
+    // Component instances: {{ component.pin }} / .field / .gpio -> a nested
+    // object per instance, so template attribute access resolves correctly.
     for inst in &ir.instances {
         if let Some(pin) = inst.pins.first() {
             let pin_num = pin.number.to_string();
             let gpio_name = format!("GPIO{}", pin.number);
+            let mut fields: HashMap<String, String> = HashMap::new();
             // Default .pin resolves to bare pin number (what wokwi expects)
-            ctx.insert(format!("{}.pin", inst.id), pin_num.clone());
+            fields.insert("pin".to_string(), pin_num);
             // .field / .gpio yields the esp_hal peripheral name (GPIO18)
-            ctx.insert(format!("{}.field", inst.id), gpio_name.clone());
-            ctx.insert(format!("{}.gpio", inst.id), gpio_name);
+            fields.insert("field".to_string(), gpio_name.clone());
+            fields.insert("gpio".to_string(), gpio_name);
+            ctx.insert(inst.id.clone(), minijinja::Value::from(fields));
         }
     }
 
@@ -86,7 +102,7 @@ fn build_context(ir: &DeviceTree) -> minijinja::Value {
 
 /// Render a diagram.json template using minijinja.
 fn render_diagram(template: &str, ctx: &minijinja::Value) -> Result<String> {
-    let mut env = Environment::new();
+    let env = Environment::new();
     let template = env
         .template_from_str(template)
         .map_err(|e| anyhow::anyhow!("failed to parse template: {e}"))?;

@@ -31,4 +31,4 @@ clap = { version = "4.5", features = ["derive"] }
 dialoguer = "0.11"
 include_dir = "0.7"
 embedded-hal = "1.0"
-minijinja = { git = "https://github.com/mitsuhiko/minijinja", rev = "ef27bc9ea4a8762a1fddaeaf2302d744a57bc1d2", features = ["builtins", "macros", "multi_template", "adjacent_loop_items", "std_collections", "json"] }
+minijinja = { git = "https://github.com/mitsuhiko/minijinja", rev = "ef27bc9ea4a8762a1fddaeaf2302d744a57bc1d2", features = ["json"] }
