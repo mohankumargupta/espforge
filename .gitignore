@@ -2,5 +2,5 @@ target/
 **/.zig-cache
 .env
 build/
-
+.cargo-git/
 

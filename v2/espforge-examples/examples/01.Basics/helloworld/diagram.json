@@ -3,10 +3,10 @@
   "author": "espforge",
   "editor": "wokwi",
   "parts": [
-    { "type": "$board", "id": "esp", "top": 0, "left": 0 }
+    { "type": "{{ board }}", "id": "esp", "top": 0, "left": 0 }
   ],
   "connections": [
-  	[ "esp:TX", "$serialMonitor:RX", "", [] ],
-  	[ "esp:RX", "$serialMonitor:TX", "", [] ]
+  	[ "esp:TX", "{{ serialMonitor }}:RX", "", [] ],
+  	[ "esp:RX", "{{ serialMonitor }}:TX", "", [] ]
   ]
 }

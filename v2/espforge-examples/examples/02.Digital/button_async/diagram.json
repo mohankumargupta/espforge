@@ -2,14 +2,8 @@
   "version": 1,
   "author": "Raspberry Pi",
   "editor": "wokwi",
-  "refs": {
-    "gnd": "GND.10",
-    "gnd2": "GND.6",
-    "led": "$red_led.pin",
-    "button": "$button.pin"
-  },
   "parts": [
-    { "type": "$board", "id": "esp", "top": 18.9, "left": -90.18, "attrs": {} },
+    { "type": "{{ board }}", "id": "esp", "top": 18.9, "left": -90.18, "attrs": {} },
     { "type": "wokwi-led", "id": "led1", "top": 111.6, "left": 90.2, "attrs": { "color": "red" } },
     {
       "type": "wokwi-pushbutton",
@@ -27,13 +21,13 @@
     }
   ],
   "connections": [
-    [ "esp:TX", "$serialMonitor:RX", "", [] ],
-    [ "esp:RX", "$serialMonitor:TX", "", [] ],
-    [ "esp:$gnd2", "r1:1", "black", [ "v0" ] ],
+    [ "esp:TX", "{{ serialMonitor }}:RX", "", [] ],
+    [ "esp:RX", "{{ serialMonitor }}:TX", "", [] ],
+    [ "esp:GND.6", "r1:1", "black", [ "v0" ] ],
     [ "r1:2", "led1:C", "black", [ "v0" ] ],
-    [ "led1:A", "esp:$led", "green", [ "v0", "h28.8", "v-48" ] ],
-    [ "btn1:2.l", "esp:$button", "green", [ "h0" ] ],
-    [ "esp:$gnd", "btn1:1.l", "black", [ "h0" ] ]
+    [ "led1:A", "esp:{{ red_led.pin }}", "green", [ "v0", "h28.8", "v-48" ] ],
+    [ "btn1:2.l", "esp:{{ button.pin }}", "green", [ "h0" ] ],
+    [ "esp:GND.10", "btn1:1.l", "black", [ "h0" ] ]
   ],
   "dependencies": {}
 }

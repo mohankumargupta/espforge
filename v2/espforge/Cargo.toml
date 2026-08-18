@@ -1,6 +1,6 @@
 [package]
 name = "espforge"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 license.workspace = true
 
@@ -9,12 +9,13 @@ name = "espforge"
 path = "src/main.rs"
 
 [dependencies]
-espforge-model = { version = "0.1.0", path = "../espforge-model" }
-espforge-bindings = { version = "0.1.0", path = "../espforge-bindings" }
-espforge-examples = { version = "0.1.0", path = "../espforge-examples" }
+espforge-model = { version = "0.2.0", path = "../espforge-model" }
+espforge-bindings = { version = "0.2.0", path = "../espforge-bindings" }
+espforge-examples = { version = "0.2.0", path = "../espforge-examples" }
 anyhow.workspace = true
 clap.workspace = true
 dialoguer.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
+minijinja.workspace = true

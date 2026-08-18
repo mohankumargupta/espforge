@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "espforge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -894,6 +894,7 @@ dependencies = [
  "espforge-bindings",
  "espforge-examples",
  "espforge-model",
+ "minijinja",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -901,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "espforge-bindings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "espforge-model",
@@ -909,14 +910,14 @@ dependencies = [
 
 [[package]]
 name = "espforge-examples"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "include_dir",
 ]
 
 [[package]]
 name = "espforge-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1212,10 +1213,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "memo-map"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
+
+[[package]]
 name = "micromath"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
+
+[[package]]
+name = "minijinja"
+version = "3.0.0-alpha.0"
+source = "git+https://github.com/mitsuhiko/minijinja?rev=ef27bc9ea4a8762a1fddaeaf2302d744a57bc1d2#ef27bc9ea4a8762a1fddaeaf2302d744a57bc1d2"
+dependencies = [
+ "memo-map",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "nb"

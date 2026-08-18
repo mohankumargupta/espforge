@@ -2,16 +2,12 @@
   "version": 1,
   "author": "espforge",
   "editor": "wokwi",
-  "refs": {
-    "led_pin_number": "$red_led.pin",
-    "gnd": "GND.10"
-  },
   "parts": [
-    { "type": "$board", "id": "esp", "top": 0, "left": 0 },
-    { "type": "wokwi-led", "id": "led1", "top": -40, "left": 96, "attrs": { "color": "red", "gpio": "$led_pin_number" } }
+    { "type": "{{ board }}", "id": "esp", "top": 0, "left": 0 },
+    { "type": "wokwi-led", "id": "led1", "top": -40, "left": 96, "attrs": { "color": "red", "gpio": "{{ red_led.pin }}" } }
   ],
   "connections": [
-    [ "led1:A", "esp:$led_pin_number", "green", [] ],
-    [ "led1:C", "esp:$gnd", "black", [] ]
+    [ "led1:A", "esp:{{ red_led.pin }}", "green", [] ],
+    [ "led1:C", "esp:GND.10", "black", [] ]
   ]
 }
