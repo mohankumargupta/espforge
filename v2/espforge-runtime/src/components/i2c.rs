@@ -94,7 +94,7 @@ impl<Dm: DriverMode + 'static> Copy for I2cBus<Dm> {}
 pub struct I2cBus<Dm: DriverMode + 'static> {
     inner: &'static embassy_sync::mutex::Mutex<
         embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
-        RefCell<I2c<'static, Dm>>,
+        I2c<'static, Dm>,
     >,
 }
 
@@ -194,14 +194,14 @@ impl I2cBus<Async> {
         static CELL: static_cell::StaticCell<
             embassy_sync::mutex::Mutex<
                 embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
-                RefCell<I2c<'static, Async>>,
+                I2c<'static, Async>,
             >,
         > = static_cell::StaticCell::new();
         let esp = I2c::new(i2c, EspConfig::from(config))?
             .with_sda(sda)
             .with_scl(scl)
             .into_async();
-        let inner = CELL.init(embassy_sync::mutex::Mutex::new(RefCell::new(esp)));
+        let inner = CELL.init(embassy_sync::mutex::Mutex::new(esp));
         Ok(I2cBus { inner })
     }
 
@@ -212,32 +212,28 @@ impl I2cBus<Async> {
         address: u8,
         operations: &mut [embedded_hal::i2c::Operation<'_>],
     ) -> Result<(), I2cError> {
-        let guard = self.inner.lock().await;
-        let mut bus = guard.borrow_mut();
+        let mut bus = self.inner.lock().await;
         embedded_hal_async::i2c::I2c::transaction(&mut *bus, address, operations)
             .await
             .map_err(I2cError::Bus)
     }
 
     pub async fn write(&self, addr: u8, bytes: &[u8]) -> Result<(), I2cError> {
-        let guard = self.inner.lock().await;
-        let mut bus = guard.borrow_mut();
+        let mut bus = self.inner.lock().await;
         embedded_hal_async::i2c::I2c::write(&mut *bus, addr, bytes)
             .await
             .map_err(I2cError::Bus)
     }
 
     pub async fn read(&self, addr: u8, buf: &mut [u8]) -> Result<(), I2cError> {
-        let guard = self.inner.lock().await;
-        let mut bus = guard.borrow_mut();
+        let mut bus = self.inner.lock().await;
         embedded_hal_async::i2c::I2c::read(&mut *bus, addr, buf)
             .await
             .map_err(I2cError::Bus)
     }
 
     pub async fn write_read(&self, addr: u8, w: &[u8], r: &mut [u8]) -> Result<(), I2cError> {
-        let guard = self.inner.lock().await;
-        let mut bus = guard.borrow_mut();
+        let mut bus = self.inner.lock().await;
         embedded_hal_async::i2c::I2c::write_read(&mut *bus, addr, w, r)
         .await
         .map_err(I2cError::Bus)

@@ -89,7 +89,7 @@ pub struct UartDevice<Dm: DriverMode + 'static> {
 pub struct UartDevice<Dm: DriverMode + 'static> {
     inner: embassy_sync::mutex::Mutex<
         embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
-        RefCell<Uart<'static, Dm>>,
+        Uart<'static, Dm>,
     >,
 }
 
@@ -191,7 +191,7 @@ impl UartDevice<Async> {
             .with_rx(rx)
             .into_async();
         Ok(UartDevice {
-            inner: embassy_sync::mutex::Mutex::new(RefCell::new(esp)),
+            inner: embassy_sync::mutex::Mutex::new(esp),
         })
     }
 
@@ -200,12 +200,11 @@ impl UartDevice<Async> {
         let mut off = 0;
         while off < data.len() {
             let n = uart
-                .borrow_mut()
                 .write(&data[off..])
                 .map_err(UartError::Write)?;
             off += n;
         }
-        uart.borrow_mut().flush().map_err(UartError::Write)
+        uart.flush().map_err(UartError::Write)
     }
 
     pub async fn write_str(&self, s: &str) -> Result<(), UartError> {
@@ -216,7 +215,6 @@ impl UartDevice<Async> {
         self.inner
             .lock()
             .await
-            .borrow_mut()
             .read(buf)
             .map_err(UartError::Read)
     }
@@ -225,7 +223,6 @@ impl UartDevice<Async> {
         self.inner
             .lock()
             .await
-            .borrow_mut()
             .read_buffered(buf)
             .map_err(UartError::Read)
     }
@@ -236,8 +233,7 @@ impl UartDevice<Async> {
             // Release the lock between idle reads (§20.3: not held across await).
             let n = {
                 let mut uart = self.inner.lock().await;
-                uart.borrow_mut()
-                    .read_buffered(&mut buf[total..])
+                uart.read_buffered(&mut buf[total..])
                     .map_err(UartError::Read)?
             };
             if n == 0 {

@@ -58,29 +58,21 @@ impl Ssd1306 {
     }
 
     pub fn init(&self) {
-        critical_section::with(|_cs| {
-            let _ = self.display.borrow_mut().init();
-        });
+        let _ = self.display.borrow_mut().init();
      }
 
     pub fn clear(&self) {
-        critical_section::with(|_cs| {
-            let _ = self.display.borrow_mut().clear(BinaryColor::Off);
-        });
+        let _ = self.display.borrow_mut().clear(BinaryColor::Off);
     }
 
     pub fn flush(&self) {
-        critical_section::with(|_cs| {
-            let _ = self.display.borrow_mut().flush();
-        });
+        let _ = self.display.borrow_mut().flush();
      }
 
     pub fn print(&self, x: i32, y: i32, text: &str) {
-        critical_section::with(|_cs| {
-            let mut disp = self.display.borrow_mut();
-            let _ = Text::with_baseline(text, Point::new(x, y), self.text_style, Baseline::Top)
-                .draw(&mut *disp);
-        });
+        let mut disp = self.display.borrow_mut();
+        let _ = Text::with_baseline(text, Point::new(x, y), self.text_style, Baseline::Top)
+            .draw(&mut *disp);
     }
 }
 

@@ -90,7 +90,7 @@ impl<Dm: DriverMode + 'static> Copy for SpiBus<Dm> {}
 pub struct SpiBus<Dm: DriverMode + 'static> {
     inner: &'static embassy_sync::mutex::Mutex<
         embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
-        RefCell<Spi<'static, Dm>>,
+        Spi<'static, Dm>,
     >,
 }
 
@@ -149,7 +149,7 @@ impl SpiBus<Async> {
         static CELL: static_cell::StaticCell<
             embassy_sync::mutex::Mutex<
                 embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
-                RefCell<Spi<'static, Async>>,
+                Spi<'static, Async>,
             >,
         > = static_cell::StaticCell::new();
         let esp = Spi::new(spi, EspConfig::from(config))?
@@ -157,7 +157,7 @@ impl SpiBus<Async> {
             .with_mosi(mosi)
             .with_miso(miso)
             .into_async();
-        let inner = CELL.init(embassy_sync::mutex::Mutex::new(RefCell::new(esp)));
+        let inner = CELL.init(embassy_sync::mutex::Mutex::new(esp));
         Ok(SpiBus { inner })
     }
 }
@@ -272,8 +272,7 @@ impl SpiDevice<Async> {
         &self,
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), SpiError> {
-        let bus_guard = self.bus.inner.lock().await;
-        let mut bus = bus_guard.borrow_mut();
+        let mut bus = self.bus.inner.lock().await;
         let mut cs = self.cs.borrow_mut();
         let delay = self.delay.borrow();
 

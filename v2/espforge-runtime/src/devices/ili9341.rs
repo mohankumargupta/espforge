@@ -46,9 +46,7 @@ impl Ili9341 {
     }
 
     pub fn clear(&self) {
-        critical_section::with(|_cs| {
-            let _ = self.display.borrow_mut().clear(Rgb565::BLACK);
-        });
+        let _ = self.display.borrow_mut().clear(Rgb565::BLACK);
     }
 
     pub fn print(&self, x: i32, y: i32, text: &str) {
@@ -57,10 +55,8 @@ impl Ili9341 {
             .text_color(Rgb565::WHITE)
             .background_color(Rgb565::BLACK)
             .build();
-        critical_section::with(|_cs| {
-            let mut disp = self.display.borrow_mut();
-            let _ = Text::with_baseline(text, Point::new(x, y), style, Baseline::Top)
-                .draw(&mut *disp);
-        });
+        let mut disp = self.display.borrow_mut();
+        let _ = Text::with_baseline(text, Point::new(x, y), style, Baseline::Top)
+            .draw(&mut *disp);
     }
 }
