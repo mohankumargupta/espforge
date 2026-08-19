@@ -51,7 +51,7 @@ pub const ESPFORGE_PATH: &str = "ESPFORGE_PATH";
 /// module features (design §19.4); when empty the dep is emitted bare so a
 /// minimal project gets the cleanest possible manifest.
 fn espforge_dep(crate_name: &str, features: &[String]) -> String {
-    const VERSION: &str = "0.1.0";
+    const VERSION: &str = "0.2.0";
     if !use_local() {
         if features.is_empty() {
             return format!("{crate_name} = \"{VERSION}\"");

@@ -974,7 +974,7 @@ mod tests {
         let cargo = emitted_cargo_toml("01.Basics/helloworld/helloworld.yaml");
         // No runtime features => bare dep, no `features =` clause at all.
         assert!(
-            cargo.contains("espforge-runtime = \"0.1.0\""),
+            cargo.contains("espforge-runtime = \"0.2.0\""),
             "expected bare espforge-runtime dep, got:\n{cargo}"
         );
         assert!(
@@ -996,7 +996,7 @@ mod tests {
     fn display_requests_ssd1306_runtime_feature() {
         let cargo = emitted_cargo_toml("06.Displays/display/display.yaml");
         assert!(
-            cargo.contains("espforge-runtime = { version = \"0.1.0\", features = [\"ssd1306\"] }")
+            cargo.contains("espforge-runtime = { version = \"0.2.0\", features = [\"ssd1306\"] }")
                 || cargo.contains("features = [ \"ssd1306\" ]"),
             "display must require the ssd1306 runtime feature:\n{cargo}"
         );
