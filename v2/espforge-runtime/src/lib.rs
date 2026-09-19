@@ -8,7 +8,7 @@
 //! `Logger` and `Delay` are espforge's own types (mirroring v1's
 //! `espforge_platform`), not thin esp-hal re-exports.
 
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
 // `alloc` is available in generated projects that enable the `has_alloc` flag
 // (e.g. the `http` software-service, ADR-012); this lets runtime modules use
@@ -78,6 +78,12 @@ impl Logger {
     }
 }
 
+impl Default for Logger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Delay handle stored on the `Context` (ADR-008 stable API).
 ///
 /// The *type* is always `espforge_runtime::Delay`; its behaviour is selected by
@@ -90,20 +96,28 @@ impl Logger {
 ///   single `Context` field serve both runtimes without regenerating the struct.
 #[derive(Clone, Copy)]
 pub struct Delay {
-    #[cfg(not(feature = "embassy"))]
+    // `esp-hal` exists only on riscv32/xtensa (see `Cargo.toml`
+    // `[target.'cfg(...)'.dependencies]`); host builds (incl. the plain lib
+    // that `cargo test` also compiles) skip it. `cfg(test)` code never uses
+    // this field (tests substitute `embedded-hal-mock` delays via the
+    // generic `Rc522<SPI, RST, DLY>`).
+    #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
     inner: esp_hal::delay::Delay,
 }
 
 impl Delay {
     pub fn new() -> Self {
         Delay {
-            #[cfg(not(feature = "embassy"))]
+            #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
             inner: esp_hal::delay::Delay::new(),
         }
     }
 
     /// Blocking millisecond delay. Present in the default (blocking) build.
-    #[cfg(not(feature = "embassy"))]
+    #[cfg(all(
+        not(feature = "embassy"),
+        any(target_arch = "riscv32", target_arch = "xtensa")
+    ))]
     pub fn delay_ms(&self, ms: u32) {
         self.inner.delay_millis(ms);
     }
@@ -119,15 +133,25 @@ impl Delay {
     /// Blocking nanosecond delay. Used by `SpiDevice` inside a transaction (the
     /// `DelayNs` op), where awaiting is not possible. Present in both runtimes
     /// via esp-hal's hardware blocking `Delay` (design §20.5).
+    #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
     pub fn delay_ns(&self, ns: u32) {
         let mut d = esp_hal::delay::Delay::new();
         embedded_hal::delay::DelayNs::delay_ns(&mut d, ns);
     }
 }
 
-#[cfg(not(feature = "embassy"))]
+#[cfg(all(
+    not(feature = "embassy"),
+    any(target_arch = "riscv32", target_arch = "xtensa")
+))]
 impl embedded_hal::delay::DelayNs for Delay {
     fn delay_ns(&mut self, ns: u32) {
         self.inner.delay_ns(ns);
+    }
+}
+
+impl Default for Delay {
+    fn default() -> Self {
+        Self::new()
     }
 }
