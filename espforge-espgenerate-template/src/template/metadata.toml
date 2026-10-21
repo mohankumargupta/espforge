@@ -1,0 +1,38 @@
+# Which template files are emitted, under what name, and who owns them.
+#
+# `emit`: files NOT listed here are always emitted. A listed file is emitted
+# only when its `when` is true. `when` and `as` are minijinja, evaluated with
+# the template context (see espforge-emit/src/context.rs); every option is
+# `opt.<name>`, or `opt["<name>"]` when the name has a hyphen. Entries for
+# files that are not in this template are ignored.
+#
+# `ownership`: first matching glob wins, default is "owned". Globs are an exact
+# path or `dir/**`. An entry may also carry its own `own = "..."`.
+#   owned     - regenerated every build, drift-checked
+#   seed-once - written only if absent, then yours
+#   not-owned - never written
+
+emit = [
+  { path = ".github/workflows/rust_ci.yml", when = "opt.ci" },
+  { path = ".helix/languages.toml",         when = "opt.helix" },
+  { path = ".nvim.lua",                     when = "opt.neovim" },
+  { path = ".vscode/extensions.json",       when = "opt.vscode" },
+  { path = ".vscode/launch.json",           when = "opt.vscode" },
+  { path = ".vscode/settings.json",         when = "opt.vscode" },
+  { path = ".vscode/tasks.json",            when = "opt.vscode" },
+  { path = ".zed/settings.json",            when = "opt.zed" },
+  { path = "Embed.toml",                    when = 'opt["cargo-embed"]' },
+  { path = "diagram.json",                  when = "opt.wokwi" },
+  { path = "tests/hello_test.rs",           when = 'opt["embedded-test"]' },
+  { path = "wokwi.toml",                    when = "opt.wokwi" },
+]
+
+ownership = [
+  { glob = "Cargo.toml",          own = "owned" },
+  { glob = "src/**",              own = "owned" },
+  { glob = "diagram.json",        own = "owned" },
+  { glob = "wokwi.toml",          own = "owned" },
+  { glob = ".vscode/**",          own = "seed-once" },
+  { glob = "rust-toolchain.toml", own = "seed-once" },
+  { glob = ".cargo/**",           own = "seed-once" },
+]

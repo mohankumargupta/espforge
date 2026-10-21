@@ -1,0 +1,13 @@
+[package]
+name = "espforge-options"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+espf = { path = "../espf" }
+espforge-model = { path = "../espforge-model" }
+espforge-espgenerate-template = { path = "../espforge-espgenerate-template" }
+# KDL v2 parser (the `span` feature is on by default).
+kdl = "6"
+# Same pin/feature as the espforge crate, so only one copy is compiled.
+esp-metadata-generated = { version = "0.5.3", features = ["build-script"] }

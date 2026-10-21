@@ -1,0 +1,3 @@
+# peripherals
+  <gpio id="gpio4" pin="4 />
+  <spi id="spi2" sclk="6" mosi="7" />

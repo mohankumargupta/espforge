@@ -1,0 +1,8 @@
+[toolchain]
+{% if chip.riscv %}
+channel    = "stable"
+components = ["rust-src"]
+targets = ["{{ chip.rust_target }}"]
+{% elif chip.xtensa %}
+channel = "esp"
+{% endif %}

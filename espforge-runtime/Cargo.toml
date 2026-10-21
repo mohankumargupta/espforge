@@ -1,0 +1,18 @@
+[package]
+name = "espforge-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+log = "0.4"
+embassy-time = { version = "0.5", features = ["generic-queue-64"], optional = true }
+
+[features]
+# Selects the async `Delay` (yields via embassy_time) so the same
+# `ctx.delay.delay_ms(..)` call works in both runtimes.
+embassy = ["dep:embassy-time"]
+
+# esp-hal only builds for esp targets, so keep it invisible to host builds.
+# The generated project supplies the chip feature.
+[target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
+esp-hal = { version = "1", features = ["unstable"] }

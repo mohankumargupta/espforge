@@ -1,0 +1,42 @@
+======================================================================================
+ESPF file format
+
+1. comment block preceded with line containing only one or more equal sign sigil and
+   closing line containing only one or more equal sign sigil.
+   comment blocks can only appear before sections, not inside sections
+2. mandatory sections: espforge, peripherals, components, devices
+3. there is only one data type, that is string enclosed in double quotes.
+4. sections use the # sigil 
+5. a document contains sections, each section contains 0 or more elements
+6. an element is a restricted self closing xml element format.
+   - inline comments(//)at the end of self-closing elements only, not anywhere else
+   - element can span multiple lines, \ continuation not supported
+7. double quoted strings cannot span multiple lines
+8. single quotes can only appear inside double quotes
+9. you can reference elements throughout the document.
+======================================================================================
+
+# espforge
+  <project name="example project" description="example showing espf file format" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <gpio id="gpio4" pin="4" />
+  <gpio id="gpio5" pin="5" />
+  <i2c  id="i2c0" sda="8" scl="9" frequency="400kHz" />
+  <spi  id="spi2" sclk="6" mosi="7" /> // displays generally omit miso
+  <uart id="uart1" tx="20" rx="21" />
+
+# components
+  <gpio_component id="blue_led"    gpio="$gpio4" direction="output" />
+  <i2c_component  id="temp_bus"    i2c="$i2c0" address="0x48" />
+  <spi_component  id="display_bus" spi="$spi2" mode="0" cs="gpio5" frequency="40MHz" />
+  <uart_component id="serial_bus"  uart="$uart1" baud_rate="9600" parity="none" stop_bits="1" />
+
+# devices
+  <status_led     id="status"       gpio_component="$blue_led" />
+  <tmp102         id="outdoor_temp" i2c_component="$temp_bus" />
+  <ili9341        id="tft_display"  
+                  spi_component="$display_bus" />
+
