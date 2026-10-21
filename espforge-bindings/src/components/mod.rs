@@ -17,6 +17,22 @@ pub mod i2c_component;
 pub mod spi_component;
 pub mod uart_component;
 
+/// The component tags taken by [`resolve_component`], so the `espforge espf`
+/// catalog can be drift-checked against the wrappers.
+pub const TAGS: &[&str] = &["gpio_component", "i2c_component", "spi_component", "uart_component"];
+
+/// The required-attribute list of the wrapper named by `tag` (each wrapper
+/// keeps it next to its `resolve`).
+pub fn resolve_tag_required_attrs(tag: &str) -> Option<Vec<&'static str>> {
+    match tag {
+        "gpio_component" => Some(gpio_component::REQUIRED_ATTRS.to_vec()),
+        "i2c_component" => Some(i2c_component::REQUIRED_ATTRS.to_vec()),
+        "spi_component" => Some(spi_component::REQUIRED_ATTRS.to_vec()),
+        "uart_component" => Some(uart_component::REQUIRED_ATTRS.to_vec()),
+        _ => None,
+    }
+}
+
 pub use gpio_component::{GpioComponent, GpioDirection};
 pub use i2c_component::{I2cComponent, parse_address as parse_i2c_address};
 pub use spi_component::SpiComponent;

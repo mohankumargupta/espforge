@@ -1,11 +1,14 @@
 //! Option schema (`options.kdl`), option resolution, and the `# espforge`
 //! section reader.
 //!
+//! * [`catalog`] - the element catalog (elements.kdl) behind `espforge espf`:
+//!   types, loader and path resolution
 //! * [`schema`]  - 2.1: schema types and the KDL v2 loader
 //! * [`resolve`] - 2.2-2.4: defaults, derived flags, requires, chip
 //!   compatibility, selection groups, console-vs-chip
 //! * [`section`] - 2.5: `core_from_section`, replacing `parse_meta`
 
+pub mod catalog;
 pub mod chips;
 pub mod resolve;
 pub mod schema;

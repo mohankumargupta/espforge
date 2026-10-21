@@ -1,4 +1,5 @@
 mod commands;
+mod render;
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use commands::build::{BuildArgs, Stage};
@@ -60,6 +61,13 @@ enum Commands {
         #[command(subcommand)]
         command: Option<ExamplesSub>,
     },
+    /// Explore what an ESPF file can contain: sections, elements, examples.
+    /// A trailing `help` or `examples` is that element's view.
+    #[command(
+        alias = "ref",
+        after_help = "Grammar:\n  espforge espf                        everything, as commands\n  espforge espf overview               the ESPF format in one page\n  espforge espf peripherals            the section and its elements\n  espforge espf peripherals i2c help   the man page for i2c\n  espforge espf i2c                    shorthand: a unique element name\n\nExamples:\n  espforge espf\n  espforge espf overview\n  espforge espf peripherals\n  espforge espf peripherals i2c help\n  espforge espf peripherals i2c examples"
+    )]
+    Espf(commands::espf::EspfArgs),
     /// Check that prerequisites (toolchain, binaries, env) are met.
     #[command(after_help = "Example:\n  espforge doctor")]
     Doctor,
@@ -103,6 +111,8 @@ enum ExamplesSub {
 /// Every command name (and alias, and `examples` sub-command) after which a
 /// bare `help` means "show help for that command".
 const COMMAND_NAMES: &[&str] = &[
+    "espf",
+    "ref",
     "new",
     "init",
     "check",
@@ -125,6 +135,17 @@ const COMMAND_NAMES: &[&str] = &[
 /// `espforge -C help` keep `help` as a plain argument. The one name you can
 /// no longer give is a project directory called `help` straight after `new`.
 fn expand_help(mut args: Vec<OsString>) -> Vec<OsString> {
+    // Inside `espf`, a trailing `help` is the man-page view word, rewritten
+    // by `catalog::strip_view` — never into `--help` (plan 7.1). The rule:
+    // the first argument after the program (skipping `-C <dir>` values) being
+    // `ref` or `espf` turns the rewrite off for the whole line.
+    let first_arg_is_espf = args.iter().skip(1).any(|a| {
+        let s = a.to_str();
+        s == Some("espf") || s == Some("ref")
+    });
+    if first_arg_is_espf {
+        return args;
+    }
     for i in 2..args.len() {
         let after_command = args[i - 1]
             .to_str()
@@ -183,6 +204,7 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
         },
+        Some(Commands::Espf(args)) => commands::espf::run(args),
         Some(Commands::Doctor) => {
             commands::doctor::run();
             ExitCode::SUCCESS
@@ -237,6 +259,26 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_help_after_espf_is_kept_for_the_view_parser() {
+        // Plan 7.1 + drift test 14: `help right after espf must survive
+        // so `espforge espf peripherals i2c help` becomes the man page.
+        assert_eq!(
+            expand(&["espforge", "espf", "peripherals", "i2c", "help"]),
+            ["espforge", "espf", "peripherals", "i2c", "help"]
+        );
+        assert_eq!(
+            expand(&["espforge", "ref", "i2c", "examples"]),
+            ["espforge", "ref", "i2c", "examples"]
+        );
+        // `help` is a view word anywhere in an espf path, so even a section
+        // named `help`-adjacent position is untouched.
+        assert_eq!(
+            expand(&["espforge", "-C", "dir", "ref", "help"]),
+            ["espforge", "-C", "dir", "ref", "help"]
+        );
+    }
+
+    #[test]
     fn other_uses_of_the_word_help_are_left_alone() {
         // clap's own form
         assert_eq!(
@@ -259,7 +301,8 @@ mod tests {
     fn every_command_name_is_a_real_command() {
         let cmd = Cli::command();
         for name in [
-            "new", "init", "check", "validate", "build", "gen", "examples", "doctor", "version",
+            "new", "init", "check", "validate", "build", "gen", "examples", "espf", "ref",
+            "doctor", "version",
         ] {
             assert!(COMMAND_NAMES.contains(&name), "{name}");
             assert!(cmd.find_subcommand(name).is_some(), "{name}");

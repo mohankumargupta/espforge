@@ -8,6 +8,10 @@ pub mod ili9341;
 #[path = "tmp102.rs"]
 pub mod tmp102;
 
+/// The device tags this registry routes, emitted alongside `route_driver`
+        /// so the `espforge espf` catalog can be drift-checked against it.
+        pub const TAGS: &[&str] = &["status_led", "ili9341", "tmp102"];
+
 pub fn route_driver(tag_name: &str, device: &espf::context::ResolvedDevice, ctx: &espf::context::RuntimeContext) -> Result<(), String> {
 match tag_name {
         "status_led" => status_led::init(device, ctx),

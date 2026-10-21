@@ -10,6 +10,10 @@
 
 use espf::context::{ActivePeripheral, Handle, RuntimeContext};
 
+/// The attributes `resolve` requires besides `id`. Drift-checked against
+/// the `espforge espf` catalog.
+pub const REQUIRED_ATTRS: &[&str] = &["spi", "mode", "cs"];
+
 /// A fully validated `<spi_component>` node.
 #[derive(Debug, Clone)]
 pub struct SpiComponent<'a> {
