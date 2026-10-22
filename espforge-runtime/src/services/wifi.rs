@@ -11,7 +11,8 @@ use embassy_net::{Runner, Stack, StackResources};
 use embassy_time::{Duration, Timer};
 use esp_hal::peripherals::WIFI;
 use esp_radio::wifi::{
-    AuthenticationMethod, Config, ControllerConfig, Interface, WifiController, sta::StationConfig,
+    AuthenticationMethodConfig, Config, ControllerConfig, Interface, WifiController,
+    sta::StationConfig,
 };
 use static_cell::StaticCell;
 
@@ -53,21 +54,25 @@ impl Wifi {
         wifi: WIFI<'static>,
         config: WifiConfig,
     ) -> Result<Self, WifiError> {
-        let (mut controller, interfaces) = esp_radio::wifi::new(wifi, ControllerConfig::default())?;
+        let mut controller = WifiController::new(wifi, ControllerConfig::default())?;
+        let interface = Interface::station();
 
-        let mut station = StationConfig::default()
-            .with_ssid(config.ssid.into())
-            .with_password(config.password.into());
-        if config.password.is_empty() {
-            station = station.with_auth_method(AuthenticationMethod::None);
+        let authentication = if config.password.is_empty() {
+            AuthenticationMethodConfig::Open
         }
+        else {
+            AuthenticationMethodConfig::Wpa2Personal(config.password.try_into()?)
+        };
+        let station = StationConfig::default()
+            .with_ssid(config.ssid.try_into()?)
+            .with_authentication(authentication);
         controller.set_config(&Config::Station(station))?;
 
         let rng = esp_hal::rng::Rng::new();
         let seed = (u64::from(rng.random()) << 32) | u64::from(rng.random());
 
         let (stack, runner) = embassy_net::new(
-            interfaces.station,
+            interface,
             embassy_net::Config::dhcpv4(Default::default()),
             RESOURCES.init(StackResources::new()),
             seed,
@@ -111,6 +116,6 @@ async fn connection_task(mut controller: WifiController<'static>) {
 
 /// Drives the network stack.
 #[embassy_executor::task]
-async fn net_task(mut runner: Runner<'static, Interface<'static>>) {
+async fn net_task(mut runner: Runner<'static, Interface>) {
     runner.run().await
 }

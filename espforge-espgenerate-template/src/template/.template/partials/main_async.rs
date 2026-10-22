@@ -5,7 +5,6 @@
 
 use embassy_executor::Spawner;
 use esp_backtrace as _;
-use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::timer::timg::TimerGroup;
 use {{ project_name }}::{app, Components, Context, Devices, PeripheralRegistry, CTX};
 use {{ project_name }}::Services;
@@ -26,9 +25,8 @@ async fn main(spawner: Spawner) {
     let components = Components::new(&mut registry);
     let devices = Devices {};
 
-    let sw_int = SoftwareInterruptControl::new(registry.peripherals.SW_INTERRUPT);
     let timg0 = TimerGroup::new(registry.peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+    esp_rtos::start(timg0.timer0, registry.peripherals.FROM_CPU_INTR0);
 
     // Hoisted above the component/device wiring because some drivers take
     // `&ctx.delay` at construct time.
