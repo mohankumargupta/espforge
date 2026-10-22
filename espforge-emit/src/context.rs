@@ -15,6 +15,7 @@
 //! | `runtime_dep`  | TOML inline table for the `espforge-runtime` dependency |
 //! | `leds`         | list of `{ name, pin, active_low }`, one per `<led>` component |
 //! | `<led name>`   | each led again, by its component id (`red_led.pin` in diagram.json) |
+//! | `wifi`         | `{ ssid, password }` when `<wifi>` is in `# services`, else none (falsy) |
 
 use anyhow::{Context as _, Result};
 use espforge_model::{Console, Meta, Runtime};
@@ -43,10 +44,20 @@ pub struct LedSpec {
     pub active_low: bool,
 }
 
-/// The hardware the generated project has to construct.
+/// The `<wifi>` service. Both strings are written into Rust string literals,
+/// so the caller must have rejected `\`, `"` and line breaks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WifiSpec {
+    pub ssid: String,
+    /// Empty means an open network.
+    pub password: String,
+}
+
+/// The hardware and services the generated project has to construct.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Hardware {
     pub leds: Vec<LedSpec>,
+    pub wifi: Option<WifiSpec>,
 }
 
 /// Wokwi board id for a chip (moved out of the old `diagram.json` if-chain).
@@ -62,9 +73,12 @@ pub fn wokwi_board(chip: &str) -> &'static str {
     }
 }
 
-/// The `espforge-runtime` dependency as a TOML inline table.
-pub fn runtime_dep(source: &RuntimeSource, embassy: bool) -> String {
-    let feats = if embassy {
+/// The `espforge-runtime` dependency as a TOML inline table. Wi-Fi implies
+/// the embassy runtime.
+pub fn runtime_dep(source: &RuntimeSource, embassy: bool, wifi: bool) -> String {
+    let feats = if wifi {
+        ", features = [\"embassy\", \"wifi\"]"
+    } else if embassy {
         ", features = [\"embassy\"]"
     } else {
         ""
@@ -130,6 +144,17 @@ pub fn build_context_with(
         "leds".into(),
         Value::from(hardware.leds.iter().map(led_value).collect::<Vec<_>>()),
     );
+    map.insert(
+        "wifi".into(),
+        match &hardware.wifi {
+            Some(w) => context! {
+                ssid => w.ssid.clone(),
+                password => w.password.clone(),
+            },
+            // Always defined (strict mode), but falsy.
+            None => Value::from(()),
+        },
+    );
     map.insert("project_name".into(), Value::from(meta.crate_name()));
     map.insert(
         "project".into(),
@@ -168,7 +193,11 @@ pub fn build_context_with(
     map.insert("log".into(), Value::from(true));
     map.insert(
         "runtime_dep".into(),
-        Value::from(runtime_dep(runtime_source, embassy)),
+        Value::from(runtime_dep(
+            runtime_source,
+            embassy,
+            hardware.wifi.is_some(),
+        )),
     );
     Ok(Value::from(map))
 }
@@ -228,6 +257,8 @@ mod tests {
         assert!(!get(&c, "opt.keep-zig-source").is_true());
         // no hardware: an empty (but defined) list, so templates can loop over it
         assert_eq!(get(&c, "leds").len(), Some(0));
+        // no wifi service: defined but falsy
+        assert!(!get(&c, "wifi").is_true());
     }
 
     #[test]
@@ -241,6 +272,7 @@ mod tests {
                 pin: 18,
                 active_low: false,
             }],
+            ..Default::default()
         };
         let c = build_context_with(&m, &opts, &RuntimeSource::Published, &hw).unwrap();
         assert_eq!(get(&c, "leds").len(), Some(1));
@@ -250,6 +282,28 @@ mod tests {
         assert_eq!(
             env.render_str("{{ red_led.active_low }}", &c).unwrap(),
             "false"
+        );
+    }
+
+    #[test]
+    fn the_wifi_service_reaches_the_context_and_the_runtime_dependency() {
+        let m = meta(Runtime::Embassy, "esp32c3");
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let hw = Hardware {
+            wifi: Some(WifiSpec {
+                ssid: "Wokwi-GUEST".into(),
+                password: String::new(),
+            }),
+            ..Default::default()
+        };
+        let c = build_context_with(&m, &opts, &RuntimeSource::Published, &hw).unwrap();
+        assert!(get(&c, "wifi").is_true());
+        assert_eq!(get(&c, "wifi.ssid").as_str(), Some("Wokwi-GUEST"));
+        assert_eq!(get(&c, "wifi.password").as_str(), Some(""));
+        assert_eq!(
+            get(&c, "runtime_dep").as_str(),
+            Some("{ version = \"0.1.0\", features = [\"embassy\", \"wifi\"] }")
         );
     }
 
@@ -277,7 +331,7 @@ mod tests {
     #[test]
     fn runtime_dep_path_form() {
         assert_eq!(
-            runtime_dep(&RuntimeSource::Path("..\\rt".into()), false),
+            runtime_dep(&RuntimeSource::Path("..\\rt".into()), false, false),
             "{ path = \"../rt\", version = \"0.1.0\" }"
         );
     }

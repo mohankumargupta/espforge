@@ -118,3 +118,6 @@ mod led {
         }
     }
 }
+
+#[cfg(all(feature = "wifi", any(target_arch = "riscv32", target_arch = "xtensa")))]
+pub mod wifi;
