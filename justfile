@@ -2,40 +2,59 @@ export JUST_CHOOSER := "fzf --height=40% --tac --layout=reverse --border"
 
 espforge_bin := justfile_directory() / "target/debug/espforge"
 runtime_path := justfile_directory() / "espforge-runtime"
+demo_dir     := "/tmp/espforgedemo"
 
 _default:
   @just --list
 
-[group('espemu')]
-helloworld:
-  just _espforge helloworld
+# ---- build recipes -------------------------------------------------------
 
 [group('espemu')]
-blink:
-  just _espforge blink
+helloworld: (_espforge "01.Basics/helloworld")
 
-_espforge example="helloworld" dir="/tmp/espforgedemo" :
+[group('espemu')]
+blink: (_espforge "01.Basics/blink")
+
+# ---- test recipes: one line each -----------------------------------------
+# usage: (_emutest "<category>/<example>" "<pytest script>")
+
+[group('espemu-test')]
+helloworld_test: (_emutest "01.Basics/helloworld" "test_esphal.py")
+
+[group('espemu-test')]
+blink_test: (_emutest "01.Basics/blink" "test_blink.py")
+
+# ---- shared recipes (the reusable "functions") ---------------------------
+
+# Generate and compile one example into {{ demo_dir }}/build.
+_espforge example dir=demo_dir:
   #!/usr/bin/env bash
-  set -ex
+  set -euxo pipefail
   rm -rf {{ dir }}
   mkdir {{ dir }}
   cargo build -p espforge
-  {{ espforge_bin }} examples get 01.Basics/{{ example }} --out {{ dir }}
+  {{ espforge_bin }} examples get {{ example }} --out {{ dir }}
   cd {{ dir }}
   {{ espforge_bin }} build example.espf.txt --runtime-path {{ runtime_path }}
   cd build
   cargo build
 
-espforgetest out="/tmp/espforgedemo/build":
+# Build an example, make a merged flash image, shim an ESP-IDF-style build dir
+# for pytest-embedded, then run the given test script in esp-emu.
+_emutest example script chip="esp32c3": (_espforge example)
   #!/usr/bin/env bash
-  set -e
-  build_dir="{{ out }}"
-  (cd "$build_dir" && cargo espflash save-image --merge firmware.factory.bin --chip esp32c3)
+  set -euo pipefail
+  name="$(basename {{ example }})"
+  build_dir="{{ demo_dir }}/build"
+  shim=".esphal/$name/build"
+
+  (cd "$build_dir" && cargo espflash save-image --merge firmware.factory.bin --chip {{ chip }})
+
   echo "Shimming an ESP-IDF-style build dir for pytest-embedded's IdfApp..."
-  shim=".esphal/helloworld/build"
+  rm -rf ".esphal/$name"
   mkdir -p "$shim"
   cp -f "$build_dir/firmware.factory.bin" "$shim/firmware.factory.bin"
-  cat > "$shim/flasher_args.json" <<'EOF'
+  cat > "$shim/flasher_args.json" <<EOF
   {
     "write_flash_args": ["--flash-mode", "dio"],
     "flash_files": {
@@ -45,13 +64,16 @@ espforgetest out="/tmp/espforgedemo/build":
       "flash_mode": "dio"
     },
     "extra_esptool_args": {
-      "chip": "esp32c3"
+      "chip": "{{ chip }}"
     }
   }
   EOF
-  echo "Running test_esphal.py against the esp-hal firmware in esp-emu..."
+
+  echo "Running {{ script }} against $name in esp-emu..."
   uv sync
-  uv run pytest test_esphal.py --embedded-services idf,espemu --app-path .esphal/helloworld -s
+  uv run pytest {{ script }} --embedded-services idf,espemu --app-path ".esphal/$name" -s
+
+# ---- standalone esp-emu helpers ------------------------------------------
 
 [no-cd]
 esp-emu name assertion="Hello World" timeout="10s":
@@ -59,12 +81,12 @@ esp-emu name assertion="Hello World" timeout="10s":
   firmware_location=".esphome/build/{{ name }}/build/firmware.factory.bin"
   echo "$firmware_location"
   set -x
-  esp-emu --timeout 10s --chip esp32c3 --firmware "$firmware_location" --exit-on "{{ assertion}}i"
+  esp-emu --timeout {{ timeout }} --chip esp32c3 --firmware "$firmware_location" --exit-on "{{ assertion }}"
 
 [no-cd]
-esp-emu-uart name assertion="Hello World" timeout="20s"  :
+esp-emu-uart name assertion="Hello World" timeout="20s":
   #!/usr/bin/env bash
   firmware_location=".esphome/build/{{ name }}/build/firmware.factory.bin"
   echo "$firmware_location"
   set -x
-  esp-emu --timeout 10s --chip esp32c3 --firmware "$firmware_location" --exit-on "{{ assertion}}" --uart1-tcp 127.0.0.1:5556
+  esp-emu --timeout {{ timeout }} --chip esp32c3 --firmware "$firmware_location" --exit-on "{{ assertion }}" --uart1-tcp 127.0.0.1:5556

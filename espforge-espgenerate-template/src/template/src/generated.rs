@@ -26,7 +26,7 @@ impl Components {
             // SAFETY: espforge checked that no other component uses GPIO{{ led.pin }}.
             {{ led.name }}: espforge_runtime::Led::new(
                 unsafe { registry.peripherals.GPIO{{ led.pin }}.clone_unchecked() },
-                {{ led.active_low }},
+                {% if led.active_low %}true{% else %}false{% endif %},
             ),
 {% endfor %}
         }
