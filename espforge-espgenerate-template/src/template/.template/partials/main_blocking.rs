@@ -12,12 +12,13 @@ fn main() -> ! {
     esp_println::print!("\x1b[20h");
     esp_bootloader_esp_idf::esp_app_desc!();
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    let _registry = PeripheralRegistry::new(peripherals);
+    #[allow(unused_mut)]
+    let mut registry = PeripheralRegistry::new(peripherals);
 
     let logger = espforge_runtime::Logger::new();
     let delay = espforge_runtime::Delay::new();
 
-    let components = Components {};
+    let components = Components::new(&mut registry);
     let devices = Devices {};
 
     let ctx = Context { logger, delay, components, devices };
