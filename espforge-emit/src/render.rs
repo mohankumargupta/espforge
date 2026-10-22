@@ -314,6 +314,9 @@ fn opt_flag(ctx: &Value, name: &str) -> Result<bool> {
 ///   the `chip/` source directory only when `keep-zig-source` is on. An
 ///   example without `chip/` makes that a no-op.
 ///   These are seed-once, so rebuilding a chip locally is never clobbered.
+///   A seeded chip also appends a `[[chip]]` section (see [`crate::wokwi`])
+///   to the emitted `wokwi.toml`, whichever one was emitted: the template's
+///   or the example's own.
 /// * Everything else (`example.espf.txt`, `app/`, ...) is the CLI's business
 ///   and ignored here.
 pub fn render_project_with_overlay(ctx: &Value, overlay: &[OverlayFile]) -> Result<Rendered> {
@@ -335,6 +338,8 @@ pub fn render_project_with_overlay(ctx: &Value, overlay: &[OverlayFile]) -> Resu
     let wokwi = opt_flag(ctx, "wokwi")?;
     let keep_zig = opt_flag(ctx, "keep-zig-source")?;
 
+    let mut chip_json: Option<&[u8]> = None;
+    let mut have_chip = false;
     for f in overlay {
         match f.path {
             "diagram.json" | "wokwi.toml" => {
@@ -346,13 +351,29 @@ pub fn render_project_with_overlay(ctx: &Value, overlay: &[OverlayFile]) -> Resu
                         .map_err(|e| anyhow!("example `{}`: {e:#}", f.path))?;
                 }
             }
-            "chip.json" | "chip.wasm" if wokwi => seed(f, &mut artifacts, &mut assets),
+            "chip.json" | "chip.wasm" if wokwi => {
+                have_chip = true;
+                if f.path == "chip.json" {
+                    chip_json = Some(f.contents);
+                }
+                seed(f, &mut artifacts, &mut assets);
+            }
             p if p.starts_with("chip/") && wokwi && keep_zig => {
                 seed(f, &mut artifacts, &mut assets)
             }
             _ => {}
         }
     }
+
+    // A seeded custom chip needs a `[[chip]]` section in the emitted
+    // `wokwi.toml` so the `chip-<name>` part in diagram.json resolves.
+    if have_chip {
+        if let Some(a) = artifacts.iter_mut().find(|a| a.path == "wokwi.toml") {
+            let json = chip_json.and_then(|b| std::str::from_utf8(b).ok());
+            a.content.push_str(&crate::wokwi::chip_section(json));
+        }
+    }
+
     Ok(Rendered { artifacts, assets })
 }
 
@@ -918,6 +939,28 @@ ownership = [ { glob = "src/**", own = "owned" } ]
                 .contains("chipInit")
         );
         assert!(r.artifacts.iter().any(|a| a.path == "chip/build.zig"));
+    }
+
+    #[test]
+    fn a_seeded_chip_appends_the_chip_section_to_wokwi_toml() {
+        let r = run_overlay(hello(), &overlay_of("04.Communication/i2c_scanner"));
+        let t = file(&r.artifacts, "wokwi.toml");
+        // the template's own content is untouched
+        assert!(
+            t.content
+                .contains("elf = \"target/riscv32imc-unknown-none-elf/debug/hello_world\""),
+            "{}",
+            t.content
+        );
+        // and the chip is wired in, named from chip.json
+        assert!(t.content.contains("[[chip]]\nname = 'chip'"), "{}", t.content);
+        assert!(t.content.contains("binary = 'chip.wasm'"), "{}", t.content);
+    }
+
+    #[test]
+    fn no_chip_means_no_chip_section_in_wokwi_toml() {
+        let r = run_overlay(hello(), &overlay_of("01.Basics/helloworld"));
+        assert!(!file(&r.artifacts, "wokwi.toml").content.contains("[[chip]]"));
     }
 
     #[test]

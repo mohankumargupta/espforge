@@ -11,6 +11,7 @@
 pub mod context;
 pub mod manifest;
 pub mod render;
+pub mod wokwi;
 
 use anyhow::{Context, Result, bail};
 use espforge_model::{Artifact, Asset, Meta, Ownership};
