@@ -14,6 +14,7 @@
 //! | `log`          | always `true` (logging is `log` only) |
 //! | `runtime_dep`  | TOML inline table for the `espforge-runtime` dependency |
 //! | `leds`         | list of `{ name, pin, active_low }`, one per `<led>` component |
+//! | `i2cs`         | list of `{ name, peripheral, sda, scl, khz }`, one per `<i2c_component>` |
 //! | `<led name>`   | each led again, by its component id (`red_led.pin` in diagram.json) |
 //! | `wifi`         | `{ ssid, password }` when `<wifi>` is in `# services`, else none (falsy) |
 
@@ -44,6 +45,20 @@ pub struct LedSpec {
     pub active_low: bool,
 }
 
+/// `<i2c>` in `# peripherals`, plus the `<i2c_component>` on it, resolved to
+/// pins and a bus frequency. Both become one Rust field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct I2cSpec {
+    /// Rust identifier: the component id with `-` turned into `_`.
+    pub name: String,
+    /// Upper-cased esp-hal peripheral name (`I2C0`, `I2C1`, ...).
+    pub peripheral: String,
+    pub sda: u8,
+    pub scl: u8,
+    /// Bus frequency in kHz.
+    pub khz: u32,
+}
+
 /// The `<wifi>` service. Both strings are written into Rust string literals,
 /// so the caller must have rejected `\`, `"` and line breaks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +72,7 @@ pub struct WifiSpec {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Hardware {
     pub leds: Vec<LedSpec>,
+    pub i2cs: Vec<I2cSpec>,
     pub wifi: Option<WifiSpec>,
 }
 
@@ -135,14 +151,31 @@ pub fn build_context_with(
         }
     };
 
+    let i2c_value = |b: &I2cSpec| {
+        context! {
+            name => b.name.clone(),
+            peripheral => b.peripheral.clone(),
+            sda => b.sda,
+            scl => b.scl,
+            khz => b.khz,
+        }
+    };
+
     let mut map: BTreeMap<String, Value> = BTreeMap::new();
     // Hardware first, so the fixed names below always win a collision.
     for led in &hardware.leds {
         map.insert(led.name.clone(), led_value(led));
     }
+    for i2c in &hardware.i2cs {
+        map.insert(i2c.name.clone(), i2c_value(i2c));
+    }
     map.insert(
         "leds".into(),
         Value::from(hardware.leds.iter().map(led_value).collect::<Vec<_>>()),
+    );
+    map.insert(
+        "i2cs".into(),
+        Value::from(hardware.i2cs.iter().map(i2c_value).collect::<Vec<_>>()),
     );
     map.insert(
         "wifi".into(),

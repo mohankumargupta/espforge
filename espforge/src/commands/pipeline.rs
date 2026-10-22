@@ -4,7 +4,7 @@
 
 use espf::context::{ParsedNode, RuntimeContext};
 use espf::diag::EspfError;
-use espforge_emit::{Hardware, LedSpec, WifiSpec};
+use espforge_emit::{Hardware, I2cSpec, LedSpec, WifiSpec};
 use espforge_model::Meta;
 use espforge_options::{Answers, ResolvedOptions};
 use std::path::{Path, PathBuf};
@@ -186,6 +186,36 @@ fn is_rust_ident(s: &str) -> bool {
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// `i2c0` -> `I2C0`, `i2c1` -> `I2C1`, `i2c2` -> `I2C2`; anything else is the
+/// user's error (the esp-hal peripheral structs are named exactly this).
+fn i2c_peripheral_name(id: &str) -> Result<String, String> {
+    if id == "i2c0" || id == "i2c1" || id == "i2c2" {
+        return Ok(id.to_ascii_uppercase());
+    }
+    Err(format!(
+        "<i2c id=\"{id}\">: the id must be i2c0, i2c1 or i2c2"
+    ))
+}
+
+/// A `frequency=` value like `100kHz` or `400kHz` -> kHz; anything else is
+/// told off.
+fn parse_khz(raw: &str, id: &str) -> Result<u32, String> {
+    let t = raw.trim().to_ascii_lowercase();
+    let split = t.find(|c: char| !c.is_ascii_digit()).unwrap_or(t.len());
+    let (num, unit) = t.split_at(split);
+    let n: u32 = num.parse().map_err(|_| {
+        format!(
+            "<i2c id=\"{id}\"> frequency=\"{raw}\" is not a frequency: use e.g. `100kHz`"
+        )
+    })?;
+    match unit.trim() {
+        "khz" => Ok(n),
+        other => Err(format!(
+            "<i2c id=\"{id}\"> frequency=\"{raw}\" unit `{other}` is not supported yet: use `kHz`"
+        )),
+    }
+}
+
 /// An `EspfError` as a one-line message (the hardware step reports plain
 /// strings, like the rest of `build`'s "not supported yet" messages).
 fn plain(e: EspfError) -> String {
@@ -261,42 +291,111 @@ fn wifi_spec(n: &ParsedNode) -> Result<WifiSpec, String> {
 }
 
 /// The hardware and services `build` can generate code for today: `<gpio>`
-/// peripherals used by `<led>` components, and one `<wifi>` service.
-/// Anything else is a clear "not supported yet".
+/// peripherals used by `<led>` components, `<i2c>` peripherals used by
+/// `<i2c_component>` components, and one `<wifi>` service. Anything else is a
+/// clear "not supported yet".
 pub fn hardware(c: &Checked) -> Result<Hardware, String> {
+    struct I2cBusDraft {
+        id: String,
+        peripheral: String,
+        sda: u8,
+        scl: u8,
+        khz: u32,
+        /// The component id riding on this bus, if any.
+        used: Option<String>,
+    }
+
     let sections = &c.fe.parsed.sections;
     if sections.get("devices").is_some_and(|v| !v.is_empty()) {
         return Err(
-            "`# devices` is not supported by `build` yet (only <gpio> peripherals with <led> components, and the <wifi> service)"
+            "`# devices` is not supported by `build` yet (only <gpio> peripherals with <led> components, <i2c> peripherals with <i2c_component> components, and the <wifi> service)"
                 .to_string(),
         );
     }
 
     // id -> (pin, direction)
     let mut gpios: Vec<(&str, u8, Option<&str>)> = Vec::new();
+    // `<i2c>` peripherals, in spec order; filled in by the next loop.
+    let mut i2c_buses: Vec<I2cBusDraft> = Vec::new();
     for n in sections
         .get("peripherals")
         .map(Vec::as_slice)
         .unwrap_or(&[])
     {
-        if n.tag_name != "gpio" {
+        if n.tag_name == "gpio" {
+            let pin = n
+                .get_attr("pin")
+                .and_then(|p| p.parse::<u8>().ok())
+                .ok_or_else(|| format!("<gpio id=\"{}\"> needs a numeric pin=\"...\"", n.id))?;
+            gpios.push((n.id, pin, n.get_attr("direction")));
+        } else if n.tag_name == "i2c" {
+            let pin_attr = |what: &str| {
+                n.get_attr(what)
+                    .and_then(|p| p.parse::<u8>().ok())
+                    .ok_or_else(|| format!("<i2c id=\"{}\"> needs a numeric {what}=\"...\"", n.id))
+            };
+            let khz = match n.get_attr("frequency") {
+                None => 100, // esp-hal's default
+                Some(f) => parse_khz(f, n.id)?,
+            };
+            i2c_buses.push(I2cBusDraft {
+                id: n.id.to_string(),
+                peripheral: i2c_peripheral_name(n.id)?,
+                sda: pin_attr("sda")?,
+                scl: pin_attr("scl")?,
+                khz,
+                used: None,
+            });
+        } else {
             return Err(format!(
-                "<{}> in `# peripherals` is not supported by `build` yet (only <gpio>)",
+                "<{}> in `# peripherals` is not supported by `build` yet (only <gpio> and <i2c>)",
                 n.tag_name
             ));
         }
-        let pin = n
-            .get_attr("pin")
-            .and_then(|p| p.parse::<u8>().ok())
-            .ok_or_else(|| format!("<gpio id=\"{}\"> needs a numeric pin=\"...\"", n.id))?;
-        gpios.push((n.id, pin, n.get_attr("direction")));
     }
 
     let mut leds: Vec<LedSpec> = Vec::new();
     for n in sections.get("components").map(Vec::as_slice).unwrap_or(&[]) {
+        if n.tag_name == "i2c_component" {
+            let bus_ref = n
+                .get_attr("i2c")
+                .ok_or_else(|| format!("<i2c_component id=\"{}\"> needs i2c=\"$<i2c id>\"", n.id))?;
+            // Note: unlike `<gpio>`, this must be an exact (non-prefixed) id;
+            // `i2c="$i2c0"` and `i2c="i2c0"` are both accepted.
+            let target = bus_ref.trim_start_matches('$');
+            if !i2c_buses.iter().any(|b| b.id == target) {
+                return Err(format!(
+                    "<i2c_component id=\"{}\"> refers to `{target}`, which is not an <i2c> in `# peripherals`",
+                    n.id
+                ));
+            }
+            if let Some(other) = &i2c_buses
+                .iter()
+                .find(|b| b.id == target)
+                .and_then(|b| b.used.as_deref())
+            {
+                return Err(format!(
+                    "<i2c_component id=\"{other}\"> and <i2c_component id=\"{}\"> both use <i2c id=\"{target}\">",
+                    n.id
+                ));
+            }
+            let name = n.id.replace('-', "_");
+            if !is_rust_ident(&name) {
+                return Err(format!(
+                    "<i2c_component id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
+                    n.id
+                ));
+            }
+            i2c_buses
+                .iter_mut()
+                .find(|b| b.id == target)
+                .expect("checked above")
+                .used = Some(name);
+            continue;
+        }
         if n.tag_name != "led" {
             return Err(format!(
-                "<{}> in `# components` is not supported by `build` yet (only <led>)",
+                "<{}> in `# components` is not supported by `build` yet (only <led> and <i2c_component>)",
                 n.tag_name
             ));
         }
@@ -364,7 +463,35 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
         wifi = Some(wifi_spec(n)?);
     }
 
-    Ok(Hardware { leds, wifi })
+    // A `<gpio>` that shares a pin with an I2C SDA/SCL would be a wiring bug;
+    // refuse it the same way two `<led>`s on one pin are refused.
+    for bus in &i2c_buses {
+        for (id, pin, _) in &gpios {
+            if *pin == bus.sda || *pin == bus.scl {
+                return Err(format!(
+                    "<gpio id=\"{id}\"> and <i2c id=\"{}\"> both use GPIO{pin}",
+                    bus.id
+                ));
+            }
+        }
+    }
+
+    let i2cs: Vec<I2cSpec> = i2c_buses
+        .into_iter()
+        // A bare `<i2c>` with no component generates nothing: the app can
+        // only reach the bus through a component anyway.
+        .filter_map(|b| {
+            b.used.map(|name| I2cSpec {
+                name,
+                peripheral: b.peripheral,
+                sda: b.sda,
+                scl: b.scl,
+                khz: b.khz,
+            })
+        })
+        .collect();
+
+    Ok(Hardware { leds, i2cs, wifi })
 }
 
 /// Whether `build` can turn this spec into firmware. `build` fails on `Err`;
@@ -454,14 +581,102 @@ mod tests {
         }
     }
 
+    const I2C_400K: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <i2c id=\"i2c0\" sda=\"4\" scl=\"5\" frequency=\"400kHz\" />\n# components\n  <i2c_component id=\"c\" i2c=\"$i2c0\" address=\"0x48\" />\n# devices\n# services\n";
+
     #[test]
     fn unsupported_hardware_is_valid_but_not_buildable() {
+        let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <spi id=\"spi2\" />\n# components\n# devices\n# services\n";
+        let c = validate(src, &AnswerArgs::default()).ok().expect("graph is fine");
+        assert_eq!(unsupported_section(&c), Some("peripherals"));
+        let err = buildable(&c).unwrap_err();
+        assert!(err.contains("<spi>"), "{err}");
+    }
+
+    #[test]
+    fn an_i2c_bus_with_a_component_becomes_hardware() {
         let c = validate(WITH_BUS, &AnswerArgs::default())
             .ok()
             .expect("graph is fine");
-        assert_eq!(unsupported_section(&c), Some("peripherals"));
-        let err = buildable(&c).unwrap_err();
-        assert!(err.contains("<i2c>"), "{err}");
+        assert!(buildable(&c).is_ok());
+        assert_eq!(
+            hardware(&c).unwrap().i2cs,
+            [I2cSpec {
+                name: "c".into(),
+                peripheral: "I2C0".into(),
+                sda: 4,
+                scl: 5,
+                khz: 100,
+            }]
+        );
+    }
+
+    #[test]
+    fn i2c_frequency_is_parsed() {
+        let c = validate(I2C_400K, &AnswerArgs::default()).ok().expect("valid");
+        let spec = &hardware(&c).unwrap().i2cs[0];
+        assert_eq!(spec.khz, 400);
+
+        let mhz = I2C_400K.replace("400kHz", "400MHZ");
+        let c = validate(&mhz, &AnswerArgs::default()).ok().expect("valid");
+        let err = hardware(&c).unwrap_err();
+        assert!(err.contains("not supported yet"), "{err}");
+    }
+
+    #[test]
+    fn an_i2c_component_needs_a_declared_i2c() {
+        // The ref passes graph resolution (`$pin7` is a peripheral) but the
+        // component then points at a gpio, not an `<i2c>`.
+        let src = WITH_BUS
+            .replace("<i2c id=", "<gpio id=")
+            .replace(" sda=\"4\" scl=\"5\"", " pin=\"4\"");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        let err = hardware(&c).unwrap_err();
+        assert!(err.contains("not an <i2c>"), "{err}");
+    }
+
+    #[test]
+    fn two_i2c_components_on_one_bus_are_refused() {
+        let src = WITH_BUS.replace(
+            "# devices",
+            "  <i2c_component id=\"c2\" i2c=\"$i2c0\" address=\"0x49\" />\n# devices",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        let err = hardware(&c).unwrap_err();
+        assert!(
+            err.contains("<i2c_component id=\"c\">") && err.contains("both use"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_gpio_sharing_a_pin_with_i2c_is_refused() {
+        let src = WITH_BUS.replace(
+            "# components",
+            "  <gpio id=\"gpio5\" pin=\"5\" direction=\"output\" />\n# components",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        let err = hardware(&c).unwrap_err();
+        assert!(err.contains("both use GPIO5"), "{err}");
+    }
+
+    #[test]
+    fn a_bare_i2c_without_a_component_generates_nothing() {
+        let src = WITH_BUS.replace(
+            "# components\n  <i2c_component id=\"c\" i2c=\"$i2c0\" address=\"0x48\" />\n",
+            "# components\n",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap().i2cs.is_empty());
+    }
+
+    #[test]
+    fn i2c_ids_must_be_i2c0_to_i2c2() {
+        let src = WITH_BUS
+            .replace("<i2c id=\"i2c0\"", "<i2c id=\"bus0\"")
+            .replace("i2c=\"$i2c0\"", "i2c=\"$bus0\"");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        let err = hardware(&c).unwrap_err();
+        assert!(err.contains("i2c0, i2c1 or i2c2"), "{err}");
     }
 
     #[test]

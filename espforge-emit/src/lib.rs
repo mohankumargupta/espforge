@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-pub use context::{Hardware, LedSpec, RuntimeSource, WifiSpec};
+pub use context::{Hardware, I2cSpec, LedSpec, RuntimeSource, WifiSpec};
 pub use render::OverlayFile;
 
 /// Everything a build writes: text files and binary assets.
@@ -247,6 +247,48 @@ mod tests {
         assert!(!generated.contains("\n\n\n"), "{generated}");
         // no wifi service: Services is an empty struct with no impl
         assert!(!generated.contains("Wifi"), "{generated}");
+    }
+
+    #[test]
+    fn an_i2c_component_reaches_generated_rs_for_both_runtimes() {
+        let m = core();
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let hw = Hardware {
+            i2cs: vec![I2cSpec {
+                name: "i2c0".into(),
+                peripheral: "I2C0".into(),
+                sda: 6,
+                scl: 7,
+                khz: 400,
+            }],
+            ..Default::default()
+        };
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+        let generated = &find(&g, "src/generated.rs").content;
+        assert!(
+            generated.contains("pub i2c0: espforge_runtime::I2cBus<esp_hal::Blocking>,"),
+            "{generated}"
+        );
+        assert!(generated.contains("peripherals.I2C0.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("GPIO6.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("GPIO7.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("Rate::from_khz(400)"), "{generated}");
+        assert!(!generated.contains("\n\n\n"), "{generated}");
+
+        let m = Meta {
+            runtime: Runtime::Embassy,
+            ..core()
+        };
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+        let generated = &find(&g, "src/generated.rs").content;
+        assert!(
+            generated.contains("pub i2c0: espforge_runtime::I2cBus<esp_hal::Async>,"),
+            "{generated}"
+        );
+        assert!(!generated.contains("I2cBus<esp_hal::Blocking>"), "{generated}");
     }
 
     #[test]

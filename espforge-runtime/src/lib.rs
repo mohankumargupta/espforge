@@ -119,6 +119,18 @@ mod led {
     }
 }
 
+/// Hardware-peripheral components (`# components` in the .espf). The inline
+/// module makes `components/i2c.rs` resolve as `src/components/i2c.rs`.
+/// Like `led` below, esp-hal only builds for esp targets, so it is
+/// target-gated.
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
+pub mod components {
+    pub mod i2c;
+}
+
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
+pub use components::i2c::{I2cBus, I2cConfig, I2cError};
+
 /// Software services (`# services` in the .espf). The inline module makes
 /// `services/wifi.rs` resolve as `src/services/wifi.rs`.
 #[cfg(all(feature = "wifi", any(target_arch = "riscv32", target_arch = "xtensa")))]

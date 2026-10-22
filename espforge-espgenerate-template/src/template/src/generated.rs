@@ -17,6 +17,9 @@ pub struct Components {
 {% for led in leds %}
     pub {{ led.name }}: espforge_runtime::Led,
 {% endfor %}
+{% for i2c in i2cs %}
+    pub {{ i2c.name }}: espforge_runtime::I2cBus<{% if embassy %}esp_hal::Async{% else %}esp_hal::Blocking{% endif %}>,
+{% endfor %}
 }
 
 impl Components {
@@ -28,6 +31,19 @@ impl Components {
                 unsafe { registry.peripherals.GPIO{{ led.pin }}.clone_unchecked() },
                 {% if led.active_low %}true{% else %}false{% endif %},
             ),
+{% endfor %}
+{% for i2c in i2cs %}
+            // SAFETY: espforge checked that no other component uses this
+            // peripheral or GPIO{{ i2c.sda }}/GPIO{{ i2c.scl }}.
+            {{ i2c.name }}: espforge_runtime::I2cBus::build(
+                unsafe { registry.peripherals.{{ i2c.peripheral }}.clone_unchecked() },
+                unsafe { registry.peripherals.GPIO{{ i2c.sda }}.clone_unchecked() },
+                unsafe { registry.peripherals.GPIO{{ i2c.scl }}.clone_unchecked() },
+                espforge_runtime::I2cConfig {
+                    frequency: esp_hal::time::Rate::from_khz({{ i2c.khz }}),
+                },
+            )
+            .expect("I2C bus configuration failed"),
 {% endfor %}
         }
     }

@@ -810,7 +810,8 @@ ownership = [ { glob = "src/**", own = "owned" } ]
             flags: vec![("probe-rs", "true")],
             ..case()
         });
-        let cfg = &file(&render_project(&probe).unwrap(), ".cargo/config.toml").content;
+        let binding = render_project(&probe).unwrap();
+        let cfg = &file(&binding, ".cargo/config.toml").content;
         assert!(cfg.contains("probe-rs run --chip=esp32c3"));
     }
 

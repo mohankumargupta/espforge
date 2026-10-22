@@ -15,6 +15,10 @@ helloworld: (_espforge "01.Basics/helloworld")
 [group('espemu')]
 blink: (_espforge "01.Basics/blink")
 
+[group('espemu')]
+i2cscanner: (_espforge "04.Communication/i2c_scanner")
+
+
 # ---- test recipes: one line each -----------------------------------------
 # usage: (_emutest "<category>/<example>" "<pytest script>")
 
