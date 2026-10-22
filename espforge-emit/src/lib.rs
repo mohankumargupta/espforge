@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-pub use context::{Hardware, I2cSpec, LedSpec, RuntimeSource, WifiSpec};
+pub use context::{Hardware, I2cSpec, LedSpec, RuntimeSource, SpiBusSpec, SpiSpec, WifiSpec};
 pub use render::OverlayFile;
 
 /// Everything a build writes: text files and binary assets.
@@ -290,6 +290,104 @@ mod tests {
             "{generated}"
         );
         assert!(!generated.contains("I2cBus<esp_hal::Blocking>"), "{generated}");
+    }
+
+    #[test]
+    fn a_spi_component_reaches_generated_rs_and_app_reexports_for_both_runtimes() {
+        let m = core();
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let hw = Hardware {
+            spi_buses: vec![SpiBusSpec {
+                id: "spi2".into(),
+                peripheral: "SPI2".into(),
+                sclk: 8,
+                mosi: 7,
+                miso: 6,
+                khz: 100,
+                mode: 0,
+            }],
+            spis: vec![SpiSpec {
+                name: "spi_tester".into(),
+                bus: "spi2".into(),
+                cs: 9,
+            }],
+            ..Default::default()
+        };
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+        let generated = &find(&g, "src/generated.rs").content;
+        assert!(
+            generated.contains("pub spi_tester: espforge_runtime::SpiDevice<esp_hal::Blocking>,"),
+            "{generated}"
+        );
+        assert!(generated.contains("peripherals.SPI2.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("GPIO8.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("GPIO7.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("GPIO6.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("GPIO9.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("Rate::from_khz(100)"), "{generated}");
+        assert!(generated.contains("Mode::_0"), "{generated}");
+        assert!(generated.contains("let spi2_bus = espforge_runtime::SpiBus::build("), "{generated}");
+        assert!(generated.contains("SpiDevice::new(\n                spi2_bus,"), "{generated}");
+        assert!(!generated.contains("\n\n\n"), "{generated}");
+
+        // app.rs's `use crate::embedded_hal::spi::Operation` resolves.
+        let lib = &find(&g, "src/lib.rs").content;
+        assert!(lib.contains("pub use espforge_runtime::embedded_hal;"), "{lib}");
+
+        let m = Meta {
+            runtime: Runtime::Embassy,
+            ..core()
+        };
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+        let generated = &find(&g, "src/generated.rs").content;
+        assert!(
+            generated.contains("pub spi_tester: espforge_runtime::SpiDevice<esp_hal::Async>,"),
+            "{generated}"
+        );
+        assert!(!generated.contains("SpiDevice<esp_hal::Blocking>"), "{generated}");
+    }
+
+    #[test]
+    fn two_spi_devices_on_one_bus_emit_the_bus_once() {
+        let m = core();
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let hw = Hardware {
+            spi_buses: vec![SpiBusSpec {
+                id: "spi2".into(),
+                peripheral: "SPI2".into(),
+                sclk: 8,
+                mosi: 7,
+                miso: 6,
+                khz: 1000,
+                mode: 0,
+            }],
+            spis: vec![
+                SpiSpec {
+                    name: "a".into(),
+                    bus: "spi2".into(),
+                    cs: 9,
+                },
+                SpiSpec {
+                    name: "b".into(),
+                    bus: "spi2".into(),
+                    cs: 10,
+                },
+            ],
+            ..Default::default()
+        };
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+        let generated = &find(&g, "src/generated.rs").content;
+        assert_eq!(
+            generated.matches("SpiBus::build(").count(),
+            1,
+            "{generated}"
+        );
+        assert!(generated.contains("GPIO10.clone_unchecked()"), "{generated}");
+        assert!(!generated.contains("\n\n\n"), "{generated}");
     }
 
     #[test]

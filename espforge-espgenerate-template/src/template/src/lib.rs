@@ -5,6 +5,7 @@ pub mod generated;
 
 // Re-exports for `app.rs` (it only uses `crate::` paths).
 pub use espforge_runtime::Delay;
+pub use espforge_runtime::embedded_hal;
 
 /// Access a component from the `Context`. Usage: `component!(ctx, my_led)`
 #[macro_export]

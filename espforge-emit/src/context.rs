@@ -15,6 +15,8 @@
 //! | `runtime_dep`  | TOML inline table for the `espforge-runtime` dependency |
 //! | `leds`         | list of `{ name, pin, active_low }`, one per `<led>` component |
 //! | `i2cs`         | list of `{ name, peripheral, sda, scl, khz }`, one per `<i2c_component>` |
+//! | `spi_buses`    | list of `{ id, peripheral, sclk, mosi, miso, khz, mode }`, one used `<spi>` |
+//! | `spis`         | list of `{ name, bus, cs }`, one per `<spi_component>`, by component id |
 //! | `<led name>`   | each led again, by its component id (`red_led.pin` in diagram.json) |
 //! | `wifi`         | `{ ssid, password }` when `<wifi>` is in `# services`, else none (falsy) |
 
@@ -59,6 +61,36 @@ pub struct I2cSpec {
     pub khz: u32,
 }
 
+/// A `<spi>` peripheral that at least one `<spi_component>` rides on.
+/// Diagnostic/validation use the raw id; the template uses the fields to
+/// emit the bus setup once per peripheral.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpiBusSpec {
+    /// The `<spi>` id (`spi2`); generated code names the bus handle `{id}_bus`.
+    pub id: String,
+    /// Upper-cased esp-hal peripheral name (`SPI2`).
+    pub peripheral: String,
+    pub sclk: u8,
+    pub mosi: u8,
+    pub miso: u8,
+    /// Bus frequency in kHz. Bus clock: the one `SpiBus` carries.
+    pub khz: u32,
+    /// SPI mode 0..=3 (`Mode::_0`..`Mode::_3` in the template).
+    pub mode: u8,
+}
+
+/// One `<spi_component>`: a device with its own chip-select on a shared
+/// `<spi>` bus (the bus is `SpiSpec::bus`, a `SpiBusSpec::id`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpiSpec {
+    /// Rust identifier: the component id with `-` turned into `_`.
+    pub name: String,
+    /// The `<spi>` bus id this device rides on.
+    pub bus: String,
+    /// Device-local chip-select pin (always owned by one component).
+    pub cs: u8,
+}
+
 /// The `<wifi>` service. Both strings are written into Rust string literals,
 /// so the caller must have rejected `\`, `"` and line breaks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +105,9 @@ pub struct WifiSpec {
 pub struct Hardware {
     pub leds: Vec<LedSpec>,
     pub i2cs: Vec<I2cSpec>,
+    /// Used bus peripherals first (template order), then devices.
+    pub spi_buses: Vec<SpiBusSpec>,
+    pub spis: Vec<SpiSpec>,
     pub wifi: Option<WifiSpec>,
 }
 
@@ -161,6 +196,26 @@ pub fn build_context_with(
         }
     };
 
+    let spi_bus_value = |b: &SpiBusSpec| {
+        context! {
+            id => b.id.clone(),
+            peripheral => b.peripheral.clone(),
+            sclk => b.sclk,
+            mosi => b.mosi,
+            miso => b.miso,
+            khz => b.khz,
+            mode => b.mode,
+        }
+    };
+
+    let spi_value = |s: &SpiSpec| {
+        context! {
+            name => s.name.clone(),
+            bus => s.bus.clone(),
+            cs => s.cs,
+        }
+    };
+
     let mut map: BTreeMap<String, Value> = BTreeMap::new();
     // Hardware first, so the fixed names below always win a collision.
     for led in &hardware.leds {
@@ -169,6 +224,9 @@ pub fn build_context_with(
     for i2c in &hardware.i2cs {
         map.insert(i2c.name.clone(), i2c_value(i2c));
     }
+    for spi in &hardware.spis {
+        map.insert(spi.name.clone(), spi_value(spi));
+    }
     map.insert(
         "leds".into(),
         Value::from(hardware.leds.iter().map(led_value).collect::<Vec<_>>()),
@@ -176,6 +234,20 @@ pub fn build_context_with(
     map.insert(
         "i2cs".into(),
         Value::from(hardware.i2cs.iter().map(i2c_value).collect::<Vec<_>>()),
+    );
+    map.insert(
+        "spi_buses".into(),
+        Value::from(
+            hardware
+                .spi_buses
+                .iter()
+                .map(spi_bus_value)
+                .collect::<Vec<_>>(),
+        ),
+    );
+    map.insert(
+        "spis".into(),
+        Value::from(hardware.spis.iter().map(spi_value).collect::<Vec<_>>()),
     );
     map.insert(
         "wifi".into(),
@@ -337,6 +409,43 @@ mod tests {
         assert_eq!(
             get(&c, "runtime_dep").as_str(),
             Some("{ version = \"0.1.0\", features = [\"embassy\", \"wifi\"] }")
+        );
+    }
+
+    #[test]
+    fn spi_devices_are_reachable_by_list_and_by_name() {
+        let m = meta(Runtime::Blocking, "esp32c3");
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let hw = Hardware {
+            spi_buses: vec![SpiBusSpec {
+                id: "spi2".into(),
+                peripheral: "SPI2".into(),
+                sclk: 8,
+                mosi: 7,
+                miso: 6,
+                khz: 100,
+                mode: 0,
+            }],
+            spis: vec![SpiSpec {
+                name: "spi_tester".into(),
+                bus: "spi2".into(),
+                cs: 9,
+            }],
+            ..Default::default()
+        };
+        let c = build_context_with(&m, &opts, &RuntimeSource::Published, &hw).unwrap();
+        assert_eq!(get(&c, "spis").len(), Some(1));
+        assert_eq!(get(&c, "spi_buses").len(), Some(1));
+        assert_eq!(get(&c, "spi_tester.bus").as_str(), Some("spi2"));
+        let env = minijinja::Environment::new();
+        assert_eq!(
+            env.render_str("{{ spi_tester.cs }}", &c).unwrap(),
+            "9"
+        );
+        assert_eq!(
+            env.render_str("{{ spi_buses[0].peripheral }}", &c).unwrap(),
+            "SPI2"
         );
     }
 

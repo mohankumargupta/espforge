@@ -14,3 +14,7 @@ SPI EXAMPLE
   <spi_component id="spi_tester" spi="$spi2" cs="9" />
 
 # devices
+
+# services 
+
+

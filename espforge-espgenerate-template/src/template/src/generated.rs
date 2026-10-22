@@ -20,10 +20,28 @@ pub struct Components {
 {% for i2c in i2cs %}
     pub {{ i2c.name }}: espforge_runtime::I2cBus<{% if embassy %}esp_hal::Async{% else %}esp_hal::Blocking{% endif %}>,
 {% endfor %}
+{% for spi in spis %}
+    pub {{ spi.name }}: espforge_runtime::SpiDevice<{% if embassy %}esp_hal::Async{% else %}esp_hal::Blocking{% endif %}>,
+{% endfor %}
 }
 
 impl Components {
     pub fn new(registry: &mut PeripheralRegistry) -> Self {
+{% for bus in spi_buses %}
+        // SAFETY: espforge checked that no other component uses this
+        // peripheral or GPIO{{ bus.sclk }}/GPIO{{ bus.mosi }}/GPIO{{ bus.miso }}.
+        let {{ bus.id }}_bus = espforge_runtime::SpiBus::build(
+            unsafe { registry.peripherals.{{ bus.peripheral }}.clone_unchecked() },
+            unsafe { registry.peripherals.GPIO{{ bus.sclk }}.clone_unchecked() },
+            unsafe { registry.peripherals.GPIO{{ bus.mosi }}.clone_unchecked() },
+            unsafe { registry.peripherals.GPIO{{ bus.miso }}.clone_unchecked() },
+            espforge_runtime::SpiConfig {
+                frequency: esp_hal::time::Rate::from_khz({{ bus.khz }}),
+                mode: esp_hal::spi::Mode::_{{ bus.mode }},
+            },
+        )
+        .expect("SPI bus configuration failed");
+{% endfor %}
         Self {
 {% for led in leds %}
             // SAFETY: espforge checked that no other component uses GPIO{{ led.pin }}.
@@ -44,6 +62,19 @@ impl Components {
                 },
             )
             .expect("I2C bus configuration failed"),
+{% endfor %}
+{% for spi in spis %}
+            // SAFETY: espforge checked that no other component uses GPIO{{ spi.cs }}.
+            {{ spi.name }}: espforge_runtime::SpiDevice::new(
+                {{ spi.bus }}_bus,
+                // Chip-select idles high (deasserted).
+                esp_hal::gpio::Output::new(
+                    unsafe { registry.peripherals.GPIO{{ spi.cs }}.clone_unchecked() },
+                    esp_hal::gpio::Level::High,
+                    esp_hal::gpio::OutputConfig::default(),
+                ),
+                espforge_runtime::Delay::new(),
+            ),
 {% endfor %}
         }
     }

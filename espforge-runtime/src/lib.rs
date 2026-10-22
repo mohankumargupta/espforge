@@ -61,6 +61,15 @@ impl Delay {
     pub async fn delay_ms(&self, ms: u32) {
         embassy_time::Timer::after(embassy_time::Duration::from_millis(ms as u64)).await;
     }
+
+    /// Busy-waits for `ns` nanoseconds (blocking, targets only). Used by the
+    /// `spi` component for the `DelayNs` op inside a transaction; a blocking
+    /// wait is fine there (the `DelayNs` ops inside a transaction are
+    /// microsecond-scale, so a busy wait is acceptable even under embassy).
+    #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
+    pub fn delay_ns(&self, ns: u32) {
+        self.inner.delay_nanos(ns);
+    }
 }
 
 impl Default for Delay {
@@ -68,6 +77,11 @@ impl Default for Delay {
         Self::new()
     }
 }
+
+/// The embedded-hal traits, re-exported so generated projects can write
+/// transaction operation lists (`embedded_hal::spi::Operation`) through
+/// `crate::` without adding the crate as a dependency (ADR-008).
+pub use embedded_hal;
 
 #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 pub use led::Led;
@@ -126,10 +140,14 @@ mod led {
 #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 pub mod components {
     pub mod i2c;
+    pub mod spi;
 }
 
 #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 pub use components::i2c::{I2cBus, I2cConfig, I2cError};
+
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
+pub use components::spi::{SpiBus, SpiConfig, SpiDevice, SpiError};
 
 /// Software services (`# services` in the .espf). The inline module makes
 /// `services/wifi.rs` resolve as `src/services/wifi.rs`.
