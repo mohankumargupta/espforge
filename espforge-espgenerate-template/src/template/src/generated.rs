@@ -35,3 +35,31 @@ impl Components {
 
 /// Constructed devices (none yet).
 pub struct Devices {}
+
+/// Constructed services.
+pub struct Services {
+{% if wifi %}
+    pub wifi: espforge_runtime::Wifi,
+{% endif %}
+}
+{% if wifi %}
+
+impl Services {
+    /// Starts the Wi-Fi station: it returns right away and connects in the
+    /// background. Call `wifi.wait_connected().await` to wait for an address.
+    pub fn new(
+        wifi: esp_hal::peripherals::WIFI<'static>,
+        spawner: &embassy_executor::Spawner,
+    ) -> Result<Self, espforge_runtime::WifiError> {
+        let wifi = espforge_runtime::Wifi::start(
+            spawner,
+            wifi,
+            espforge_runtime::WifiConfig {
+                ssid: "{{ wifi.ssid }}",
+                password: "{{ wifi.password }}",
+            },
+        )?;
+        Ok(Self { wifi })
+    }
+}
+{% endif %}

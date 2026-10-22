@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-pub use context::{Hardware, LedSpec, RuntimeSource};
+pub use context::{Hardware, LedSpec, RuntimeSource, WifiSpec};
 pub use render::OverlayFile;
 
 /// Everything a build writes: text files and binary assets.
@@ -235,6 +235,7 @@ mod tests {
                 pin: 18,
                 active_low: false,
             }],
+            ..Default::default()
         };
         let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
         let generated = &find(&g, "src/generated.rs").content;
@@ -244,6 +245,53 @@ mod tests {
         );
         assert!(generated.contains("GPIO18"), "{generated}");
         assert!(!generated.contains("\n\n\n"), "{generated}");
+        // no wifi service: Services is an empty struct with no impl
+        assert!(!generated.contains("Wifi"), "{generated}");
+    }
+
+    #[test]
+    fn the_wifi_service_reaches_generated_rs_main_and_cargo_toml() {
+        let m = Meta {
+            runtime: Runtime::Embassy,
+            ..core()
+        };
+        let derived = DerivedInputs {
+            services: vec![("wifi".to_string(), 0..1)],
+            console_span: None,
+        };
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &derived).unwrap();
+        let hw = Hardware {
+            wifi: Some(WifiSpec {
+                ssid: "Wokwi-GUEST".into(),
+                password: String::new(),
+            }),
+            ..Default::default()
+        };
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+
+        let generated = &find(&g, "src/generated.rs").content;
+        assert!(
+            generated.contains("pub wifi: espforge_runtime::Wifi,"),
+            "{generated}"
+        );
+        assert!(generated.contains("ssid: \"Wokwi-GUEST\","), "{generated}");
+        assert!(generated.contains("password: \"\","), "{generated}");
+        assert!(!generated.contains("\n\n\n"), "{generated}");
+
+        let main = &find(&g, "src/bin/main.rs").content;
+        assert!(
+            main.contains("Services::new(registry.peripherals.WIFI, &spawner)"),
+            "{main}"
+        );
+        assert!(main.contains("esp_alloc::heap_allocator!"), "{main}");
+        assert!(!main.contains("\n\n\n"), "{main}");
+
+        let cargo = &find(&g, "Cargo.toml").content;
+        assert!(cargo.contains("esp-radio"), "{cargo}");
+        assert!(cargo.contains("\"wifi\""), "{cargo}");
+
+        let lib = &find(&g, "src/lib.rs").content;
+        assert!(lib.contains("pub services: Services,"), "{lib}");
     }
 
     #[test]

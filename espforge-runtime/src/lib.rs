@@ -119,5 +119,12 @@ mod led {
     }
 }
 
+/// Software services (`# services` in the .espf). The inline module makes
+/// `services/wifi.rs` resolve as `src/services/wifi.rs`.
 #[cfg(all(feature = "wifi", any(target_arch = "riscv32", target_arch = "xtensa")))]
-pub mod wifi;
+pub mod services {
+    pub mod wifi;
+}
+
+#[cfg(all(feature = "wifi", any(target_arch = "riscv32", target_arch = "xtensa")))]
+pub use services::wifi::{Wifi, WifiConfig, WifiError};

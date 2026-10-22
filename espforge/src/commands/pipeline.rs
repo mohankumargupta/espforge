@@ -2,9 +2,9 @@
 //! parse -> `# espforge` core -> options -> flag overrides -> resolve -> `$`
 //! dependency graph. One function, so the commands cannot disagree.
 
-use espf::context::RuntimeContext;
+use espf::context::{ParsedNode, RuntimeContext};
 use espf::diag::EspfError;
-use espforge_emit::{Hardware, LedSpec};
+use espforge_emit::{Hardware, LedSpec, WifiSpec};
 use espforge_model::Meta;
 use espforge_options::{Answers, ResolvedOptions};
 use std::path::{Path, PathBuf};
@@ -186,16 +186,90 @@ fn is_rust_ident(s: &str) -> bool {
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// The hardware `build` can generate code for today: `<gpio>` peripherals
-/// used by `<led>` components. Anything else is a clear "not supported yet".
-pub fn hardware(c: &Checked) -> Result<Hardware, String> {
-    let sections = &c.fe.parsed.sections;
-    for name in ["devices", "services"] {
-        if sections.get(name).is_some_and(|v| !v.is_empty()) {
+/// An `EspfError` as a one-line message (the hardware step reports plain
+/// strings, like the rest of `build`'s "not supported yet" messages).
+fn plain(e: EspfError) -> String {
+    format!("{}: {}", e.title, e.label)
+}
+
+/// The `<wifi>` service. One network only: `network1.ssid` (required) and
+/// `network1.password` (optional; empty or absent means an open network).
+/// Both strings end up inside Rust string literals in `generated.rs`.
+fn wifi_spec(n: &ParsedNode) -> Result<WifiSpec, String> {
+    let id = n.id;
+    let obj = n
+        .to_object()
+        .map_err(|errs| errs.into_iter().map(plain).collect::<Vec<_>>().join("; "))?;
+
+    if let Some(key) = obj
+        .fields
+        .keys()
+        .find(|k| !matches!(k.as_str(), "id" | "network1"))
+    {
+        return Err(format!(
+            "<wifi id=\"{id}\"> has `{key}`, which is not supported yet (only network1.ssid and network1.password: one network)"
+        ));
+    }
+
+    let net = obj
+        .get_object("network1")
+        .map_err(plain)?
+        .ok_or_else(|| format!("<wifi id=\"{id}\"> needs network1.ssid=\"...\""))?;
+    if let Some(key) = net
+        .fields
+        .keys()
+        .find(|k| !matches!(k.as_str(), "ssid" | "password"))
+    {
+        return Err(format!(
+            "<wifi id=\"{id}\"> has `network1.{key}`, which is not supported yet (only ssid and password)"
+        ));
+    }
+
+    let ssid = net
+        .get_str("ssid")
+        .map_err(plain)?
+        .ok_or_else(|| format!("<wifi id=\"{id}\"> needs network1.ssid=\"...\""))?
+        .value
+        .clone();
+    let password = net
+        .get_str("password")
+        .map_err(plain)?
+        .map(|p| p.value.clone())
+        .unwrap_or_default();
+
+    if ssid.is_empty() || ssid.len() > 32 {
+        return Err(format!(
+            "<wifi id=\"{id}\"> network1.ssid must be 1 to 32 bytes, got {}",
+            ssid.len()
+        ));
+    }
+    if !(password.is_empty() || (8..=63).contains(&password.len())) {
+        return Err(format!(
+            "<wifi id=\"{id}\"> network1.password must be empty (open network) or 8 to 63 characters, got {}",
+            password.len()
+        ));
+    }
+    for (what, value) in [("ssid", &ssid), ("password", &password)] {
+        if value.contains('\\') {
             return Err(format!(
-                "`# {name}` is not supported by `build` yet (only <gpio> peripherals with <led> components)"
+                "<wifi id=\"{id}\"> network1.{what} cannot contain a backslash"
             ));
         }
+    }
+
+    Ok(WifiSpec { ssid, password })
+}
+
+/// The hardware and services `build` can generate code for today: `<gpio>`
+/// peripherals used by `<led>` components, and one `<wifi>` service.
+/// Anything else is a clear "not supported yet".
+pub fn hardware(c: &Checked) -> Result<Hardware, String> {
+    let sections = &c.fe.parsed.sections;
+    if sections.get("devices").is_some_and(|v| !v.is_empty()) {
+        return Err(
+            "`# devices` is not supported by `build` yet (only <gpio> peripherals with <led> components, and the <wifi> service)"
+                .to_string(),
+        );
     }
 
     // id -> (pin, direction)
@@ -276,7 +350,21 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
         });
     }
 
-    Ok(Hardware { leds })
+    let mut wifi: Option<WifiSpec> = None;
+    for n in sections.get("services").map(Vec::as_slice).unwrap_or(&[]) {
+        if n.tag_name != "wifi" {
+            return Err(format!(
+                "<{}> in `# services` is not supported by `build` yet (only <wifi>)",
+                n.tag_name
+            ));
+        }
+        if wifi.is_some() {
+            return Err("only one <wifi> is supported in `# services`".to_string());
+        }
+        wifi = Some(wifi_spec(n)?);
+    }
+
+    Ok(Hardware { leds, wifi })
 }
 
 /// Whether `build` can turn this spec into firmware. `build` fails on `Err`;
@@ -292,6 +380,8 @@ mod tests {
     const WITH_BUS: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <i2c id=\"i2c0\" sda=\"4\" scl=\"5\" />\n# components\n  <i2c_component id=\"c\" i2c=\"$i2c0\" address=\"0x48\" />\n# devices\n# services\n";
 
     const WITH_LED: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# components\n  <led id=\"red-led\" gpio=\"$gpio18\" active_low=\"true\" />\n# devices\n# services\n";
+
+    const WITH_WIFI: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"embassy\" />\n# peripherals\n# components\n# devices\n# services\n  <wifi id=\"wifi0\" network1.ssid=\"Wokwi-GUEST\" />\n";
 
     fn hello() -> &'static str {
         &espforge_examples::find("01.Basics/helloworld")
@@ -328,6 +418,7 @@ mod tests {
         assert!(c.notes.is_empty());
         assert!(buildable(&c).is_ok());
         assert!(hardware(&c).unwrap().leds.is_empty());
+        assert!(hardware(&c).unwrap().wifi.is_none());
     }
 
     #[test]
@@ -404,5 +495,81 @@ mod tests {
         let src = WITH_LED.replace("output", "input");
         let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
         assert!(hardware(&c).unwrap_err().contains("needs an output pin"));
+    }
+
+    // ---- wifi service -------------------------------------------------------
+
+    #[test]
+    fn a_wifi_service_is_buildable_and_becomes_hardware() {
+        let c = validate(WITH_WIFI, &AnswerArgs::default())
+            .ok()
+            .expect("embassy + wifi validates");
+        let hw = hardware(&c).unwrap();
+        assert_eq!(
+            hw.wifi,
+            Some(WifiSpec {
+                ssid: "Wokwi-GUEST".into(),
+                password: String::new(),
+            })
+        );
+        assert!(hw.leds.is_empty());
+    }
+
+    #[test]
+    fn wifi_needs_the_embassy_runtime() {
+        let src = WITH_WIFI.replace("embassy", "blocking");
+        assert!(matches!(
+            validate(&src, &AnswerArgs::default()).err(),
+            Some(Invalid::Spans(_))
+        ));
+    }
+
+    #[test]
+    fn wifi_password_rules() {
+        let with = |attrs: &str| {
+            WITH_WIFI.replace(
+                "network1.ssid=\"Wokwi-GUEST\"",
+                &format!("network1.ssid=\"home\" {attrs}"),
+            )
+        };
+
+        let src = with("network1.password=\"short\"");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap_err().contains("8 to 63"));
+
+        let src = with("network1.password=\"longenough\"");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert_eq!(hardware(&c).unwrap().wifi.unwrap().password, "longenough");
+
+        let src = with("network1.password=\"back\\slash1\"");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap_err().contains("backslash"));
+    }
+
+    #[test]
+    fn only_one_network_is_supported() {
+        let src = WITH_WIFI.replace(
+            "network1.ssid=\"Wokwi-GUEST\"",
+            "network1.ssid=\"a\" network2.ssid=\"b\"",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap_err().contains("network2"));
+    }
+
+    #[test]
+    fn wifi_without_an_ssid_is_refused() {
+        let src = WITH_WIFI.replace(" network1.ssid=\"Wokwi-GUEST\"", "");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap_err().contains("network1.ssid"));
+    }
+
+    #[test]
+    fn other_services_are_not_buildable_yet() {
+        let src = WITH_WIFI.replace(
+            "<wifi id=\"wifi0\" network1.ssid=\"Wokwi-GUEST\" />",
+            "<ntp id=\"n\" servers+=\"pool.ntp.org\" />",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap_err().contains("<ntp>"));
     }
 }

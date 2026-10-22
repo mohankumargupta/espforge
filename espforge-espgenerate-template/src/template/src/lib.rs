@@ -22,9 +22,17 @@ macro_rules! device {
     };
 }
 
+/// Access a service from the `Context`. Usage: `service!(ctx, wifi)`
+#[macro_export]
+macro_rules! service {
+    ($ctx:expr, $name:ident) => {
+        &$ctx.services.$name
+    };
+}
+
 pub mod app;
 
-pub use generated::{Components, Devices, PeripheralRegistry};
+pub use generated::{Components, Devices, PeripheralRegistry, Services};
 
 /// The whole context the app receives.
 pub struct Context {
@@ -32,6 +40,7 @@ pub struct Context {
     pub delay: espforge_runtime::Delay,
     pub components: Components,
     pub devices: Devices,
+    pub services: Services,
 }
 
 /// Set by the entry point once wiring is complete.

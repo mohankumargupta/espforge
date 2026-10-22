@@ -5,6 +5,7 @@
 
 use esp_backtrace as _;
 use {{ project_name }}::{app, Components, Context, Devices, PeripheralRegistry, CTX};
+use {{ project_name }}::Services;
 
 #[esp_hal::main]
 fn main() -> ! {
@@ -20,8 +21,9 @@ fn main() -> ! {
 
     let components = Components::new(&mut registry);
     let devices = Devices {};
+    let services = Services {};
 
-    let ctx = Context { logger, delay, components, devices };
+    let ctx = Context { logger, delay, components, devices, services };
     let ctx = CTX.init(ctx);
     app::setup(ctx);
     loop {

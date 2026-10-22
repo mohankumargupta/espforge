@@ -8,6 +8,7 @@ use esp_backtrace as _;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::timer::timg::TimerGroup;
 use {{ project_name }}::{app, Components, Context, Devices, PeripheralRegistry, CTX};
+use {{ project_name }}::Services;
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -18,7 +19,12 @@ async fn main(spawner: Spawner) {
 {% if opt.wifi or opt["ble-trouble"] %}
     esp_alloc::heap_allocator!(size: 72 * 1024);
 {% endif %}
-    let registry = PeripheralRegistry::new(peripherals);
+    #[allow(unused_mut)]
+    let mut registry = PeripheralRegistry::new(peripherals);
+
+    // Built first: it borrows the whole registry, which the moves below break.
+    let components = Components::new(&mut registry);
+    let devices = Devices {};
 
     let sw_int = SoftwareInterruptControl::new(registry.peripherals.SW_INTERRUPT);
     let timg0 = TimerGroup::new(registry.peripherals.TIMG0);
@@ -29,10 +35,15 @@ async fn main(spawner: Spawner) {
     let logger = espforge_runtime::Logger::new();
     let delay = espforge_runtime::Delay::new();
 
-    let components = Components {};
-    let devices = Devices {};
+    // Services need the scheduler (started above) and the spawner.
+{% if wifi %}
+    let services = Services::new(registry.peripherals.WIFI, &spawner)
+        .expect("failed to start Wi-Fi");
+{% else %}
+    let services = Services {};
+{% endif %}
 
-    let ctx = Context { logger, delay, components, devices };
+    let ctx = Context { logger, delay, components, devices, services };
     let ctx = CTX.init(ctx);
     app::setup(ctx, spawner).await;
     loop {
