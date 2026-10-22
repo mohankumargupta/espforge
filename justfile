@@ -21,6 +21,8 @@ i2cscanner: (_espforge "04.Communication/i2c_scanner")
 [group('espemu')]
 spiexample: (_espforge "04.Communication/spi_example")
 
+[group('espemu')]
+uartexample: (_espforge "04.Communication/uart_example")
 # ---- test recipes: one line each -----------------------------------------
 # usage: (_emutest "<category>/<example>" "<pytest script>")
 

@@ -141,6 +141,7 @@ mod led {
 pub mod components {
     pub mod i2c;
     pub mod spi;
+    pub mod uart;
 }
 
 #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
@@ -148,6 +149,9 @@ pub use components::i2c::{I2cBus, I2cConfig, I2cError};
 
 #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 pub use components::spi::{SpiBus, SpiConfig, SpiDevice, SpiError};
+
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
+pub use components::uart::{UartConfig, UartDevice, UartError};
 
 /// Software services (`# services` in the .espf). The inline module makes
 /// `services/wifi.rs` resolve as `src/services/wifi.rs`.

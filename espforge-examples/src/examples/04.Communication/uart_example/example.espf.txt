@@ -14,3 +14,8 @@ UART EXAMPLE
   <uart_component id="uart0" uart="$uart1" baud_rate="9600" />
 
 # devices
+
+# services 
+
+
+

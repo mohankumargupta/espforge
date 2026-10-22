@@ -17,6 +17,7 @@
 //! | `i2cs`         | list of `{ name, peripheral, sda, scl, khz }`, one per `<i2c_component>` |
 //! | `spi_buses`    | list of `{ id, peripheral, sclk, mosi, miso, khz, mode }`, one used `<spi>` |
 //! | `spis`         | list of `{ name, bus, cs }`, one per `<spi_component>`, by component id |
+//! | `uarts`        | list of `{ name, peripheral, tx, rx, baud, parity, stop_bits }`, one per `<uart_component>` |
 //! | `<led name>`   | each led again, by its component id (`red_led.pin` in diagram.json) |
 //! | `wifi`         | `{ ssid, password }` when `<wifi>` is in `# services`, else none (falsy) |
 
@@ -91,8 +92,28 @@ pub struct SpiSpec {
     pub cs: u8,
 }
 
+/// One `<uart_component>`: a UART peripheral with its pins and framing,
+/// resolved from the component that rides on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UartSpec {
+    /// Rust identifier: the component id with `-` turned into `_`.
+    pub name: String,
+    /// Upper-cased esp-hal peripheral name (`UART0`, `UART1`, ...).
+    pub peripheral: String,
+    pub tx: u8,
+    pub rx: u8,
+    /// Baud rate the component sets.
+    pub baud: u32,
+    /// Template token for `<uart_component parity=..>`: `"None"`, `"Even"` or
+    /// `"Odd"` (used as `esp_hal::uart::Parity::{{ u.parity }}`).
+    pub parity: String,
+    /// Template token for `<uart_component stop_bits=..>`: `"_1"` or `"_2"`
+    /// (used as `esp_hal::uart::StopBits::{{ u.stop_bits }}`).
+    pub stop_bits: String,
+}
+
 /// The `<wifi>` service. Both strings are written into Rust string literals,
-/// so the caller must have rejected `\`, `"` and line breaks.
+/// so the caller must have rejected `\\`, `"` and line breaks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WifiSpec {
     pub ssid: String,
@@ -108,6 +129,7 @@ pub struct Hardware {
     /// Used bus peripherals first (template order), then devices.
     pub spi_buses: Vec<SpiBusSpec>,
     pub spis: Vec<SpiSpec>,
+    pub uarts: Vec<UartSpec>,
     pub wifi: Option<WifiSpec>,
 }
 
@@ -216,6 +238,18 @@ pub fn build_context_with(
         }
     };
 
+    let uart_value = |u: &UartSpec| {
+        context! {
+            name => u.name.clone(),
+            peripheral => u.peripheral.clone(),
+            tx => u.tx,
+            rx => u.rx,
+            baud => u.baud,
+            parity => u.parity.clone(),
+            stop_bits => u.stop_bits.clone(),
+        }
+    };
+
     let mut map: BTreeMap<String, Value> = BTreeMap::new();
     // Hardware first, so the fixed names below always win a collision.
     for led in &hardware.leds {
@@ -226,6 +260,9 @@ pub fn build_context_with(
     }
     for spi in &hardware.spis {
         map.insert(spi.name.clone(), spi_value(spi));
+    }
+    for uart in &hardware.uarts {
+        map.insert(uart.name.clone(), uart_value(uart));
     }
     map.insert(
         "leds".into(),
@@ -248,6 +285,16 @@ pub fn build_context_with(
     map.insert(
         "spis".into(),
         Value::from(hardware.spis.iter().map(spi_value).collect::<Vec<_>>()),
+    );
+    map.insert(
+        "uarts".into(),
+        Value::from(
+            hardware
+                .uarts
+                .iter()
+                .map(uart_value)
+                .collect::<Vec<_>>(),
+        ),
     );
     map.insert(
         "wifi".into(),

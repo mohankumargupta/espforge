@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-pub use context::{Hardware, I2cSpec, LedSpec, RuntimeSource, SpiBusSpec, SpiSpec, WifiSpec};
+pub use context::{Hardware, I2cSpec, LedSpec, RuntimeSource, SpiBusSpec, SpiSpec, UartSpec, WifiSpec};
 pub use render::OverlayFile;
 
 /// Everything a build writes: text files and binary assets.
@@ -348,6 +348,52 @@ mod tests {
             "{generated}"
         );
         assert!(!generated.contains("SpiDevice<esp_hal::Blocking>"), "{generated}");
+    }
+
+    #[test]
+    fn a_uart_component_reaches_generated_rs_for_both_runtimes() {
+        let m = core();
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let hw = Hardware {
+            uarts: vec![UartSpec {
+                name: "serial".into(),
+                peripheral: "UART1".into(),
+                tx: 6,
+                rx: 5,
+                baud: 9600,
+                parity: "None".into(),
+                stop_bits: "_1".into(),
+            }],
+            ..Default::default()
+        };
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+        let generated = &find(&g, "src/generated.rs").content;
+        assert!(
+            generated.contains("pub serial: espforge_runtime::UartDevice<esp_hal::Blocking>,"),
+            "{generated}"
+        );
+        assert!(generated.contains("peripherals.UART1.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("GPIO6.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("GPIO5.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("baudrate: 9600"), "{generated}");
+        assert!(generated.contains("parity: esp_hal::uart::Parity::None"), "{generated}");
+        assert!(generated.contains("stop_bits: esp_hal::uart::StopBits::_1"), "{generated}");
+        assert!(!generated.contains("\n\n\n"), "{generated}");
+
+        let m = Meta {
+            runtime: Runtime::Embassy,
+            ..core()
+        };
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+        let generated = &find(&g, "src/generated.rs").content;
+        assert!(
+            generated.contains("pub serial: espforge_runtime::UartDevice<esp_hal::Async>,"),
+            "{generated}"
+        );
+        assert!(!generated.contains("UartDevice<esp_hal::Blocking>"), "{generated}");
     }
 
     #[test]

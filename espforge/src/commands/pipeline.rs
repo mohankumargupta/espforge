@@ -4,7 +4,9 @@
 
 use espf::context::{ParsedNode, RuntimeContext};
 use espf::diag::EspfError;
-use espforge_emit::{Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, WifiSpec};
+use espforge_emit::{
+    Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
+};
 use espforge_model::Meta;
 use espforge_options::{Answers, ResolvedOptions};
 use std::path::{Path, PathBuf};
@@ -180,6 +182,17 @@ pub fn unsupported_section(c: &Checked) -> Option<&'static str> {
         .find(|n| c.fe.parsed.sections.get(*n).is_some_and(|v| !v.is_empty()))
 }
 
+/// `uart0` -> `UART0`, `uart1` -> `UART1`, ...; anything else is the user's
+/// error (the esp-hal peripheral structs are named exactly this).
+fn uart_peripheral_name(id: &str) -> Result<String, String> {
+    if matches!(id, "uart0" | "uart1" | "uart2" | "uart3") {
+        return Ok(id.to_ascii_uppercase());
+    }
+    Err(format!(
+        "<uart id=\"{id}\">: the id must be uart0, uart1, uart2 or uart3"
+    ))
+}
+
 fn is_rust_ident(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with(|c: char| c.is_ascii_digit())
@@ -326,6 +339,25 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
         cs: u8,
     }
 
+    /// The `<uart_component>` riding on a `<uart>`: its fields are what the
+    /// generated code ends up with (framing lives on the component).
+    struct UartCompDraft {
+        name: String,
+        baud: u32,
+        parity: String,
+        stop_bits: String,
+    }
+
+    struct UartDraft {
+        /// The `<uart>` id (`uart1`), which is also the peripheral id.
+        id: String,
+        peripheral: String,
+        tx: u8,
+        rx: u8,
+        /// The component riding on this uart, if any.
+        component: Option<UartCompDraft>,
+    }
+
     let sections = &c.fe.parsed.sections;
     if sections.get("devices").is_some_and(|v| !v.is_empty()) {
         return Err(
@@ -340,6 +372,8 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
     let mut i2c_buses: Vec<I2cBusDraft> = Vec::new();
     // `<spi>` peripherals, in spec order.
     let mut spi_buses: Vec<SpiBusDraft> = Vec::new();
+    // `<uart>` peripherals, in spec order.
+    let mut uarts: Vec<UartDraft> = Vec::new();
     for n in sections
         .get("peripherals")
         .map(Vec::as_slice)
@@ -407,9 +441,23 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
                 mode,
                 used: false,
             });
+        } else if n.tag_name == "uart" {
+            let peripheral = uart_peripheral_name(n.id)?;
+            let pin_attr = |what: &str| {
+                n.get_attr(what)
+                    .and_then(|p| p.parse::<u8>().ok())
+                    .ok_or_else(|| format!("<uart id=\"{}\"> needs a numeric {what}=\"...\"", n.id))
+            };
+            uarts.push(UartDraft {
+                id: n.id.to_string(),
+                peripheral,
+                tx: pin_attr("tx")?,
+                rx: pin_attr("rx")?,
+                component: None,
+            });
         } else {
             return Err(format!(
-                "<{}> in `# peripherals` is not supported by `build` yet (only <gpio>, <i2c> and <spi>)",
+                "<{}> in `# peripherals` is not supported by `build` yet (only <gpio>, <i2c>, <spi> and <uart>)",
                 n.tag_name
             ));
         }
@@ -496,9 +544,81 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
             });
             continue;
         }
+        if n.tag_name == "uart_component" {
+            let uart_ref = n
+                .get_attr("uart")
+                .ok_or_else(|| format!("<uart_component id=\"{}\"> needs uart=\"$<uart id>\"", n.id))?;
+            let target = uart_ref.trim_start_matches('$');
+            let draft = uarts
+                .iter_mut()
+                .find(|u| u.id == target)
+                .ok_or_else(|| {
+                    format!(
+                        "<uart_component id=\"{}\"> refers to `{target}`, which is not an <uart> in `# peripherals`",
+                        n.id
+                    )
+                })?;
+            if let Some(other) = &draft.component {
+                return Err(format!(
+                    "<uart_component id=\"{}\"> and <uart_component id=\"{}\"> both use <uart id=\"{target}\">",
+                    other.name,
+                    n.id.replace('-', "_")
+                ));
+            }
+            let baud_raw = n
+                .get_attr("baud_rate")
+                .ok_or_else(|| format!("<uart_component id=\"{}\"> needs baud_rate=\"...\"", n.id))?;
+            let baud: u32 = baud_raw.parse().map_err(|_| {
+                format!(
+                    "<uart_component id=\"{}\"> baud_rate=\"{baud_raw}\" is not a number",
+                    n.id
+                )
+            })?;
+            if baud == 0 {
+                return Err(format!(
+                    "<uart_component id=\"{}\"> baud_rate=\"{baud_raw}\" must be greater than 0",
+                    n.id
+                ));
+            }
+            let parity = match n.get_attr("parity") {
+                None | Some("none") => "None".to_string(),
+                Some("even") => "Even".to_string(),
+                Some("odd") => "Odd".to_string(),
+                Some(other) => {
+                    return Err(format!(
+                        "<uart_component id=\"{}\"> parity=\"{other}\" must be \"none\", \"even\" or \"odd\"",
+                        n.id
+                    ));
+                }
+            };
+            let stop_bits = match n.get_attr("stop_bits") {
+                None | Some("1") => "_1".to_string(),
+                Some("2") => "_2".to_string(),
+                Some(other) => {
+                    return Err(format!(
+                        "<uart_component id=\"{}\"> stop_bits=\"{other}\" must be \"1\" or \"2\"",
+                        n.id
+                    ));
+                }
+            };
+            let name = n.id.replace('-', "_");
+            if !is_rust_ident(&name) {
+                return Err(format!(
+                    "<uart_component id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
+                    n.id
+                ));
+            }
+            draft.component = Some(UartCompDraft {
+                name,
+                baud,
+                parity,
+                stop_bits,
+            });
+            continue;
+        }
         if n.tag_name != "led" {
             return Err(format!(
-                "<{}> in `# components` is not supported by `build` yet (only <led>, <i2c_component> and <spi_component>)",
+                "<{}> in `# components` is not supported by `build` yet (only <led>, <i2c_component>, <spi_component> and <uart_component>)",
                 n.tag_name
             ));
         }
@@ -669,6 +789,71 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
         }
     }
 
+    // UART pins are owned wiring, exactly like the I2C and SPI pins above:
+    // nothing else may drive or listen on a UART's TX/RX, and full-duplex TX
+    // and RX may not even share a pin with each other.
+    for uart in &uarts {
+        if uart.tx == uart.rx {
+            return Err(format!(
+                "<uart id=\"{}\"> tx and rx cannot both be GPIO{}",
+                uart.id, uart.tx
+            ));
+        }
+        for pin in [uart.tx, uart.rx] {
+            for (id, gpio, _) in &gpios {
+                if *gpio == pin {
+                    return Err(format!(
+                        "<gpio id=\"{id}\"> and <uart id=\"{}\"> both use GPIO{pin}",
+                        uart.id
+                    ));
+                }
+            }
+            for led in &leds {
+                if led.pin == pin {
+                    return Err(format!(
+                        "<led id=\"{}\"> and <uart id=\"{}\"> both use GPIO{pin}",
+                        led.name, uart.id
+                    ));
+                }
+            }
+            for i2c in &i2c_buses {
+                if pin == i2c.sda || pin == i2c.scl {
+                    return Err(format!(
+                        "<i2c id=\"{}\"> and <uart id=\"{}\"> both use GPIO{pin}",
+                        i2c.id, uart.id
+                    ));
+                }
+            }
+            for bus in &spi_buses {
+                if spi_bus_pins(bus).contains(&pin) {
+                    return Err(format!(
+                        "<spi id=\"{}\"> and <uart id=\"{}\"> both use GPIO{pin}",
+                        bus.id, uart.id
+                    ));
+                }
+            }
+            for dev in &spi_devices {
+                if dev.cs == pin {
+                    return Err(format!(
+                        "<spi_component id=\"{}\"> and <uart id=\"{}\"> both use GPIO{pin}",
+                        dev.name, uart.id
+                    ));
+                }
+            }
+            for other in &uarts {
+                if other.id == uart.id {
+                    continue;
+                }
+                if other.tx == pin || other.rx == pin {
+                    return Err(format!(
+                        "<uart id=\"{}\"> and <uart id=\"{}\"> both use GPIO{pin}",
+                        uart.id, other.id
+                    ));
+                }
+            }
+        }
+    }
+
     let i2cs: Vec<I2cSpec> = i2c_buses
         .into_iter()
         // A bare `<i2c>` with no component generates nothing: the app can
@@ -709,11 +894,29 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
         })
         .collect();
 
+    let uart_specs: Vec<UartSpec> = uarts
+        .into_iter()
+        // A bare `<uart>` with no component generates nothing: the app can
+        // only reach the uart through a component anyway.
+        .filter_map(|u| {
+            u.component.map(|c| UartSpec {
+                name: c.name,
+                peripheral: u.peripheral,
+                tx: u.tx,
+                rx: u.rx,
+                baud: c.baud,
+                parity: c.parity,
+                stop_bits: c.stop_bits,
+            })
+        })
+        .collect();
+
     Ok(Hardware {
         leds,
         i2cs,
         spi_buses: spi_bus_specs,
         spis,
+        uarts: uart_specs,
         wifi,
     })
 }
@@ -809,13 +1012,93 @@ mod tests {
 
     const WITH_SPI: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"6\" frequency=\"100kHz\" />\n# components\n  <spi_component id=\"tester\" spi=\"$spi2\" cs=\"9\" />\n# devices\n# services\n";
 
+    const WITH_UART: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <uart id=\"uart1\" tx=\"6\" rx=\"5\" />\n# components\n  <uart_component id=\"serial\" uart=\"$uart1\" baud_rate=\"9600\" />\n# devices\n# services\n";
+
     #[test]
     fn unsupported_hardware_is_valid_but_not_buildable() {
-        let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <uart id=\"uart0\" />\n# components\n# devices\n# services\n";
+        let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <pwm id=\"pwm0\" />\n# components\n# devices\n# services\n";
         let c = validate(src, &AnswerArgs::default()).ok().expect("graph is fine");
         assert_eq!(unsupported_section(&c), Some("peripherals"));
         let err = buildable(&c).unwrap_err();
-        assert!(err.contains("<uart>"), "{err}");
+        assert!(err.contains("<pwm>"), "{err}");
+    }
+
+    #[test]
+    fn a_uart_with_a_component_becomes_hardware() {
+        let c = validate(WITH_UART, &AnswerArgs::default())
+            .ok()
+            .expect("graph is fine");
+        assert!(buildable(&c).is_ok());
+        assert_eq!(
+            hardware(&c).unwrap().uarts,
+            [UartSpec {
+                name: "serial".into(),
+                peripheral: "UART1".into(),
+                tx: 6,
+                rx: 5,
+                baud: 9600,
+                parity: "None".into(),
+                stop_bits: "_1".into(),
+            }]
+        );
+        // Framing attributes flow through too.
+        let src = WITH_UART.replace(
+            "baud_rate=\"9600\"",
+            "baud_rate=\"115200\" parity=\"even\" stop_bits=\"2\"",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        let spec = &hardware(&c).unwrap().uarts[0];
+        assert_eq!((spec.baud, spec.parity.as_str(), spec.stop_bits.as_str()), (115200, "Even", "_2"));
+    }
+
+    #[test]
+    fn a_bare_uart_generates_nothing() {
+        let src = WITH_UART.replace(
+            "# components\n  <uart_component id=\"serial\" uart=\"$uart1\" baud_rate=\"9600\" />\n",
+            "# components\n",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap().uarts.is_empty());
+    }
+
+    #[test]
+    fn uart_wiring_conflicts_are_refused() {
+        // tx and rx on the same pin.
+        let err = validate(
+            &WITH_UART.replace("tx=\"6\" rx=\"5\"", "tx=\"5\" rx=\"5\""),
+            &AnswerArgs::default(),
+        )
+        .ok()
+        .and_then(|c| buildable(&c).err())
+        .expect("tx==rx is a wiring bug");
+        assert!(err.contains("tx and rx"), "{err}");
+
+        // A second uart sharing the rx pin.
+        let src = WITH_UART.replace(
+            "rx=\"5\" />\n# components",
+            "rx=\"5\" />\n  <uart id=\"uart2\" tx=\"7\" rx=\"5\" />\n# components",
+        );
+        // `buildable` re-runs `hardware`, so re-validate for the error text.
+        let err = validate(&src, &AnswerArgs::default())
+            .ok()
+            .and_then(|c| buildable(&c).err())
+            .expect("shared rx is a wiring bug");
+        assert!(err.contains("both use GPIO5"), "{err}");
+
+        // A led on the tx pin.
+        let src = WITH_UART.replace(
+            "tx=\"6\" rx=\"5\" />\n# components",
+            "tx=\"6\" rx=\"5\" />\n  <gpio id=\"gpio6\" pin=\"6\" direction=\"output\" />\n# components",
+        )
+        .replace(
+            "# components\n",
+            "# components\n  <led id=\"l\" gpio=\"$gpio6\" />\n",
+        );
+        let err = validate(&src, &AnswerArgs::default())
+            .ok()
+            .and_then(|c| buildable(&c).err())
+            .expect("led on tx is a wiring bug");
+        assert!(err.contains("both use GPIO6"), "{err}");
     }
 
     #[test]

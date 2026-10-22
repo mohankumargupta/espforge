@@ -23,6 +23,9 @@ pub struct Components {
 {% for spi in spis %}
     pub {{ spi.name }}: espforge_runtime::SpiDevice<{% if embassy %}esp_hal::Async{% else %}esp_hal::Blocking{% endif %}>,
 {% endfor %}
+{% for uart in uarts %}
+    pub {{ uart.name }}: espforge_runtime::UartDevice<{% if embassy %}esp_hal::Async{% else %}esp_hal::Blocking{% endif %}>,
+{% endfor %}
 }
 
 impl Components {
@@ -75,6 +78,22 @@ impl Components {
                 ),
                 espforge_runtime::Delay::new(),
             ),
+{% endfor %}
+{% for uart in uarts %}
+            // SAFETY: espforge checked that no other component uses this
+            // peripheral or GPIO{{ uart.tx }}/GPIO{{ uart.rx }}.
+            {{ uart.name }}: espforge_runtime::UartDevice::build(
+                unsafe { registry.peripherals.{{ uart.peripheral }}.clone_unchecked() },
+                unsafe { registry.peripherals.GPIO{{ uart.tx }}.clone_unchecked() },
+                unsafe { registry.peripherals.GPIO{{ uart.rx }}.clone_unchecked() },
+                espforge_runtime::UartConfig {
+                    baudrate: {{ uart.baud }},
+                    data_bits: esp_hal::uart::DataBits::_8,
+                    parity: esp_hal::uart::Parity::{{ uart.parity }},
+                    stop_bits: esp_hal::uart::StopBits::{{ uart.stop_bits }},
+                },
+            )
+            .expect("UART configuration failed"),
 {% endfor %}
         }
     }
