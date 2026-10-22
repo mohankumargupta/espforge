@@ -1,3 +1,7 @@
+====================
+BLINK EXAMPLE
+====================
+
 # espforge
   <project name="blink" />
   <chip type="esp32c3" />
@@ -7,9 +11,8 @@
   <gpio id="gpio18" pin="18" direction="output" />
 
 # components
-  <led id="red_led" pin="$gpio18" />
+  <led id="red_led" gpio="$gpio18" />
 
 # devices
 
 # services
-

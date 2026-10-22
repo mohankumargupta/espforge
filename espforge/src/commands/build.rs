@@ -240,7 +240,7 @@ pub fn execute(args: &BuildArgs) -> Result<(), Failure> {
     }
 
     // Be explicit rather than silently generating firmware that lacks devices.
-    pipeline::buildable(&checked).map_err(user)?;
+    let hardware = pipeline::hardware(&checked).map_err(user)?;
 
     if let Some(path) = &args.write_spec {
         let doc =
@@ -263,7 +263,13 @@ pub fn execute(args: &BuildArgs) -> Result<(), Failure> {
         .collect();
     let app = app_logic(&source)?;
 
-    let generated = espforge_emit::generate(&checked.meta, &checked.resolved, &runtime, &overlay)?;
+    let generated = espforge_emit::generate_with_hardware(
+        &checked.meta,
+        &checked.resolved,
+        &runtime,
+        &overlay,
+        &hardware,
+    )?;
     if let Err(e) = espforge_emit::write_all(&args.out, &generated) {
         let msg = format!("{e:#}");
         // An edited machine-owned file is the user's doing, not a bug.
@@ -332,6 +338,26 @@ mod tests {
             std::fs::read_to_string(out.join("Cargo.toml"))
                 .unwrap()
                 .contains("name = \"hello_world\"")
+        );
+    }
+
+    #[test]
+    fn builds_the_blink_example_with_a_led_component() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        execute(&example_args("01.Basics/blink", &out)).unwrap();
+        let generated = std::fs::read_to_string(out.join("src/generated.rs")).unwrap();
+        assert!(
+            generated.contains("pub red_led: espforge_runtime::Led,"),
+            "{generated}"
+        );
+        assert!(generated.contains("GPIO18"), "{generated}");
+        let diagram = std::fs::read_to_string(out.join("diagram.json")).unwrap();
+        assert!(diagram.contains("esp:18"), "{diagram}");
+        assert!(
+            std::fs::read_to_string(out.join("src/bin/main.rs"))
+                .unwrap()
+                .contains("Components::new(&mut registry)")
         );
     }
 

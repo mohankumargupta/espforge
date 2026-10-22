@@ -4,6 +4,7 @@
 
 use espf::context::RuntimeContext;
 use espf::diag::EspfError;
+use espforge_emit::{Hardware, LedSpec};
 use espforge_model::Meta;
 use espforge_options::{Answers, ResolvedOptions};
 use std::path::{Path, PathBuf};
@@ -179,15 +180,109 @@ pub fn unsupported_section(c: &Checked) -> Option<&'static str> {
         .find(|n| c.fe.parsed.sections.get(*n).is_some_and(|v| !v.is_empty()))
 }
 
+fn is_rust_ident(s: &str) -> bool {
+    !s.is_empty()
+        && !s.starts_with(|c: char| c.is_ascii_digit())
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// The hardware `build` can generate code for today: `<gpio>` peripherals
+/// used by `<led>` components. Anything else is a clear "not supported yet".
+pub fn hardware(c: &Checked) -> Result<Hardware, String> {
+    let sections = &c.fe.parsed.sections;
+    for name in ["devices", "services"] {
+        if sections.get(name).is_some_and(|v| !v.is_empty()) {
+            return Err(format!(
+                "`# {name}` is not supported by `build` yet (only <gpio> peripherals with <led> components)"
+            ));
+        }
+    }
+
+    // id -> (pin, direction)
+    let mut gpios: Vec<(&str, u8, Option<&str>)> = Vec::new();
+    for n in sections
+        .get("peripherals")
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+    {
+        if n.tag_name != "gpio" {
+            return Err(format!(
+                "<{}> in `# peripherals` is not supported by `build` yet (only <gpio>)",
+                n.tag_name
+            ));
+        }
+        let pin = n
+            .get_attr("pin")
+            .and_then(|p| p.parse::<u8>().ok())
+            .ok_or_else(|| format!("<gpio id=\"{}\"> needs a numeric pin=\"...\"", n.id))?;
+        gpios.push((n.id, pin, n.get_attr("direction")));
+    }
+
+    let mut leds: Vec<LedSpec> = Vec::new();
+    for n in sections.get("components").map(Vec::as_slice).unwrap_or(&[]) {
+        if n.tag_name != "led" {
+            return Err(format!(
+                "<{}> in `# components` is not supported by `build` yet (only <led>)",
+                n.tag_name
+            ));
+        }
+        let gpio_ref = n
+            .get_attr("gpio")
+            .ok_or_else(|| format!("<led id=\"{}\"> needs gpio=\"$<gpio id>\"", n.id))?;
+        let target = gpio_ref.trim_start_matches('$');
+        let (_, pin, direction) = gpios
+            .iter()
+            .find(|(id, _, _)| *id == target)
+            .ok_or_else(|| {
+                format!(
+                    "<led id=\"{}\"> refers to `{target}`, which is not a <gpio> in `# peripherals`",
+                    n.id
+                )
+            })?;
+        if matches!(direction, Some(d) if *d != "output") {
+            return Err(format!(
+                "<led id=\"{}\"> needs an output pin, but `{target}` has direction=\"{}\"",
+                n.id,
+                direction.unwrap_or("")
+            ));
+        }
+        let active_low = match n.get_attr("active_low") {
+            None | Some("false") => false,
+            Some("true") => true,
+            Some(other) => {
+                return Err(format!(
+                    "<led id=\"{}\"> active_low=\"{other}\" must be \"true\" or \"false\"",
+                    n.id
+                ));
+            }
+        };
+        let name = n.id.replace('-', "_");
+        if !is_rust_ident(&name) {
+            return Err(format!(
+                "<led id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
+                n.id
+            ));
+        }
+        if let Some(other) = leds.iter().find(|l| l.pin == *pin) {
+            return Err(format!(
+                "<led id=\"{}\"> and <led id=\"{}\"> both use GPIO{pin}",
+                other.name, n.id
+            ));
+        }
+        leds.push(LedSpec {
+            name,
+            pin: *pin,
+            active_low,
+        });
+    }
+
+    Ok(Hardware { leds })
+}
+
 /// Whether `build` can turn this spec into firmware. `build` fails on `Err`;
 /// `check` reports it as a warning.
 pub fn buildable(c: &Checked) -> Result<(), String> {
-    match unsupported_section(c) {
-        Some(n) => Err(format!(
-            "`# {n}` is not supported by `build` yet (hello-world style projects only)"
-        )),
-        None => Ok(()),
-    }
+    hardware(c).map(|_| ())
 }
 
 #[cfg(test)]
@@ -195,6 +290,8 @@ mod tests {
     use super::*;
 
     const WITH_BUS: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <i2c id=\"i2c0\" sda=\"4\" scl=\"5\" />\n# components\n  <i2c_component id=\"c\" i2c=\"$i2c0\" address=\"0x48\" />\n# devices\n# services\n";
+
+    const WITH_LED: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# components\n  <led id=\"red-led\" gpio=\"$gpio18\" active_low=\"true\" />\n# devices\n# services\n";
 
     fn hello() -> &'static str {
         &espforge_examples::find("01.Basics/helloworld")
@@ -230,6 +327,7 @@ mod tests {
             .expect("hello validates");
         assert!(c.notes.is_empty());
         assert!(buildable(&c).is_ok());
+        assert!(hardware(&c).unwrap().leds.is_empty());
     }
 
     #[test]
@@ -266,11 +364,45 @@ mod tests {
     }
 
     #[test]
-    fn non_empty_sections_are_valid_but_not_buildable() {
+    fn unsupported_hardware_is_valid_but_not_buildable() {
         let c = validate(WITH_BUS, &AnswerArgs::default())
             .ok()
             .expect("graph is fine");
         assert_eq!(unsupported_section(&c), Some("peripherals"));
-        assert!(buildable(&c).is_err());
+        let err = buildable(&c).unwrap_err();
+        assert!(err.contains("<i2c>"), "{err}");
+    }
+
+    #[test]
+    fn gpio_with_a_led_is_buildable_and_becomes_hardware() {
+        let c = validate(WITH_LED, &AnswerArgs::default())
+            .ok()
+            .expect("graph is fine");
+        let hw = hardware(&c).unwrap();
+        assert_eq!(
+            hw.leds,
+            [LedSpec {
+                name: "red_led".into(),
+                pin: 18,
+                active_low: true
+            }]
+        );
+    }
+
+    #[test]
+    fn two_leds_on_one_pin_are_refused() {
+        let src = WITH_LED.replace(
+            "# devices",
+            "  <led id=\"other\" gpio=\"$gpio18\" />\n# devices",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap_err().contains("both use GPIO18"));
+    }
+
+    #[test]
+    fn a_led_on_an_input_pin_is_refused() {
+        let src = WITH_LED.replace("output", "input");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap_err().contains("needs an output pin"));
     }
 }

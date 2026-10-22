@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-pub use context::RuntimeSource;
+pub use context::{Hardware, LedSpec, RuntimeSource};
 pub use render::OverlayFile;
 
 /// Everything a build writes: text files and binary assets.
@@ -29,17 +29,34 @@ pub struct Generated {
     pub assets: Vec<Asset>,
 }
 
-/// Render the project for `core` + `resolved`, layering an example's files
-/// (`overlay`, empty for a plain project) over the template. Adds `README.txt`
-/// and `.espforge/manifest.json` (which records the template version).
-/// Does not touch the filesystem.
+/// [`generate_with_hardware`] for a project with no hardware.
 pub fn generate(
     core: &Meta,
     resolved: &ResolvedOptions,
     runtime_source: &RuntimeSource,
     overlay: &[OverlayFile],
 ) -> Result<Generated> {
-    let ctx = context::build_context(core, resolved, runtime_source)?;
+    generate_with_hardware(
+        core,
+        resolved,
+        runtime_source,
+        overlay,
+        &Hardware::default(),
+    )
+}
+
+/// Render the project for `core` + `resolved`, layering an example's files
+/// (`overlay`, empty for a plain project) over the template. Adds `README.txt`
+/// and `.espforge/manifest.json` (which records the template version).
+/// Does not touch the filesystem.
+pub fn generate_with_hardware(
+    core: &Meta,
+    resolved: &ResolvedOptions,
+    runtime_source: &RuntimeSource,
+    overlay: &[OverlayFile],
+    hardware: &Hardware,
+) -> Result<Generated> {
+    let ctx = context::build_context_with(core, resolved, runtime_source, hardware)?;
     let rendered = render::render_project_with_overlay(&ctx, overlay)?;
     let mut artifacts = rendered.artifacts;
     let assets = rendered.assets;
@@ -205,6 +222,28 @@ mod tests {
                 .iter()
                 .all(|a| !a.content.contains("esp-generate"))
         );
+    }
+
+    #[test]
+    fn leds_become_components_in_generated_rs() {
+        let m = core();
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let hw = Hardware {
+            leds: vec![LedSpec {
+                name: "red_led".into(),
+                pin: 18,
+                active_low: false,
+            }],
+        };
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+        let generated = &find(&g, "src/generated.rs").content;
+        assert!(
+            generated.contains("pub red_led: espforge_runtime::Led,"),
+            "{generated}"
+        );
+        assert!(generated.contains("GPIO18"), "{generated}");
+        assert!(!generated.contains("\n\n\n"), "{generated}");
     }
 
     #[test]

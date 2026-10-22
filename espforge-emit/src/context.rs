@@ -13,6 +13,8 @@
 //! | `opt`          | every resolved option, incl. derived/implied flags; use `opt["probe-rs"]` for hyphenated names |
 //! | `log`          | always `true` (logging is `log` only) |
 //! | `runtime_dep`  | TOML inline table for the `espforge-runtime` dependency |
+//! | `leds`         | list of `{ name, pin, active_low }`, one per `<led>` component |
+//! | `<led name>`   | each led again, by its component id (`red_led.pin` in diagram.json) |
 
 use anyhow::{Context as _, Result};
 use espforge_model::{Console, Meta, Runtime};
@@ -30,6 +32,21 @@ pub enum RuntimeSource {
     /// Path to the `espforge-runtime` crate directory, as it should appear
     /// in the generated Cargo.toml.
     Path(String),
+}
+
+/// One `<led>` component, already resolved to a gpio pin number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LedSpec {
+    /// Rust identifier: the component id with `-` turned into `_`.
+    pub name: String,
+    pub pin: u8,
+    pub active_low: bool,
+}
+
+/// The hardware the generated project has to construct.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Hardware {
+    pub leds: Vec<LedSpec>,
 }
 
 /// Wokwi board id for a chip (moved out of the old `diagram.json` if-chain).
@@ -71,10 +88,20 @@ fn opt_value(v: &OptValue) -> Value {
     }
 }
 
+/// Context for a project with no hardware.
 pub fn build_context(
     meta: &Meta,
     opts: &ResolvedOptions,
     runtime_source: &RuntimeSource,
+) -> Result<Value> {
+    build_context_with(meta, opts, runtime_source, &Hardware::default())
+}
+
+pub fn build_context_with(
+    meta: &Meta,
+    opts: &ResolvedOptions,
+    runtime_source: &RuntimeSource,
+    hardware: &Hardware,
 ) -> Result<Value> {
     let chip = esp_metadata_generated::Chip::iter()
         .find(|c| c.name() == meta.chip)
@@ -86,33 +113,64 @@ pub fn build_context(
         .map(|(name, r)| (name.clone(), opt_value(&r.value)))
         .collect();
 
-    Ok(context! {
-        project_name => meta.crate_name(),
-        project => context! {
+    let led_value = |l: &LedSpec| {
+        context! {
+            name => l.name.clone(),
+            pin => l.pin,
+            active_low => l.active_low,
+        }
+    };
+
+    let mut map: BTreeMap<String, Value> = BTreeMap::new();
+    // Hardware first, so the fixed names below always win a collision.
+    for led in &hardware.leds {
+        map.insert(led.name.clone(), led_value(led));
+    }
+    map.insert(
+        "leds".into(),
+        Value::from(hardware.leds.iter().map(led_value).collect::<Vec<_>>()),
+    );
+    map.insert("project_name".into(), Value::from(meta.crate_name()));
+    map.insert(
+        "project".into(),
+        context! {
             name => meta.name.clone(),
             description => meta.description.clone(),
         },
-        chip => context! {
+    );
+    map.insert(
+        "chip".into(),
+        context! {
             name => chip.name(),
             rust_target => chip.target(),
             riscv => !chip.is_xtensa(),
             xtensa => chip.is_xtensa(),
         },
-        board => wokwi_board(chip.name()),
-        serialMonitor => "$serialMonitor",
-        console => match meta.console {
+    );
+    map.insert("board".into(), Value::from(wokwi_board(chip.name())));
+    map.insert("serialMonitor".into(), Value::from("$serialMonitor"));
+    map.insert(
+        "console".into(),
+        Value::from(match meta.console {
             Console::Uart => "uart",
             Console::JtagSerial => "jtag-serial",
-        },
-        runtime => match meta.runtime {
+        }),
+    );
+    map.insert(
+        "runtime".into(),
+        Value::from(match meta.runtime {
             Runtime::Blocking => "blocking",
             Runtime::Embassy => "embassy",
-        },
-        embassy => embassy,
-        opt => Value::from(opt),
-        log => true,
-        runtime_dep => runtime_dep(runtime_source, embassy),
-    })
+        }),
+    );
+    map.insert("embassy".into(), Value::from(embassy));
+    map.insert("opt".into(), Value::from(opt));
+    map.insert("log".into(), Value::from(true));
+    map.insert(
+        "runtime_dep".into(),
+        Value::from(runtime_dep(runtime_source, embassy)),
+    );
+    Ok(Value::from(map))
 }
 
 #[cfg(test)]
@@ -168,6 +226,31 @@ mod tests {
         assert!(get(&c, "opt.alloc").is_true());
         assert!(get(&c, "opt.unstable-hal").is_true());
         assert!(!get(&c, "opt.keep-zig-source").is_true());
+        // no hardware: an empty (but defined) list, so templates can loop over it
+        assert_eq!(get(&c, "leds").len(), Some(0));
+    }
+
+    #[test]
+    fn leds_are_reachable_by_list_and_by_name() {
+        let m = meta(Runtime::Blocking, "esp32c3");
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let hw = Hardware {
+            leds: vec![LedSpec {
+                name: "red_led".into(),
+                pin: 18,
+                active_low: false,
+            }],
+        };
+        let c = build_context_with(&m, &opts, &RuntimeSource::Published, &hw).unwrap();
+        assert_eq!(get(&c, "leds").len(), Some(1));
+        assert_eq!(get(&c, "red_led.name").as_str(), Some("red_led"));
+        let env = minijinja::Environment::new();
+        assert_eq!(env.render_str("{{ red_led.pin }}", &c).unwrap(), "18");
+        assert_eq!(
+            env.render_str("{{ red_led.active_low }}", &c).unwrap(),
+            "false"
+        );
     }
 
     #[test]

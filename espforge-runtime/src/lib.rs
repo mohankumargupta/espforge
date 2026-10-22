@@ -68,3 +68,53 @@ impl Default for Delay {
         Self::new()
     }
 }
+
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
+pub use led::Led;
+
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
+mod led {
+    use core::cell::RefCell;
+    use esp_hal::gpio::{Level, Output, OutputConfig, OutputPin};
+
+    /// An LED on a gpio output. Methods take `&self` because the app reaches
+    /// components through `&ctx.components.<name>`; the pin sits in a
+    /// `RefCell`. Not `Sync`: use it from the blocking runtime.
+    pub struct Led {
+        pin: RefCell<Output<'static>>,
+        active_low: bool,
+    }
+
+    impl Led {
+        /// Starts switched off.
+        pub fn new(pin: impl OutputPin + 'static, active_low: bool) -> Self {
+            let off = if active_low { Level::High } else { Level::Low };
+            Self {
+                pin: RefCell::new(Output::new(pin, off, OutputConfig::default())),
+                active_low,
+            }
+        }
+
+        pub fn on(&self) {
+            let level = if self.active_low {
+                Level::Low
+            } else {
+                Level::High
+            };
+            self.pin.borrow_mut().set_level(level);
+        }
+
+        pub fn off(&self) {
+            let level = if self.active_low {
+                Level::High
+            } else {
+                Level::Low
+            };
+            self.pin.borrow_mut().set_level(level);
+        }
+
+        pub fn toggle(&self) {
+            self.pin.borrow_mut().toggle();
+        }
+    }
+}
