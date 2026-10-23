@@ -23,7 +23,7 @@ item says otherwise.
 
 ## 1. Break up `espforge/src/commands/pipeline.rs` (1,748 lines)
 
-Status: 1a ✅ 1b ✅ (2026-10-24) — 1c–1f still to do.
+Status: 1a ✅ 1b ✅ 1c ✅ 1d ✅ 1e ✅ 1f ✅ (2026-10-24) — Item 1 done; Item 2 (2c pilot: I2C only) in progress.
 
 ### Problem
 

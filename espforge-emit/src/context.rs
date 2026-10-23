@@ -25,9 +25,7 @@
 
 use anyhow::{Context as _, Result};
 use espforge_model::{Console, Meta, Runtime};
-// Spec structs live in `espforge-model` (step 1b); re-exported here so
-// downstream imports keep working until step 1f removes this shim.
-pub use espforge_model::hardware::{
+use espforge_model::hardware::{
     ButtonSpec, Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
 };
 use espforge_options::{OptValue, ResolvedOptions};
