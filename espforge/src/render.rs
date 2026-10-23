@@ -30,7 +30,11 @@ pub fn render_columns(rows: &[(String, String)], piped: bool) -> String {
         }
         return out;
     }
-    let width = rows.iter().map(|(cmd, _)| cmd.chars().count()).max().unwrap_or(0);
+    let width = rows
+        .iter()
+        .map(|(cmd, _)| cmd.chars().count())
+        .max()
+        .unwrap_or(0);
     for (cmd, desc) in rows {
         out.push_str(&format!("{cmd:<width$}  {desc}\n"));
     }
@@ -84,7 +88,12 @@ pub fn render_leaf_list(e: &ElementDef, piped: bool) -> String {
             "copy-ready snippets and example projects".to_string(),
         ),
     ];
-    format!("{} - {}\n{}", e.tag, e.summary, render_columns(&rows, piped))
+    format!(
+        "{} - {}\n{}",
+        e.tag,
+        e.summary,
+        render_columns(&rows, piped)
+    )
 }
 
 // ----------------------------------------------------------- leaf views
@@ -223,9 +232,7 @@ fn attribute_rows(e: &ElementDef) -> Vec<(String, String)> {
     // Same shape groups `sda, scl (required, pin)` even when only one of
     // them carries help text (the first one's is shown).
     let same_shape = |a: &AttrDef, b: &AttrDef| {
-        a.kind.display() == b.kind.display()
-            && a.required == b.required
-            && a.default == b.default
+        a.kind.display() == b.kind.display() && a.required == b.required && a.default == b.default
     };
 
     for attr in &e.attrs {
@@ -456,7 +463,10 @@ mod tests {
     fn a_leaf_lists_help_and_examples_under_a_title() {
         let out = render_leaf_list(&leaf("i2c"), false);
         assert!(out.starts_with("i2c - I2C bus controller\n"), "\n{out}");
-        assert!(out.contains("espforge espf peripherals i2c help"), "\n{out}");
+        assert!(
+            out.contains("espforge espf peripherals i2c help"),
+            "\n{out}"
+        );
         assert!(out.contains("man page:"), "\n{out}");
         assert!(
             out.contains("espforge espf peripherals i2c examples"),

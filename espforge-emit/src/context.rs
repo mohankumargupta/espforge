@@ -14,11 +14,13 @@
 //! | `log`          | always `true` (logging is `log` only) |
 //! | `runtime_dep`  | TOML inline table for the `espforge-runtime` dependency |
 //! | `leds`         | list of `{ name, pin, active_low }`, one per `<led>` component |
+//! | `buttons`      | list of `{ name, pin, pull_up }`, one per `<button>` component |
 //! | `i2cs`         | list of `{ name, peripheral, sda, scl, khz }`, one per `<i2c_component>` |
 //! | `spi_buses`    | list of `{ id, peripheral, sclk, mosi, miso, khz, mode }`, one used `<spi>` |
 //! | `spis`         | list of `{ name, bus, cs }`, one per `<spi_component>`, by component id |
 //! | `uarts`        | list of `{ name, peripheral, tx, rx, baud, parity, stop_bits }`, one per `<uart_component>` |
 //! | `<led name>`   | each led again, by its component id (`red_led.pin` in diagram.json) |
+//! | `<button name>`| each button again, by its component id (`button.pin` in diagram.json) |
 //! | `wifi`         | `{ ssid, password }` when `<wifi>` is in `# services`, else none (falsy) |
 
 use anyhow::{Context as _, Result};
@@ -46,6 +48,15 @@ pub struct LedSpec {
     pub name: String,
     pub pin: u8,
     pub active_low: bool,
+}
+
+/// One `<button>` component, already resolved to a gpio pin number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ButtonSpec {
+    /// Rust identifier: the component id with `-` turned into `_`.
+    pub name: String,
+    pub pin: u8,
+    pub pull_up: bool,
 }
 
 /// `<i2c>` in `# peripherals`, plus the `<i2c_component>` on it, resolved to
@@ -125,6 +136,7 @@ pub struct WifiSpec {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Hardware {
     pub leds: Vec<LedSpec>,
+    pub buttons: Vec<ButtonSpec>,
     pub i2cs: Vec<I2cSpec>,
     /// Used bus peripherals first (template order), then devices.
     pub spi_buses: Vec<SpiBusSpec>,
@@ -208,6 +220,14 @@ pub fn build_context_with(
         }
     };
 
+    let button_value = |b: &ButtonSpec| {
+        context! {
+            name => b.name.clone(),
+            pin => b.pin,
+            pull_up => b.pull_up,
+        }
+    };
+
     let i2c_value = |b: &I2cSpec| {
         context! {
             name => b.name.clone(),
@@ -255,6 +275,9 @@ pub fn build_context_with(
     for led in &hardware.leds {
         map.insert(led.name.clone(), led_value(led));
     }
+    for button in &hardware.buttons {
+        map.insert(button.name.clone(), button_value(button));
+    }
     for i2c in &hardware.i2cs {
         map.insert(i2c.name.clone(), i2c_value(i2c));
     }
@@ -267,6 +290,16 @@ pub fn build_context_with(
     map.insert(
         "leds".into(),
         Value::from(hardware.leds.iter().map(led_value).collect::<Vec<_>>()),
+    );
+    map.insert(
+        "buttons".into(),
+        Value::from(
+            hardware
+                .buttons
+                .iter()
+                .map(button_value)
+                .collect::<Vec<_>>(),
+        ),
     );
     map.insert(
         "i2cs".into(),
@@ -288,13 +321,7 @@ pub fn build_context_with(
     );
     map.insert(
         "uarts".into(),
-        Value::from(
-            hardware
-                .uarts
-                .iter()
-                .map(uart_value)
-                .collect::<Vec<_>>(),
-        ),
+        Value::from(hardware.uarts.iter().map(uart_value).collect::<Vec<_>>()),
     );
     map.insert(
         "wifi".into(),
@@ -486,10 +513,7 @@ mod tests {
         assert_eq!(get(&c, "spi_buses").len(), Some(1));
         assert_eq!(get(&c, "spi_tester.bus").as_str(), Some("spi2"));
         let env = minijinja::Environment::new();
-        assert_eq!(
-            env.render_str("{{ spi_tester.cs }}", &c).unwrap(),
-            "9"
-        );
+        assert_eq!(env.render_str("{{ spi_tester.cs }}", &c).unwrap(), "9");
         assert_eq!(
             env.render_str("{{ spi_buses[0].peripheral }}", &c).unwrap(),
             "SPI2"

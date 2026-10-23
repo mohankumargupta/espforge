@@ -953,14 +953,22 @@ ownership = [ { glob = "src/**", own = "owned" } ]
             t.content
         );
         // and the chip is wired in, named from chip.json
-        assert!(t.content.contains("[[chip]]\nname = 'chip'"), "{}", t.content);
+        assert!(
+            t.content.contains("[[chip]]\nname = 'chip'"),
+            "{}",
+            t.content
+        );
         assert!(t.content.contains("binary = 'chip.wasm'"), "{}", t.content);
     }
 
     #[test]
     fn no_chip_means_no_chip_section_in_wokwi_toml() {
         let r = run_overlay(hello(), &overlay_of("01.Basics/helloworld"));
-        assert!(!file(&r.artifacts, "wokwi.toml").content.contains("[[chip]]"));
+        assert!(
+            !file(&r.artifacts, "wokwi.toml")
+                .content
+                .contains("[[chip]]")
+        );
     }
 
     #[test]

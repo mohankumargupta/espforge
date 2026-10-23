@@ -5,7 +5,7 @@
 use espf::context::{ParsedNode, RuntimeContext};
 use espf::diag::EspfError;
 use espforge_emit::{
-    Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
+    ButtonSpec, Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
 };
 use espforge_model::Meta;
 use espforge_options::{Answers, ResolvedOptions};
@@ -217,9 +217,7 @@ fn parse_khz(raw: &str, tag: &str, id: &str) -> Result<u32, String> {
     let split = t.find(|c: char| !c.is_ascii_digit()).unwrap_or(t.len());
     let (num, unit) = t.split_at(split);
     let n: u32 = num.parse().map_err(|_| {
-        format!(
-            "<{tag} id=\"{id}\"> frequency=\"{raw}\" is not a frequency: use e.g. `100kHz`"
-        )
+        format!("<{tag} id=\"{id}\"> frequency=\"{raw}\" is not a frequency: use e.g. `100kHz`")
     })?;
     match unit.trim() {
         "khz" => Ok(n),
@@ -304,10 +302,10 @@ fn wifi_spec(n: &ParsedNode) -> Result<WifiSpec, String> {
 }
 
 /// The hardware and services `build` can generate code for today: `<gpio>`
-/// peripherals used by `<led>` components, `<i2c>` peripherals used by
-/// `<i2c_component>` components, `<spi>` peripherals used by `<spi_component>`
-/// components, and one `<wifi>` service. Anything else is a clear "not
-/// supported yet".
+/// peripherals used by `<led>` and `<button>` components, `<i2c>` peripherals
+/// used by `<i2c_component>` components, `<spi>` peripherals used by
+/// `<spi_component>` components, and one `<wifi>` service. Anything else is a
+/// clear "not supported yet".
 pub fn hardware(c: &Checked) -> Result<Hardware, String> {
     struct I2cBusDraft {
         id: String,
@@ -361,7 +359,7 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
     let sections = &c.fe.parsed.sections;
     if sections.get("devices").is_some_and(|v| !v.is_empty()) {
         return Err(
-            "`# devices` is not supported by `build` yet (only <gpio> peripherals with <led> components, <i2c> peripherals with <i2c_component> components, <spi> peripherals with <spi_component> components, and the <wifi> service)"
+            "`# devices` is not supported by `build` yet (only <gpio> peripherals with <led> and <button> components, <i2c> peripherals with <i2c_component> components, <spi> peripherals with <spi_component> components, and the <wifi> service)"
                 .to_string(),
         );
     }
@@ -466,11 +464,12 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
     // name, bus id, cs pin
     let mut spi_devices: Vec<SpiDeviceDraft> = Vec::new();
     let mut leds: Vec<LedSpec> = Vec::new();
+    let mut buttons: Vec<ButtonSpec> = Vec::new();
     for n in sections.get("components").map(Vec::as_slice).unwrap_or(&[]) {
         if n.tag_name == "i2c_component" {
-            let bus_ref = n
-                .get_attr("i2c")
-                .ok_or_else(|| format!("<i2c_component id=\"{}\"> needs i2c=\"$<i2c id>\"", n.id))?;
+            let bus_ref = n.get_attr("i2c").ok_or_else(|| {
+                format!("<i2c_component id=\"{}\"> needs i2c=\"$<i2c id>\"", n.id)
+            })?;
             // Note: unlike `<gpio>`, this must be an exact (non-prefixed) id;
             // `i2c="$i2c0"` and `i2c="i2c0"` are both accepted.
             let target = bus_ref.trim_start_matches('$');
@@ -505,9 +504,9 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
             continue;
         }
         if n.tag_name == "spi_component" {
-            let bus_ref = n
-                .get_attr("spi")
-                .ok_or_else(|| format!("<spi_component id=\"{}\"> needs spi=\"$<spi id>\"", n.id))?;
+            let bus_ref = n.get_attr("spi").ok_or_else(|| {
+                format!("<spi_component id=\"{}\"> needs spi=\"$<spi id>\"", n.id)
+            })?;
             let target = bus_ref.trim_start_matches('$');
             if !spi_buses.iter().any(|b| b.id == target) {
                 return Err(format!(
@@ -518,7 +517,9 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
             let cs = n
                 .get_attr("cs")
                 .and_then(|p| p.parse::<u8>().ok())
-                .ok_or_else(|| format!("<spi_component id=\"{}\"> needs a numeric cs=\"...\"", n.id))?;
+                .ok_or_else(|| {
+                    format!("<spi_component id=\"{}\"> needs a numeric cs=\"...\"", n.id)
+                })?;
             let name = n.id.replace('-', "_");
             if !is_rust_ident(&name) {
                 return Err(format!(
@@ -545,9 +546,9 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
             continue;
         }
         if n.tag_name == "uart_component" {
-            let uart_ref = n
-                .get_attr("uart")
-                .ok_or_else(|| format!("<uart_component id=\"{}\"> needs uart=\"$<uart id>\"", n.id))?;
+            let uart_ref = n.get_attr("uart").ok_or_else(|| {
+                format!("<uart_component id=\"{}\"> needs uart=\"$<uart id>\"", n.id)
+            })?;
             let target = uart_ref.trim_start_matches('$');
             let draft = uarts
                 .iter_mut()
@@ -565,9 +566,9 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
                     n.id.replace('-', "_")
                 ));
             }
-            let baud_raw = n
-                .get_attr("baud_rate")
-                .ok_or_else(|| format!("<uart_component id=\"{}\"> needs baud_rate=\"...\"", n.id))?;
+            let baud_raw = n.get_attr("baud_rate").ok_or_else(|| {
+                format!("<uart_component id=\"{}\"> needs baud_rate=\"...\"", n.id)
+            })?;
             let baud: u32 = baud_raw.parse().map_err(|_| {
                 format!(
                     "<uart_component id=\"{}\"> baud_rate=\"{baud_raw}\" is not a number",
@@ -616,9 +617,66 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
             });
             continue;
         }
+        if n.tag_name == "button" {
+            let gpio_ref = n
+                .get_attr("gpio")
+                .ok_or_else(|| format!("<button id=\"{}\"> needs gpio=\"$<gpio id>\"", n.id))?;
+            let target = gpio_ref.trim_start_matches('$');
+            let (_, pin, direction) = gpios
+                .iter()
+                .find(|(id, _, _)| *id == target)
+                .ok_or_else(|| {
+                    format!(
+                        "<button id=\"{}\"> refers to `{target}`, which is not a <gpio> in `# peripherals`",
+                        n.id
+                    )
+                })?;
+            if matches!(direction, Some(d) if *d != "input") {
+                return Err(format!(
+                    "<button id=\"{}\"> needs an input pin, but `{target}` has direction=\"{}\"",
+                    n.id,
+                    direction.unwrap_or("")
+                ));
+            }
+            let pull_up = match n.get_attr("pull_up") {
+                None | Some("false") => false,
+                Some("true") => true,
+                Some(other) => {
+                    return Err(format!(
+                        "<button id=\"{}\"> pull_up=\"{other}\" must be \"true\" or \"false\"",
+                        n.id
+                    ));
+                }
+            };
+            let name = n.id.replace('-', "_");
+            if !is_rust_ident(&name) {
+                return Err(format!(
+                    "<button id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
+                    n.id
+                ));
+            }
+            if let Some(other) = buttons.iter().find(|b| b.pin == *pin) {
+                return Err(format!(
+                    "<button id=\"{}\"> and <button id=\"{}\"> both use GPIO{pin}",
+                    other.name, n.id
+                ));
+            }
+            if leds.iter().any(|l| l.pin == *pin) {
+                return Err(format!(
+                    "<led id=\"{}\"> and <button id=\"{}\">: one pin cannot be both input and output",
+                    n.id, name
+                ));
+            }
+            buttons.push(ButtonSpec {
+                name,
+                pin: *pin,
+                pull_up,
+            });
+            continue;
+        }
         if n.tag_name != "led" {
             return Err(format!(
-                "<{}> in `# components` is not supported by `build` yet (only <led>, <i2c_component>, <spi_component> and <uart_component>)",
+                "<{}> in `# components` is not supported by `build` yet (only <led>, <button>, <i2c_component>, <spi_component> and <uart_component>)",
                 n.tag_name
             ));
         }
@@ -663,6 +721,12 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
             return Err(format!(
                 "<led id=\"{}\"> and <led id=\"{}\"> both use GPIO{pin}",
                 other.name, n.id
+            ));
+        }
+        if let Some(b) = buttons.iter().find(|b| b.pin == *pin) {
+            return Err(format!(
+                "<button id=\"{}\"> and <led id=\"{}\">: one pin cannot be both input and output",
+                b.name, n.id
             ));
         }
         leds.push(LedSpec {
@@ -721,6 +785,14 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
                     ));
                 }
             }
+            for button in &buttons {
+                if button.pin == pin {
+                    return Err(format!(
+                        "<button id=\"{}\"> and <spi id=\"{}\"> both use GPIO{pin}",
+                        button.name, bus.id
+                    ));
+                }
+            }
             for i2c in &i2c_buses {
                 if pin == i2c.sda || pin == i2c.scl {
                     return Err(format!(
@@ -771,6 +843,14 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
                 ));
             }
         }
+        for button in &buttons {
+            if button.pin == pin {
+                return Err(format!(
+                    "<button id=\"{}\"> and <spi_component id=\"{}\"> both use GPIO{pin}",
+                    button.name, dev.name
+                ));
+            }
+        }
         for i2c in &i2c_buses {
             if pin == i2c.sda || pin == i2c.scl {
                 return Err(format!(
@@ -813,6 +893,14 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
                     return Err(format!(
                         "<led id=\"{}\"> and <uart id=\"{}\"> both use GPIO{pin}",
                         led.name, uart.id
+                    ));
+                }
+            }
+            for button in &buttons {
+                if button.pin == pin {
+                    return Err(format!(
+                        "<button id=\"{}\"> and <uart id=\"{}\"> both use GPIO{pin}",
+                        button.name, uart.id
                     ));
                 }
             }
@@ -913,6 +1001,7 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
 
     Ok(Hardware {
         leds,
+        buttons,
         i2cs,
         spi_buses: spi_bus_specs,
         spis,
@@ -1017,7 +1106,9 @@ mod tests {
     #[test]
     fn unsupported_hardware_is_valid_but_not_buildable() {
         let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <pwm id=\"pwm0\" />\n# components\n# devices\n# services\n";
-        let c = validate(src, &AnswerArgs::default()).ok().expect("graph is fine");
+        let c = validate(src, &AnswerArgs::default())
+            .ok()
+            .expect("graph is fine");
         assert_eq!(unsupported_section(&c), Some("peripherals"));
         let err = buildable(&c).unwrap_err();
         assert!(err.contains("<pwm>"), "{err}");
@@ -1048,7 +1139,10 @@ mod tests {
         );
         let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
         let spec = &hardware(&c).unwrap().uarts[0];
-        assert_eq!((spec.baud, spec.parity.as_str(), spec.stop_bits.as_str()), (115200, "Even", "_2"));
+        assert_eq!(
+            (spec.baud, spec.parity.as_str(), spec.stop_bits.as_str()),
+            (115200, "Even", "_2")
+        );
     }
 
     #[test]
@@ -1121,7 +1215,9 @@ mod tests {
 
     #[test]
     fn i2c_frequency_is_parsed() {
-        let c = validate(I2C_400K, &AnswerArgs::default()).ok().expect("valid");
+        let c = validate(I2C_400K, &AnswerArgs::default())
+            .ok()
+            .expect("valid");
         let spec = &hardware(&c).unwrap().i2cs[0];
         assert_eq!(spec.khz, 400);
 
@@ -1199,11 +1295,7 @@ mod tests {
 
     #[test]
     fn spi_defaults_are_1_mhz_mode_0_and_explicit_attrs_are_parsed() {
-        let src = WITH_SPI
-            .replace(
-                " frequency=\"100kHz\"",
-                " mode=\"3\"",
-            );
+        let src = WITH_SPI.replace(" frequency=\"100kHz\"", " mode=\"3\"");
         let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
         let bus = &hardware(&c).unwrap().spi_buses[0];
         assert_eq!(bus.khz, 1000);
@@ -1222,11 +1314,10 @@ mod tests {
     fn a_spi_component_needs_a_declared_spi() {
         // The ref passes graph resolution (`spi2` becomes a gpio peripheral)
         // but the component then points at a gpio, not an `<spi>`.
-        let src = WITH_SPI
-            .replace(
-                "<spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"6\" frequency=\"100kHz\" />",
-                "<gpio id=\"spi2\" pin=\"8\" direction=\"output\" />",
-            );
+        let src = WITH_SPI.replace(
+            "<spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"6\" frequency=\"100kHz\" />",
+            "<gpio id=\"spi2\" pin=\"8\" direction=\"output\" />",
+        );
         let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
         assert!(hardware(&c).unwrap_err().contains("not an <spi>"));
     }
@@ -1266,7 +1357,9 @@ mod tests {
             "# devices",
             "  <spi_component id=\"second\" spi=\"$spi2\" cs=\"9\" />\n# devices",
         );
-        let c = validate(&same_cs, &AnswerArgs::default()).ok().expect("valid");
+        let c = validate(&same_cs, &AnswerArgs::default())
+            .ok()
+            .expect("valid");
         let err = hardware(&c).unwrap_err();
         assert!(
             err.contains("tester") && err.contains("second") && err.contains("both use GPIO9"),
@@ -1291,7 +1384,9 @@ mod tests {
             "# components",
             "# components\n  <led id=\"red\" gpio=\"$gpio9\" />",
         );
-        let c = validate(&with_led, &AnswerArgs::default()).ok().expect("valid");
+        let c = validate(&with_led, &AnswerArgs::default())
+            .ok()
+            .expect("valid");
         let err = hardware(&c).unwrap_err();
         assert!(
             err.contains("gpio9") && err.contains("tester") && err.contains("GPIO9"),
@@ -1320,7 +1415,9 @@ mod tests {
         let cs_on_bus = WITH_SPI
             .replace(" miso=\"6\"", " miso=\"9\"")
             .replace("cs=\"9\"", "cs=\"9\"");
-        let c = validate(&cs_on_bus, &AnswerArgs::default()).ok().expect("valid");
+        let c = validate(&cs_on_bus, &AnswerArgs::default())
+            .ok()
+            .expect("valid");
         let err = hardware(&c).unwrap_err();
         assert!(err.contains("both use GPIO9"), "{err}");
     }
@@ -1376,6 +1473,105 @@ mod tests {
         let src = WITH_LED.replace("output", "input");
         let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
         assert!(hardware(&c).unwrap_err().contains("needs an output pin"));
+    }
+
+    const WITH_BUTTON: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio9\" pin=\"9\" direction=\"input\" />\n# components\n  <button id=\"button\" gpio=\"$gpio9\" pull_up=\"true\" />\n# devices\n# services\n";
+
+    #[test]
+    fn a_button_is_buildable_and_becomes_hardware() {
+        let c = validate(WITH_BUTTON, &AnswerArgs::default())
+            .ok()
+            .expect("graph is fine");
+        let hw = hardware(&c).unwrap();
+        assert_eq!(
+            hw.buttons,
+            [ButtonSpec {
+                name: "button".into(),
+                pin: 9,
+                pull_up: true
+            }]
+        );
+    }
+
+    #[test]
+    fn pull_up_defaults_to_false_and_bad_values_are_refused() {
+        let src = WITH_BUTTON.replace(" pull_up=\"true\"", "");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(!hardware(&c).unwrap().buttons[0].pull_up);
+
+        let bad = WITH_BUTTON.replace("pull_up=\"true\"", "pull_up=\"up\"");
+        let c = validate(&bad, &AnswerArgs::default()).ok().expect("valid");
+        assert!(
+            hardware(&c)
+                .unwrap_err()
+                .contains("must be \"true\" or \"false\"")
+        );
+    }
+
+    #[test]
+    fn a_button_refers_to_a_gpio_peripheral() {
+        // Without the gpio ref attribute the graph itself refuses the
+        // component (the same controller-link check every component gets).
+        let src = WITH_BUTTON.replace(" gpio=\"$gpio9\"", "");
+        assert!(
+            validate(&src, &AnswerArgs::default()).is_err(),
+            "a button without gpio= must fail validation"
+        );
+
+        // Referring at something that exists but is not a <gpio>: the ref
+        // passes graph resolution (like `spi_component` pointing at a gpio)
+        // but the component then rejects it.
+        let src = WITH_BUTTON
+            .replace(
+                "# peripherals",
+                "# peripherals\n  <i2c id=\"i2c0\" sda=\"4\" scl=\"5\" />",
+            )
+            .replace("$gpio9", "$i2c0");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        let err = hardware(&c).unwrap_err();
+        assert!(err.contains("which is not a <gpio>"), "{err}");
+    }
+
+    #[test]
+    fn a_button_on_an_output_pin_is_refused() {
+        let src = WITH_BUTTON.replace("input", "output");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap_err().contains("needs an input pin"));
+    }
+
+    #[test]
+    fn two_buttons_on_one_pin_are_refused() {
+        let src = WITH_BUTTON.replace(
+            "# devices",
+            "  <button id=\"other\" gpio=\"$gpio9\" />\n# devices",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert!(hardware(&c).unwrap_err().contains("both use GPIO9"));
+    }
+
+    #[test]
+    fn a_led_and_a_button_cannot_share_one_pin() {
+        // A led needs an output gpio and a button an input one, so sharing a
+        // physical pin uses two <gpio> entries with the same pin number.
+        for (first, second) in [
+            (
+                "  <led id=\"red_led\" gpio=\"$gpio9\" />\n  <button id=\"button\" gpio=\"$gpio9b\" />",
+                "led before button",
+            ),
+            (
+                "  <button id=\"button\" gpio=\"$gpio9b\" />\n  <led id=\"red_led\" gpio=\"$gpio9\" />",
+                "button before led",
+            ),
+        ] {
+            let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio9\" pin=\"9\" direction=\"output\" />\n  <gpio id=\"gpio9b\" pin=\"9\" direction=\"input\" />\n# components\n".to_string()
+                + first
+                + "\n# devices\n# services\n";
+            let c = validate(&src, &AnswerArgs::default())
+                .ok()
+                .unwrap_or_else(|| panic!("{} must validate", second));
+            let err = hardware(&c).unwrap_err();
+            assert!(err.contains("input and output"), "{second}: {err}");
+        }
     }
 
     // ---- wifi service -------------------------------------------------------

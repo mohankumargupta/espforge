@@ -19,7 +19,9 @@ fn main() {
         .iter()
         .find(|package| package.name == "espforge-espgenerate-template")
         .map(|package| package.version.to_string())
-        .expect("build.rs: espforge-espgenerate-template dependency must be part of the build graph");
+        .expect(
+            "build.rs: espforge-espgenerate-template dependency must be part of the build graph",
+        );
 
     println!("cargo:rustc-env=ESP_GENERATE_VERSION={version}");
 }

@@ -17,6 +17,9 @@ pub struct Components {
 {% for led in leds %}
     pub {{ led.name }}: espforge_runtime::Led,
 {% endfor %}
+{% for button in buttons %}
+    pub {{ button.name }}: espforge_runtime::Button,
+{% endfor %}
 {% for i2c in i2cs %}
     pub {{ i2c.name }}: espforge_runtime::I2cBus<{% if embassy %}esp_hal::Async{% else %}esp_hal::Blocking{% endif %}>,
 {% endfor %}
@@ -51,6 +54,13 @@ impl Components {
             {{ led.name }}: espforge_runtime::Led::new(
                 unsafe { registry.peripherals.GPIO{{ led.pin }}.clone_unchecked() },
                 {% if led.active_low %}true{% else %}false{% endif %},
+            ),
+{% endfor %}
+{% for button in buttons %}
+            // SAFETY: espforge checked that no other component uses GPIO{{ button.pin }}.
+            {{ button.name }}: espforge_runtime::Button::new(
+                unsafe { registry.peripherals.GPIO{{ button.pin }}.clone_unchecked() },
+                {% if button.pull_up %}true{% else %}false{% endif %},
             ),
 {% endfor %}
 {% for i2c in i2cs %}

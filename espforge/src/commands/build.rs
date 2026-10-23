@@ -402,10 +402,35 @@ mod tests {
     #[test]
     fn unsupported_sections_are_reported_not_silently_dropped() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(is_user(execute(&example_args(
-            "02.Digital/button",
-            &dir.path().join("out")
-        ))));
+        let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <pwm id=\"pwm0\" />\n# components\n# devices\n# services\n";
+        let f = dir.path().join("pwm.espf");
+        std::fs::write(&f, src).unwrap();
+        let args = BuildArgs {
+            file: Some(f),
+            out: dir.path().join("out"),
+            stage: Stage::Generate,
+            ..Default::default()
+        };
+        assert!(is_user(execute(&args)));
+    }
+
+    #[test]
+    fn builds_the_button_example_with_button_and_led_components() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        execute(&example_args("02.Digital/button", &out)).unwrap();
+        let generated = std::fs::read_to_string(out.join("src/generated.rs")).unwrap();
+        assert!(
+            generated.contains("pub red_led: espforge_runtime::Led,"),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("pub button: espforge_runtime::Button,"),
+            "{generated}"
+        );
+        assert!(generated.contains("GPIO9"), "{generated}");
+        let diagram = std::fs::read_to_string(out.join("diagram.json")).unwrap();
+        assert!(diagram.contains("esp:9"), "{diagram}");
     }
 
     #[test]

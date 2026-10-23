@@ -20,7 +20,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-pub use context::{Hardware, I2cSpec, LedSpec, RuntimeSource, SpiBusSpec, SpiSpec, UartSpec, WifiSpec};
+pub use context::{
+    ButtonSpec, Hardware, I2cSpec, LedSpec, RuntimeSource, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
+};
 pub use render::OverlayFile;
 
 /// Everything a build writes: text files and binary assets.
@@ -251,6 +253,30 @@ mod tests {
     }
 
     #[test]
+    fn buttons_become_components_in_generated_rs() {
+        let m = core();
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let hw = Hardware {
+            buttons: vec![ButtonSpec {
+                name: "button".into(),
+                pin: 9,
+                pull_up: true,
+            }],
+            ..Default::default()
+        };
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+        let generated = &find(&g, "src/generated.rs").content;
+        assert!(
+            generated.contains("pub button: espforge_runtime::Button,"),
+            "{generated}"
+        );
+        assert!(generated.contains("GPIO9.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("Button::new("), "{generated}");
+        assert!(!generated.contains("\n\n\n"), "{generated}");
+    }
+
+    #[test]
     fn an_i2c_component_reaches_generated_rs_for_both_runtimes() {
         let m = core();
         let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
@@ -271,7 +297,10 @@ mod tests {
             generated.contains("pub i2c0: espforge_runtime::I2cBus<esp_hal::Blocking>,"),
             "{generated}"
         );
-        assert!(generated.contains("peripherals.I2C0.clone_unchecked()"), "{generated}");
+        assert!(
+            generated.contains("peripherals.I2C0.clone_unchecked()"),
+            "{generated}"
+        );
         assert!(generated.contains("GPIO6.clone_unchecked()"), "{generated}");
         assert!(generated.contains("GPIO7.clone_unchecked()"), "{generated}");
         assert!(generated.contains("Rate::from_khz(400)"), "{generated}");
@@ -289,7 +318,10 @@ mod tests {
             generated.contains("pub i2c0: espforge_runtime::I2cBus<esp_hal::Async>,"),
             "{generated}"
         );
-        assert!(!generated.contains("I2cBus<esp_hal::Blocking>"), "{generated}");
+        assert!(
+            !generated.contains("I2cBus<esp_hal::Blocking>"),
+            "{generated}"
+        );
     }
 
     #[test]
@@ -320,20 +352,32 @@ mod tests {
             generated.contains("pub spi_tester: espforge_runtime::SpiDevice<esp_hal::Blocking>,"),
             "{generated}"
         );
-        assert!(generated.contains("peripherals.SPI2.clone_unchecked()"), "{generated}");
+        assert!(
+            generated.contains("peripherals.SPI2.clone_unchecked()"),
+            "{generated}"
+        );
         assert!(generated.contains("GPIO8.clone_unchecked()"), "{generated}");
         assert!(generated.contains("GPIO7.clone_unchecked()"), "{generated}");
         assert!(generated.contains("GPIO6.clone_unchecked()"), "{generated}");
         assert!(generated.contains("GPIO9.clone_unchecked()"), "{generated}");
         assert!(generated.contains("Rate::from_khz(100)"), "{generated}");
         assert!(generated.contains("Mode::_0"), "{generated}");
-        assert!(generated.contains("let spi2_bus = espforge_runtime::SpiBus::build("), "{generated}");
-        assert!(generated.contains("SpiDevice::new(\n                spi2_bus,"), "{generated}");
+        assert!(
+            generated.contains("let spi2_bus = espforge_runtime::SpiBus::build("),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("SpiDevice::new(\n                spi2_bus,"),
+            "{generated}"
+        );
         assert!(!generated.contains("\n\n\n"), "{generated}");
 
         // app.rs's `use crate::embedded_hal::spi::Operation` resolves.
         let lib = &find(&g, "src/lib.rs").content;
-        assert!(lib.contains("pub use espforge_runtime::embedded_hal;"), "{lib}");
+        assert!(
+            lib.contains("pub use espforge_runtime::embedded_hal;"),
+            "{lib}"
+        );
 
         let m = Meta {
             runtime: Runtime::Embassy,
@@ -347,7 +391,10 @@ mod tests {
             generated.contains("pub spi_tester: espforge_runtime::SpiDevice<esp_hal::Async>,"),
             "{generated}"
         );
-        assert!(!generated.contains("SpiDevice<esp_hal::Blocking>"), "{generated}");
+        assert!(
+            !generated.contains("SpiDevice<esp_hal::Blocking>"),
+            "{generated}"
+        );
     }
 
     #[test]
@@ -373,12 +420,21 @@ mod tests {
             generated.contains("pub serial: espforge_runtime::UartDevice<esp_hal::Blocking>,"),
             "{generated}"
         );
-        assert!(generated.contains("peripherals.UART1.clone_unchecked()"), "{generated}");
+        assert!(
+            generated.contains("peripherals.UART1.clone_unchecked()"),
+            "{generated}"
+        );
         assert!(generated.contains("GPIO6.clone_unchecked()"), "{generated}");
         assert!(generated.contains("GPIO5.clone_unchecked()"), "{generated}");
         assert!(generated.contains("baudrate: 9600"), "{generated}");
-        assert!(generated.contains("parity: esp_hal::uart::Parity::None"), "{generated}");
-        assert!(generated.contains("stop_bits: esp_hal::uart::StopBits::_1"), "{generated}");
+        assert!(
+            generated.contains("parity: esp_hal::uart::Parity::None"),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("stop_bits: esp_hal::uart::StopBits::_1"),
+            "{generated}"
+        );
         assert!(!generated.contains("\n\n\n"), "{generated}");
 
         let m = Meta {
@@ -393,7 +449,10 @@ mod tests {
             generated.contains("pub serial: espforge_runtime::UartDevice<esp_hal::Async>,"),
             "{generated}"
         );
-        assert!(!generated.contains("UartDevice<esp_hal::Blocking>"), "{generated}");
+        assert!(
+            !generated.contains("UartDevice<esp_hal::Blocking>"),
+            "{generated}"
+        );
     }
 
     #[test]
@@ -432,7 +491,10 @@ mod tests {
             1,
             "{generated}"
         );
-        assert!(generated.contains("GPIO10.clone_unchecked()"), "{generated}");
+        assert!(
+            generated.contains("GPIO10.clone_unchecked()"),
+            "{generated}"
+        );
         assert!(!generated.contains("\n\n\n"), "{generated}");
     }
 

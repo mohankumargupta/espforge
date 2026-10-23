@@ -23,7 +23,10 @@ spiexample: (_espforge "04.Communication/spi_example")
 
 [group('espemu')]
 uartexample: (_espforge "04.Communication/uart_example")
-# ---- test recipes: one line each -----------------------------------------
+
+[group('espemu')]
+button: (_espforge "02.Digital/button")
+
 # usage: (_emutest "<category>/<example>" "<pytest script>")
 
 [group('espemu-test')]

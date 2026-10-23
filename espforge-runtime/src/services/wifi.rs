@@ -59,8 +59,7 @@ impl Wifi {
 
         let authentication = if config.password.is_empty() {
             AuthenticationMethodConfig::Open
-        }
-        else {
+        } else {
             AuthenticationMethodConfig::Wpa2Personal(config.password.try_into()?)
         };
         let station = StationConfig::default()

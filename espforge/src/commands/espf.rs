@@ -15,8 +15,8 @@
 use clap::Args;
 use espforge_options::catalog::{self, Match, ResolutionError, View};
 use std::io::IsTerminal;
-use std::process::{Command, Stdio};
 use std::process::ExitCode;
+use std::process::{Command, Stdio};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct EspfArgs {
@@ -69,20 +69,14 @@ fn execute(args: &EspfArgs) -> Result<(), u8> {
 fn render(m: &Match, view: View) -> Result<String, String> {
     let piped = !stdout_is_terminal();
     match (m, view) {
-        (Match::Root(c), View::Default | View::Help) => {
-            Ok(crate::render::render_root(c, piped))
-        }
-        (Match::Overview(c), View::Default | View::Help) => {
-            Ok(crate::render::render_overview(c))
-        }
+        (Match::Root(c), View::Default | View::Help) => Ok(crate::render::render_root(c, piped)),
+        (Match::Overview(c), View::Default | View::Help) => Ok(crate::render::render_overview(c)),
         (Match::Overview(_), View::Examples) => Err(examples_needs_a_leaf()),
         (Match::Section(s), View::Default | View::Help) => {
             Ok(crate::render::render_section(s, piped))
         }
         (Match::Leaf(e), View::Default) => Ok(crate::render::render_leaf_list(e, piped)),
-        (Match::Leaf(e), View::Help) => {
-            Ok(crate::render::render_man(catalog::embedded(), e))
-        }
+        (Match::Leaf(e), View::Help) => Ok(crate::render::render_man(catalog::embedded(), e)),
         (Match::Leaf(e), View::Examples) => Ok(crate::render::render_examples(e)),
         (Match::Root(_) | Match::Section(_), View::Examples) => Err(examples_needs_a_leaf()),
     }
@@ -192,9 +186,13 @@ mod tests {
         use crate::commands::pipeline;
 
         let overview = catalog::embedded().overview;
-        let start = overview.find("EXAMPLE\n").expect("overview has an EXAMPLE block")
+        let start = overview
+            .find("EXAMPLE\n")
+            .expect("overview has an EXAMPLE block")
             + "EXAMPLE\n".len();
-        let end = overview.find("\nNEXT\n").expect("overview has a NEXT block");
+        let end = overview
+            .find("\nNEXT\n")
+            .expect("overview has a NEXT block");
         let body = &overview[start..end];
 
         let indent = body

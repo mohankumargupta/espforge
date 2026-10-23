@@ -16,3 +16,7 @@ BUTTON EXAMPLE
   <button id="button" gpio="$gpio9" pull_up="true" />
 
 # devices
+
+# services 
+
+
