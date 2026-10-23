@@ -1160,6 +1160,7 @@ name = "espforge-hardware"
 version = "0.1.0"
 dependencies = [
  "espf",
+ "espforge-bindings",
  "espforge-model",
  "espforge-options",
 ]

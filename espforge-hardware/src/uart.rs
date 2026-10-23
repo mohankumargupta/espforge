@@ -175,7 +175,7 @@ pub fn finish_uart(uarts: Vec<UartDraft>) -> Vec<UartSpec> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::lower;
+    use super::super::lower_sections;
     use super::*;
 
     const WITH_UART: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <uart id=\"uart1\" tx=\"6\" rx=\"5\" />\n# components\n  <uart_component id=\"serial\" uart=\"$uart1\" baud_rate=\"9600\" />\n# devices\n# services\n";
@@ -185,7 +185,7 @@ mod tests {
     }
 
     fn lower_src(src: &str) -> Result<super::super::Hardware, String> {
-        lower(&sections(src))
+        lower_sections(&sections(src))
     }
 
     #[test]

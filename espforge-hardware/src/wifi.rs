@@ -95,7 +95,7 @@ pub fn lower_services(services: &[ParsedNode]) -> Result<Option<WifiSpec>, Strin
 
 #[cfg(test)]
 mod tests {
-    use super::super::{buildable_sections, lower};
+    use super::super::{buildable_sections, lower_sections};
     use super::*;
 
     const WITH_WIFI: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"embassy\" />\n# peripherals\n# components\n# devices\n# services\n  <wifi id=\"wifi0\" network1.ssid=\"Wokwi-GUEST\" />\n";
@@ -108,7 +108,7 @@ mod tests {
     // lowering tests the sections map is enough (validate only feeds
     // sections into lowering).
     fn lower_src(src: &str) -> Result<super::super::Hardware, String> {
-        lower(&sections(src))
+        lower_sections(&sections(src))
     }
 
     #[test]

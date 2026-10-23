@@ -6,7 +6,8 @@
 
 use super::util::parse_khz;
 use super::I2cSpec;
-use espf::context::ParsedNode;
+use espf::context::{ParsedNode, RuntimeContext};
+use espforge_bindings::components::I2cComponent;
 use espforge_model::hardware::is_rust_ident;
 
 /// One `<i2c>` peripheral plus the component riding on it (if any).
@@ -54,27 +55,31 @@ pub fn lower_i2c(n: &ParsedNode) -> Result<I2cBusDraft, String> {
 }
 
 /// The `<i2c_component>` branch of the `# components` loop.
+///
+/// Step 2c (pilot): the `$` parent lookup goes through the typed wrapper
+/// (`I2cComponent::resolve`), the sole consumer of the context handles.
+/// Bus occupancy (`both use`) and the slug check stay here until 2d/2e;
+/// the slug check duplicates the wrapper so the message stays byte-identical.
 pub fn attach_i2c_component(
     n: &ParsedNode,
     i2c_buses: &mut [I2cBusDraft],
+    ctx: &RuntimeContext,
 ) -> Result<(), String> {
-    let bus_ref = n.get_attr("i2c").ok_or_else(|| {
-        format!("<i2c_component id=\"{}\"> needs i2c=\"$<i2c id>\"", n.id)
-    })?;
-    // Note: unlike `<gpio>`, this must be an exact (non-prefixed) id;
-    // `i2c="$i2c0"` and `i2c="i2c0"` are both accepted.
-    let target = bus_ref.trim_start_matches('$');
-    if !i2c_buses.iter().any(|b| b.id == target) {
-        return Err(format!(
-            "<i2c_component id=\"{}\"> refers to `{target}`, which is not an <i2c> in `# peripherals`",
-            n.id
-        ));
-    }
-    if let Some(other) = &i2c_buses
+    // Single dispatch path for the `$` ref; wrapper owns `trim_start_matches`.
+    let comp = I2cComponent::resolve(n, ctx)?;
+    // Locate the draft via the resolved handle, not a string `find`.
+    let idx = i2c_buses
         .iter()
-        .find(|b| b.id == target)
-        .and_then(|b| b.used.as_deref())
-    {
+        .position(|b| ctx.interner.get(&b.id) == Some(comp.peripheral_handle))
+        .ok_or_else(|| {
+            let target = comp.i2c_ref.trim_start_matches('$');
+            format!(
+                "<i2c_component id=\"{}\"> refers to `{target}`, which is not an <i2c> in `# peripherals`",
+                n.id
+            )
+        })?;
+    let target = i2c_buses[idx].id.clone();
+    if let Some(other) = i2c_buses[idx].used.as_deref() {
         return Err(format!(
             "<i2c_component id=\"{other}\"> and <i2c_component id=\"{}\"> both use <i2c id=\"{target}\">",
             n.id
@@ -87,11 +92,7 @@ pub fn attach_i2c_component(
             n.id
         ));
     }
-    i2c_buses
-        .iter_mut()
-        .find(|b| b.id == target)
-        .expect("checked above")
-        .used = Some(name);
+    i2c_buses[idx].used = Some(name);
     Ok(())
 }
 
@@ -114,7 +115,7 @@ pub fn finish_i2c(buses: Vec<I2cBusDraft>) -> Vec<I2cSpec> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::lower;
+    use super::super::lower_sections;
     use super::*;
 
     const WITH_BUS: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <i2c id=\"i2c0\" sda=\"4\" scl=\"5\" />\n# components\n  <i2c_component id=\"c\" i2c=\"$i2c0\" address=\"0x48\" />\n# devices\n# services\n";
@@ -126,7 +127,7 @@ mod tests {
     }
 
     fn lower_src(src: &str) -> Result<super::super::Hardware, String> {
-        lower(&sections(src))
+        lower_sections(&sections(src))
     }
 
     #[test]
@@ -156,13 +157,15 @@ mod tests {
 
     #[test]
     fn an_i2c_component_needs_a_declared_i2c() {
-        // The ref passes graph resolution (`$pin7` is a peripheral) but the
-        // component then points at a gpio, not an `<i2c>`.
+        // The ref passes graph resolution but the component then points at a
+        // gpio, not an `<i2c>`. Step 2c pilot: the `$` lookup goes through
+        // `I2cComponent::resolve`, so the wrapper's message replaces
+        // hardware's old "not an <i2c>" line.
         let src = WITH_BUS
             .replace("<i2c id=", "<gpio id=")
             .replace(" sda=\"4\" scl=\"5\"", " pin=\"4\"");
         let err = lower_src(&src).unwrap_err();
-        assert!(err.contains("not an <i2c>"), "{err}");
+        assert!(err.contains("expects an i2c"), "{err}");
     }
 
     #[test]

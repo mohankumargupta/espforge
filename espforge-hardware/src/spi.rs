@@ -158,7 +158,7 @@ pub fn finish_spi(
 
 #[cfg(test)]
 mod tests {
-    use super::super::lower;
+    use super::super::lower_sections;
     use super::*;
 
     const WITH_SPI: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"6\" frequency=\"100kHz\" />\n# components\n  <spi_component id=\"tester\" spi=\"$spi2\" cs=\"9\" />\n# devices\n# services\n";
@@ -170,7 +170,7 @@ mod tests {
     }
 
     fn lower_src(src: &str) -> Result<super::super::Hardware, String> {
-        lower(&sections(src))
+        lower_sections(&sections(src))
     }
 
     #[test]

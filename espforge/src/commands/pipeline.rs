@@ -104,15 +104,17 @@ pub fn unsupported_section(c: &Checked) -> Option<&'static str> {
 }
 
 /// The hardware and services `build` can generate code for today. See
-/// `espforge-hardware::lower` for the per-bus breakdown.
+/// `espforge-hardware::lower` for the per-bus breakdown. `ctx` is the bound
+/// `$` graph from `validate`: I2C (pilot, item 2c) resolves its `$` parent
+/// through the typed `I2cComponent` wrapper instead of a string `find`.
 pub fn hardware(c: &Checked) -> Result<Hardware, String> {
-    espforge_hardware::lower(&c.fe.parsed.sections)
+    espforge_hardware::lower(&c.fe.parsed.sections, &c.ctx)
 }
 
 /// Whether `build` can turn this spec into firmware. `build` fails on `Err`;
 /// `check` reports it as a warning.
 pub fn buildable(c: &Checked) -> Result<(), String> {
-    espforge_hardware::buildable(&c.fe.parsed.sections)
+    espforge_hardware::buildable(&c.fe.parsed.sections, &c.ctx)
 }
 
 #[cfg(test)]

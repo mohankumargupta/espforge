@@ -62,6 +62,15 @@ impl<'a> I2cComponent<'a> {
             ));
         }
 
+        // Same slug rule `hardware` enforces so the wrapper can replace the
+        // manual `$` lookup without changing the user-visible text.
+        let slug = id.replace('-', "_");
+        if !is_rust_ident(&slug) {
+            return Err(format!(
+                "<i2c_component id=\"{id}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)"
+            ));
+        }
+
         Ok(Self {
             id,
             i2c_ref,
@@ -70,6 +79,12 @@ impl<'a> I2cComponent<'a> {
             peripheral: *peripheral,
         })
     }
+}
+
+fn is_rust_ident(s: &str) -> bool {
+    !s.is_empty()
+        && !s.starts_with(|c: char| c.is_ascii_digit())
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Parses an I2C device address: `0x48`-style hex or decimal.

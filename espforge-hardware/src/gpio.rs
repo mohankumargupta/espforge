@@ -162,7 +162,7 @@ pub fn attach_led(
 
 #[cfg(test)]
 mod tests {
-    use super::super::lower;
+    use super::super::lower_sections;
     use super::*;
 
     const WITH_LED: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# components\n  <led id=\"red-led\" gpio=\"$gpio18\" active_low=\"true\" />\n# devices\n# services\n";
@@ -174,7 +174,7 @@ mod tests {
     }
 
     fn lower_src(src: &str) -> Result<super::super::Hardware, String> {
-        lower(&sections(src))
+        lower_sections(&sections(src))
     }
 
     #[test]

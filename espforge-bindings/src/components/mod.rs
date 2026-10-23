@@ -12,14 +12,25 @@
 //! constructor that validates required attributes and resolves the
 //! `$`-parent-peripheral reference through the [`RuntimeContext`] tables.
 
+pub mod button_component;
 pub mod gpio_component;
 pub mod i2c_component;
+pub mod led_component;
 pub mod spi_component;
 pub mod uart_component;
 
-/// The component tags taken by [`resolve_component`], so the `espforge espf`
-/// catalog can be drift-checked against the wrappers.
-pub const TAGS: &[&str] = &["gpio_component", "i2c_component", "spi_component", "uart_component"];
+/// The bus-component tags taken by [`resolve_component`], so the
+/// `espforge espf` catalog can be drift-checked against the wrappers.
+/// `<led>` / `<button>` have their own typed wrappers (`led_component`,
+/// `button_component`) for hardware to consume directly; they are not bus
+/// components in the catalog, so they stay out of `TAGS` until the catalog
+/// gains `components` entries for them (item 2 follow-up).
+pub const TAGS: &[&str] = &[
+    "gpio_component",
+    "i2c_component",
+    "spi_component",
+    "uart_component",
+];
 
 /// The required-attribute list of the wrapper named by `tag` (each wrapper
 /// keeps it next to its `resolve`).
@@ -33,8 +44,10 @@ pub fn resolve_tag_required_attrs(tag: &str) -> Option<Vec<&'static str>> {
     }
 }
 
+pub use button_component::ButtonComponent;
 pub use gpio_component::{GpioComponent, GpioDirection};
 pub use i2c_component::{I2cComponent, parse_address as parse_i2c_address};
+pub use led_component::LedComponent;
 pub use spi_component::SpiComponent;
 pub use uart_component::{Parity, StopBits, UartComponent};
 

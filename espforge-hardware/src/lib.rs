@@ -31,14 +31,17 @@ pub use espforge_model::hardware::*;
 
 use std::collections::HashMap;
 
-use espf::context::ParsedNode;
+use espf::context::{ParsedNode, RuntimeContext};
 
 /// The hardware and services `build` can generate code for today: `<gpio>`
 /// peripherals used by `<led>` and `<button>` components, `<i2c>` peripherals
 /// used by `<i2c_component>` components, `<spi>` peripherals used by
 /// `<spi_component>` components, and one `<wifi>` service. Anything else is a
 /// clear "not supported yet".
-pub fn lower(sections: &HashMap<String, Vec<ParsedNode>>) -> Result<Hardware, String> {
+pub fn lower(
+    sections: &HashMap<String, Vec<ParsedNode>>,
+    ctx: &RuntimeContext,
+) -> Result<Hardware, String> {
     if sections
         .get("devices")
         .is_some_and(|v| !v.is_empty())
@@ -85,7 +88,7 @@ pub fn lower(sections: &HashMap<String, Vec<ParsedNode>>) -> Result<Hardware, St
         .unwrap_or(&[])
     {
         if n.tag_name == "i2c_component" {
-            i2c::attach_i2c_component(n, &mut i2c_buses)?;
+            i2c::attach_i2c_component(n, &mut i2c_buses, ctx)?;
         } else if n.tag_name == "spi_component" {
             spi::attach_spi_component(n, &mut spi_buses, &mut spi_devices)?;
         } else if n.tag_name == "uart_component" {
@@ -135,12 +138,48 @@ pub fn lower(sections: &HashMap<String, Vec<ParsedNode>>) -> Result<Hardware, St
 }
 
 /// Whether `build` can turn this spec into firmware.
-pub fn buildable(sections: &HashMap<String, Vec<ParsedNode>>) -> Result<(), String> {
-    lower(sections).map(|_| ())
+pub fn buildable(
+    sections: &HashMap<String, Vec<ParsedNode>>,
+    ctx: &RuntimeContext,
+) -> Result<(), String> {
+    lower(sections, ctx).map(|_| ())
+}
+
+/// Test helper: `lower` over a sections map. Builds a bound
+/// `RuntimeContext` via `resolve_and_bind` first, so tests exercise the
+/// same triangulation `pipeline::validate` feeds into `lower`.
+pub fn lower_sections(sections: &HashMap<String, Vec<ParsedNode>>) -> Result<Hardware, String> {
+    let mut ctx = RuntimeContext::new();
+    ctx.resolve_and_bind(
+        sections.get("peripherals").map(Vec::as_slice).unwrap_or(&[]),
+        sections.get("components").map(Vec::as_slice).unwrap_or(&[]),
+        sections.get("devices").map(Vec::as_slice).unwrap_or(&[]),
+    )
+    .map_err(|errs| {
+        errs.into_iter()
+            .map(|e| format!("{}: {}", e.title, e.label))
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    lower(sections, &ctx)
 }
 
 /// Test helper: `buildable` over a sections map (mirrors the old
 /// `pipeline::buildable(&Checked)` shape without the CLI type).
+/// Builds a bound `RuntimeContext` via `resolve_and_bind` first, so tests
+/// exercise the same triangulation `pipeline::validate` feeds into `lower`.
 pub fn buildable_sections(sections: &HashMap<String, Vec<ParsedNode>>) -> Result<(), String> {
-    buildable(sections)
+    let mut ctx = RuntimeContext::new();
+    ctx.resolve_and_bind(
+        sections.get("peripherals").map(Vec::as_slice).unwrap_or(&[]),
+        sections.get("components").map(Vec::as_slice).unwrap_or(&[]),
+        sections.get("devices").map(Vec::as_slice).unwrap_or(&[]),
+    )
+    .map_err(|errs| {
+        errs.into_iter()
+            .map(|e| format!("{}: {}", e.title, e.label))
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    buildable(sections, &ctx)
 }

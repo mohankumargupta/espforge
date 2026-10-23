@@ -10,3 +10,4 @@ edition = "2024"
 espforge-model = { path = "../espforge-model" }
 espf = { path = "../espf" }
 espforge-options = { path = "../espforge-options" }
+espforge-bindings = { path = "../espforge-bindings" }
