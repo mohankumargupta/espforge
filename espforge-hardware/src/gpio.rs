@@ -5,7 +5,8 @@
 //! branches (pin resolution, direction checks, duplicate-pin errors).
 
 use super::{ButtonSpec, LedSpec, is_rust_ident};
-use espf::context::ParsedNode;
+use espf::context::{ParsedNode, RuntimeContext};
+use espforge_bindings::components::{ButtonComponent, LedComponent};
 
 /// One `<gpio>` peripheral: id -> pin + optional direction.
 #[derive(Debug, Clone)]
@@ -28,34 +29,45 @@ pub fn lower_gpio(n: &ParsedNode) -> Result<GpioEntry, String> {
     })
 }
 
-/// Look a `$gpio` ref up in the gpio table. Kept as a helper so the
-/// `<led>` / `<button>` branches share the "not a `<gpio>`" message.
-pub fn resolve_gpio<'a>(
-    ref_raw: &str,
+/// Locate the `<gpio>` entry for a resolved component handle. The wrapper
+/// already proved the handle is an active GPIO; this maps it back onto the
+/// `gpios` table built from `# peripherals` (same order, same ids).
+fn gpio_for_handle<'a>(
+    gpios: &'a [GpioEntry],
+    ctx: &RuntimeContext,
+    handle: espf::context::Handle,
     owner_tag: &str,
     owner_id: &str,
-    gpios: &'a [GpioEntry],
+    ref_raw: &str,
 ) -> Result<&'a GpioEntry, String> {
-    let target = ref_raw.trim_start_matches('$');
-    gpios.iter().find(|g| g.id == target).ok_or_else(|| {
-        format!(
-            "<{owner_tag} id=\"{owner_id}\"> refers to `{target}`, which is not a <gpio> in `# peripherals`"
-        )
-    })
+    gpios
+        .iter()
+        .find(|g| ctx.interner.get(&g.id) == Some(handle))
+        .ok_or_else(|| {
+            let target = ref_raw.trim_start_matches('$');
+            format!(
+                "<{owner_tag} id=\"{owner_id}\"> refers to `{target}`, which is not a <gpio> in `# peripherals`"
+            )
+        })
 }
 
 /// The `<button>` branch of the `# components` loop. `leds` is the leds
 /// lowered so far (for the input/output clash check).
+///
+/// Step 2c: the `$` parent lookup goes through the typed wrapper
+/// (`ButtonComponent::resolve`), the sole consumer of the context handles.
+/// Pin/direction/duplicate checks stay here so messages stay byte-identical.
 pub fn attach_button(
     n: &ParsedNode,
     gpios: &[GpioEntry],
     leds: &[LedSpec],
     buttons: &mut Vec<ButtonSpec>,
+    ctx: &RuntimeContext,
 ) -> Result<(), String> {
-    let gpio_ref = n
-        .get_attr("gpio")
-        .ok_or_else(|| format!("<button id=\"{}\"> needs gpio=\"$<gpio id>\"", n.id))?;
-    let gpio = resolve_gpio(gpio_ref, "button", n.id, gpios)?;
+    // Single dispatch path for the `$` ref; wrapper error text already matches
+    // hardware's "not a <gpio>" / pull_up / slug messages.
+    let comp = ButtonComponent::resolve(n, ctx)?;
+    let gpio = gpio_for_handle(gpios, ctx, comp.peripheral_handle, "button", n.id, comp.gpio_ref)?;
     let (pin, direction) = (gpio.pin, gpio.direction.as_deref());
     if matches!(direction, Some(d) if d != "input") {
         return Err(format!(
@@ -104,16 +116,21 @@ pub fn attach_button(
 
 /// The `<led>` branch of the `# components` loop. `buttons` holds the
 /// buttons lowered so far (for the input/output clash check).
+///
+/// Step 2c: the `$` parent lookup goes through the typed wrapper
+/// (`LedComponent::resolve`), the sole consumer of the context handles.
+/// Pin/direction/duplicate checks stay here so messages stay byte-identical.
 pub fn attach_led(
     n: &ParsedNode,
     gpios: &[GpioEntry],
     leds: &mut Vec<LedSpec>,
     buttons: &[ButtonSpec],
+    ctx: &RuntimeContext,
 ) -> Result<(), String> {
-    let gpio_ref = n
-        .get_attr("gpio")
-        .ok_or_else(|| format!("<led id=\"{}\"> needs gpio=\"$<gpio id>\"", n.id))?;
-    let gpio = resolve_gpio(gpio_ref, "led", n.id, gpios)?;
+    // Single dispatch path for the `$` ref; wrapper error text already matches
+    // hardware's "not a <gpio>" / active_low / slug messages.
+    let comp = LedComponent::resolve(n, ctx)?;
+    let gpio = gpio_for_handle(gpios, ctx, comp.peripheral_handle, "led", n.id, comp.gpio_ref)?;
     let (pin, direction) = (gpio.pin, gpio.direction.as_deref());
     if matches!(direction, Some(d) if d != "output") {
         return Err(format!(

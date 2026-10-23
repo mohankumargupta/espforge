@@ -4,15 +4,17 @@
 //!   `<spi_component id="display_bus" spi="$spi2" mode="0" cs="gpio5" frequency="40MHz" />`
 //!
 //! Required attributes: `id`, `spi` (a `$`-prefixed reference to an `<spi>`
-//! peripheral), `mode` (SPI mode 0..=3), `cs` (a chip-select gpio referenced
-//! by plain id, with no `$` prefix). `frequency` is optional (e.g. `40MHz`,
-//! `10kHz`).
+//! peripheral), `cs` (chip-select: either a numeric pin like `cs="9"` as in
+//! the `spi_example`s, or a gpio id like `cs="gpio5"` as in
+//! `examples/example.espf.txt`). `mode` (0..=3) and `frequency` are optional
+//! on the component — the `spi_example`s keep both on `<spi>` — and default
+//! to `0` / unset when omitted (see `elements.kdl` TODO 11.11).
 
 use espf::context::{ActivePeripheral, Handle, RuntimeContext};
 
 /// The attributes `resolve` requires besides `id`. Drift-checked against
 /// the `espforge espf` catalog.
-pub const REQUIRED_ATTRS: &[&str] = &["spi", "mode", "cs"];
+pub const REQUIRED_ATTRS: &[&str] = &["spi", "cs"];
 
 /// A fully validated `<spi_component>` node.
 #[derive(Debug, Clone)]
@@ -46,29 +48,34 @@ impl<'a> SpiComponent<'a> {
             .get_attr("spi")
             .ok_or_else(|| format!("❌ [spi_component] '{id}' missing required attribute 'spi'"))?;
 
-        let mode_raw = node
-            .get_attr("mode")
-            .ok_or_else(|| format!("❌ [spi_component] '{id}' missing required attribute 'mode'"))?;
-        let mode: u8 = mode_raw
-            .parse()
-            .map_err(|_| format!("❌ [spi_component] '{id}' invalid mode '{mode_raw}': expected 0..=3"))?;
-        if mode > 3 {
-            return Err(format!(
-                "❌ [spi_component] '{id}' invalid mode '{mode_raw}': expected 0..=3"
-            ));
-        }
+        // Optional on the component (examples keep it on `<spi>`); defaults to 0.
+        let mode: u8 = match node.get_attr("mode") {
+            None => 0,
+            Some(mode_raw) => {
+                let m: u8 = mode_raw.parse().map_err(|_| {
+                    format!("❌ [spi_component] '{id}' invalid mode '{mode_raw}': expected 0..=3")
+                })?;
+                if m > 3 {
+                    return Err(format!(
+                        "❌ [spi_component] '{id}' invalid mode '{mode_raw}': expected 0..=3"
+                    ));
+                }
+                m
+            }
+        };
 
         let cs_ref = node
             .get_attr("cs")
             .ok_or_else(|| format!("❌ [spi_component] '{id}' missing required attribute 'cs'"))?
             .trim_start_matches('$');
-        // The chip-select must point at a known gpio peripheral.
-        let _cs_handle = ctx
-            .interner
-            .get(cs_ref)
-            .ok_or_else(|| {
+        // Numeric `cs="9"` (the `spi_example`s) is a pin number, not a gpio
+        // id — accept it without an interner lookup. Otherwise it must point
+        // at a known gpio peripheral.
+        if cs_ref.parse::<u8>().is_err() {
+            ctx.interner.get(cs_ref).ok_or_else(|| {
                 format!("❌ [spi_component] '{id}' cs references undefined gpio '{cs_ref}'")
             })?;
+        }
 
         let frequency = node.get_attr("frequency");
 

@@ -164,11 +164,9 @@ element "spi_component" section="components" {
     summary "A chip-select on an SPI bus"
     attr "id" kind="ident" required=#true
     attr "spi" kind="ref" to="spi" required=#true
-    // TODO(11.11): the wrapper requires `mode`; the SPI examples put it on <spi>.
-    attr "mode" kind="u32" required=#true {
-        help "SPI mode, 0 to 3."
+    attr "mode" kind="u32" {
+        help "SPI mode, 0 to 3. Optional on the component; the SPI examples keep it on <spi>."
     }
-    // TODO(11.11): plain gpio id in the wrapper, a pin number in the SPI examples.
     attr "cs" kind="str" required=#true
     attr "frequency" kind="freq"
     example "display bus" #"<spi_component id="display_bus" spi="$spi2" mode="0" cs="gpio5" frequency="40MHz" />"#

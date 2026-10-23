@@ -4,9 +4,11 @@
 //! `<spi>` peripheral branch (`spi2`-only rule, mode, frequency) and the
 //! `<spi_component>` component branch (bus ref, `cs` pin, one-CS-per-pin).
 
+use super::gpio::GpioEntry;
 use super::util::parse_khz;
 use super::{SpiBusSpec, SpiSpec, is_rust_ident};
-use espf::context::ParsedNode;
+use espf::context::{ParsedNode, RuntimeContext};
+use espforge_bindings::components::SpiComponent;
 
 /// One `<spi>` peripheral (`spi2`), before filtering bare buses.
 #[derive(Debug, Clone)]
@@ -75,27 +77,44 @@ pub fn lower_spi(n: &ParsedNode) -> Result<SpiBusDraft, String> {
 
 /// The `<spi_component>` branch of the `# components` loop. Pushes into
 /// `devices` and marks the bus used.
+///
+/// Step 2c: the `$` parent lookup goes through the typed wrapper
+/// (`SpiComponent::resolve`), the sole consumer of the context handles.
+/// `mode`/`frequency` stay on `<spi>` (examples/hardware); the wrapper treats
+/// component `mode` as optional (default 0) and `cs` as numeric pin *or* gpio
+/// id. Pin/duplicate checks stay here so messages stay byte-identical.
 pub fn attach_spi_component(
     n: &ParsedNode,
     spi_buses: &mut [SpiBusDraft],
     spi_devices: &mut Vec<SpiDeviceDraft>,
+    gpios: &[GpioEntry],
+    ctx: &RuntimeContext,
 ) -> Result<(), String> {
-    let bus_ref = n.get_attr("spi").ok_or_else(|| {
-        format!("<spi_component id=\"{}\"> needs spi=\"$<spi id>\"", n.id)
-    })?;
-    let target = bus_ref.trim_start_matches('$');
-    if !spi_buses.iter().any(|b| b.id == target) {
+    // Single dispatch path for the `$` ref; wrapper owns `trim_start_matches`.
+    // Wrapper accepts numeric `cs` and optional `mode`, so existing
+    // `spi_example` specs (no mode, numeric cs) resolve here.
+    let comp = SpiComponent::resolve(n, ctx)?;
+    let target = comp.spi_ref.trim_start_matches('$');
+    let bus_idx = spi_buses.iter().position(|b| {
+        ctx.interner.get(&b.id) == Some(comp.peripheral_handle)
+    });
+    if bus_idx.is_none() {
         return Err(format!(
             "<spi_component id=\"{}\"> refers to `{target}`, which is not an <spi> in `# peripherals`",
             n.id
         ));
     }
-    let cs = n
-        .get_attr("cs")
-        .and_then(|p| p.parse::<u8>().ok())
-        .ok_or_else(|| {
-            format!("<spi_component id=\"{}\"> needs a numeric cs=\"...\"", n.id)
-        })?;
+    // `cs="9"` is a pin; `cs="gpio5"`/`cs="$gpio5"` resolves via the gpio table.
+    let cs_ref = comp.cs_ref.trim_start_matches('$');
+    let cs: u8 = if let Ok(pin) = cs_ref.parse::<u8>() {
+        pin
+    } else if let Some(g) = gpios.iter().find(|g| g.id == cs_ref) {
+        g.pin
+    } else {
+        return Err(format!(
+            "<spi_component id=\"{}\"> needs a numeric cs=\"...\"", n.id
+        ));
+    };
     let name = n.id.replace('-', "_");
     if !is_rust_ident(&name) {
         return Err(format!(
@@ -109,14 +128,12 @@ pub fn attach_spi_component(
             other.name, name
         ));
     }
-    spi_buses
-        .iter_mut()
-        .find(|b| b.id == target)
-        .expect("checked above")
-        .used = true;
+    let idx = bus_idx.expect("checked above");
+    spi_buses[idx].used = true;
+    let bus_id = spi_buses[idx].id.clone();
     spi_devices.push(SpiDeviceDraft {
         name,
-        bus: target.to_string(),
+        bus: bus_id,
         cs,
     });
     Ok(())
@@ -215,12 +232,15 @@ mod tests {
     #[test]
     fn a_spi_component_needs_a_declared_spi() {
         // The ref passes graph resolution (`spi2` becomes a gpio peripheral)
-        // but the component then points at a gpio, not an `<spi>`.
+        // but the component then points at a gpio, not an `<spi>`. Step 2c:
+        // the `$` lookup goes through `SpiComponent::resolve`, so the
+        // wrapper's message replaces hardware's old "not an <spi>" line.
         let src = WITH_SPI.replace(
             "<spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"6\" frequency=\"100kHz\" />",
             "<gpio id=\"spi2\" pin=\"8\" direction=\"output\" />",
         );
-        assert!(lower_src(&src).unwrap_err().contains("not an <spi>"));
+        let err = lower_src(&src).unwrap_err();
+        assert!(err.contains("expects an spi"), "{err}");
     }
 
     #[test]
@@ -265,8 +285,10 @@ mod tests {
 
     #[test]
     fn a_spi_component_needs_a_cs_pin() {
+        // Step 2c: missing `cs` is now reported by `SpiComponent::resolve`.
         let src = WITH_SPI.replace(" cs=\"9\"", "");
-        assert!(lower_src(&src).unwrap_err().contains("cs=\"...\""));
+        let err = lower_src(&src).unwrap_err();
+        assert!(err.contains("missing required attribute 'cs'"), "{err}");
     }
 
     #[test]

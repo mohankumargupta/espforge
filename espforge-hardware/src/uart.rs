@@ -5,7 +5,8 @@
 //! peripheral branch, and the `<uart_component>` component branch.
 
 use super::{UartSpec, is_rust_ident};
-use espf::context::ParsedNode;
+use espf::context::{ParsedNode, RuntimeContext};
+use espforge_bindings::components::UartComponent;
 
 /// The `<uart_component>` riding on a `<uart>`: its fields are what the
 /// generated code ends up with (framing lives on the component).
@@ -78,23 +79,30 @@ pub fn lower_uart(n: &ParsedNode) -> Result<UartDraft, String> {
 }
 
 /// The `<uart_component>` branch of the `# components` loop.
+///
+/// Step 2c: the `$` parent lookup goes through the typed wrapper
+/// (`UartComponent::resolve`), the sole consumer of the context handles.
+/// Baud/framing/slug/occupancy checks stay here so messages stay byte-identical.
 pub fn attach_uart_component(
     n: &ParsedNode,
     uarts: &mut [UartDraft],
+    ctx: &RuntimeContext,
 ) -> Result<(), String> {
-    let uart_ref = n.get_attr("uart").ok_or_else(|| {
-        format!("<uart_component id=\"{}\"> needs uart=\"$<uart id>\"", n.id)
-    })?;
-    let target = uart_ref.trim_start_matches('$');
-    let draft = uarts
-        .iter_mut()
-        .find(|u| u.id == target)
+    // Single dispatch path for the `$` ref; wrapper owns `trim_start_matches`.
+    let comp = UartComponent::resolve(n, ctx)?;
+    // Locate the draft via the resolved handle, not a string `find`.
+    let idx = uarts
+        .iter()
+        .position(|u| ctx.interner.get(&u.id) == Some(comp.peripheral_handle))
         .ok_or_else(|| {
+            let target = comp.uart_ref.trim_start_matches('$');
             format!(
                 "<uart_component id=\"{}\"> refers to `{target}`, which is not an <uart> in `# peripherals`",
                 n.id
             )
         })?;
+    let target = uarts[idx].id.clone();
+    let draft = &mut uarts[idx];
     if let Some(other) = &draft.component {
         return Err(format!(
             "<uart_component id=\"{}\"> and <uart_component id=\"{}\"> both use <uart id=\"{target}\">",

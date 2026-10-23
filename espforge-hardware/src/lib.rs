@@ -90,13 +90,13 @@ pub fn lower(
         if n.tag_name == "i2c_component" {
             i2c::attach_i2c_component(n, &mut i2c_buses, ctx)?;
         } else if n.tag_name == "spi_component" {
-            spi::attach_spi_component(n, &mut spi_buses, &mut spi_devices)?;
+            spi::attach_spi_component(n, &mut spi_buses, &mut spi_devices, &gpios, ctx)?;
         } else if n.tag_name == "uart_component" {
-            uart::attach_uart_component(n, &mut uarts)?;
+            uart::attach_uart_component(n, &mut uarts, ctx)?;
         } else if n.tag_name == "button" {
-            gpio::attach_button(n, &gpios, &leds, &mut buttons)?;
+            gpio::attach_button(n, &gpios, &leds, &mut buttons, ctx)?;
         } else if n.tag_name == "led" {
-            gpio::attach_led(n, &gpios, &mut leds, &buttons)?;
+            gpio::attach_led(n, &gpios, &mut leds, &buttons, ctx)?;
         } else {
             return Err(format!(
                 "<{}> in `# components` is not supported by `build` yet (only <led>, <button>, <i2c_component>, <spi_component> and <uart_component>)",
@@ -162,6 +162,83 @@ pub fn lower_sections(sections: &HashMap<String, Vec<ParsedNode>>) -> Result<Har
             .join("; ")
     })?;
     lower(sections, &ctx)
+}
+
+/// Snapshot baseline for item 2e (wiring errors as snippets).
+///
+/// Each test records the *current* `String` error text (the "before") and
+/// shows the *same text* rendered as an `EspfError` snippet (the "after").
+/// When `lower` switches to `Vec<EspfError>`, the `label` stays identical
+/// and only the rendering changes from `❌ {msg}` to a file/line snippet.
+#[cfg(test)]
+mod snapshot_tests {
+    use super::lower_sections;
+    use espf::diag::{EspfError, render_errors};
+    use std::collections::HashMap;
+
+    fn sections_of(src: &str) -> HashMap<String, Vec<espf::context::ParsedNode<'_>>> {
+        espf::parser::parse_espf(src).sections
+    }
+
+    fn component_node<'a>(
+        sections: &'a HashMap<String, Vec<espf::context::ParsedNode<'a>>>,
+        id: &str,
+    ) -> &'a espf::context::ParsedNode<'a> {
+        sections
+            .get("components")
+            .unwrap()
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap_or_else(|| panic!("no component {id}"))
+    }
+
+    fn renders_as_snippet(src: &str, node_id: &str, label: &str) {
+        let parsed = espf::parser::parse_espf(src);
+        let node = parsed.sections.get("components").unwrap().iter().find(|n| n.id == node_id).unwrap();
+        let err = EspfError::at_node(node, "invalid hardware", label);
+        let out = render_errors("snap.espf", src, &[err]);
+        assert!(out.contains("snap.espf"), "{out}");
+        assert!(out.contains(label), "{out}");
+        // Snippet points at the offending `<tag` line, not a bare `❌` line.
+        assert!(out.contains("error:"), "{out}");
+    }
+
+    const I2C_DOUBLE: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <i2c id=\"i2c0\" sda=\"4\" scl=\"5\" />\n# components\n  <i2c_component id=\"c\" i2c=\"$i2c0\" address=\"0x48\" />\n  <i2c_component id=\"c2\" i2c=\"$i2c0\" address=\"0x49\" />\n# devices\n# services\n";
+
+    #[test]
+    fn i2c_double_use_snapshot() {
+        let err = lower_sections(&sections_of(I2C_DOUBLE)).unwrap_err();
+        assert!(err.contains("both use"), "{err}");
+        renders_as_snippet(I2C_DOUBLE, "c2", &err);
+        let _ = component_node(&sections_of(I2C_DOUBLE), "c2");
+    }
+
+    const LED_DOUBLE: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# components\n  <led id=\"red-led\" gpio=\"$gpio18\" />\n  <led id=\"other\" gpio=\"$gpio18\" />\n# devices\n# services\n";
+
+    #[test]
+    fn led_double_use_snapshot() {
+        let err = lower_sections(&sections_of(LED_DOUBLE)).unwrap_err();
+        assert!(err.contains("both use GPIO18"), "{err}");
+        renders_as_snippet(LED_DOUBLE, "other", &err);
+    }
+
+    const SPI_CS_CLASH: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"6\" />\n# components\n  <spi_component id=\"tester\" spi=\"$spi2\" cs=\"9\" />\n  <spi_component id=\"second\" spi=\"$spi2\" cs=\"9\" />\n# devices\n# services\n";
+
+    #[test]
+    fn spi_cs_clash_snapshot() {
+        let err = lower_sections(&sections_of(SPI_CS_CLASH)).unwrap_err();
+        assert!(err.contains("both use GPIO9"), "{err}");
+        renders_as_snippet(SPI_CS_CLASH, "second", &err);
+    }
+
+    const UART_TX_RX: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <uart id=\"uart1\" tx=\"5\" rx=\"5\" />\n# components\n  <uart_component id=\"serial\" uart=\"$uart1\" baud_rate=\"9600\" />\n# devices\n# services\n";
+
+    #[test]
+    fn uart_tx_rx_snapshot() {
+        let err = lower_sections(&sections_of(UART_TX_RX)).unwrap_err();
+        assert!(err.contains("tx and rx"), "{err}");
+        renders_as_snippet(UART_TX_RX, "serial", &err);
+    }
 }
 
 /// Test helper: `buildable` over a sections map (mirrors the old
