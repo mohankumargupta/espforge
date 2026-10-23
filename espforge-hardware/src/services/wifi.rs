@@ -4,7 +4,7 @@
 //! the `# services` loop. One network only: `network1.ssid` (required) and
 //! `network1.password` (optional; empty or absent means an open network).
 
-use super::WifiSpec;
+use crate::WifiSpec;
 use espf::context::ParsedNode;
 use espf::diag::EspfError;
 
@@ -131,7 +131,7 @@ pub fn lower_services(services: &[ParsedNode]) -> Result<Option<WifiSpec>, Vec<E
 
 #[cfg(test)]
 mod tests {
-    use super::super::{buildable_sections, lower_sections};
+    use crate::{buildable_sections, lower_sections};
     use super::*;
 
     const WITH_WIFI: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"embassy\" />\n# peripherals\n# components\n# devices\n# services\n  <wifi id=\"wifi0\" network1.ssid=\"Wokwi-GUEST\" />\n";
@@ -143,7 +143,7 @@ mod tests {
     // Helper: validate via full parse would need options/frontend; for
     // lowering tests the sections map is enough (validate only feeds
     // sections into lowering).
-    fn lower_src(src: &str) -> Result<super::super::Hardware, String> {
+    fn lower_src(src: &str) -> Result<crate::Hardware, String> {
         lower_sections(&sections(src))
     }
 

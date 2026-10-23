@@ -7,10 +7,10 @@
 
 use std::collections::HashMap;
 
-use super::gpio::GpioEntry;
-use super::i2c::I2cBusDraft;
-use super::spi::{SpiBusDraft, SpiDeviceDraft, bus_pins};
-use super::uart::UartDraft;
+use super::peripherals::gpio::GpioEntry;
+use super::peripherals::i2c::I2cBusDraft;
+use super::peripherals::spi::{SpiBusDraft, SpiDeviceDraft, bus_pins};
+use super::peripherals::uart::UartDraft;
 use super::{ButtonSpec, LedSpec};
 use espf::context::ParsedNode;
 use espf::diag::EspfError;

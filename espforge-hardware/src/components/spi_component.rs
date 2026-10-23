@@ -1,93 +1,14 @@
-//! `<spi>` peripheral + `<spi_component>` lowering (step 1d).
+//! `<spi_component>` lowering.
 //!
-//! Moved verbatim from `espforge/src/commands/pipeline.rs::hardware`: the
-//! `<spi>` peripheral branch (`spi2`-only rule, mode, frequency) and the
-//! `<spi_component>` component branch (bus ref, `cs` pin, one-CS-per-pin).
+//! The `<spi>` bus draft lives in [`crate::peripherals::spi`]; this module
+//! owns the `<spi_component>` branch of the `# components` loop.
 
-use super::gpio::GpioEntry;
-use super::util::parse_khz;
-use super::{SpiBusSpec, SpiSpec, is_rust_ident};
+use crate::is_rust_ident;
+use crate::peripherals::gpio::GpioEntry;
+use crate::peripherals::spi::{SpiBusDraft, SpiDeviceDraft};
 use espf::context::{ParsedNode, RuntimeContext};
 use espf::diag::EspfError;
 use espforge_bindings::components::SpiComponent;
-
-/// One `<spi>` peripheral (`spi2`), before filtering bare buses.
-#[derive(Debug, Clone)]
-pub struct SpiBusDraft {
-    /// The `<spi>` id (`spi2`), which is also the peripheral name.
-    pub id: String,
-    pub sclk: u8,
-    pub mosi: u8,
-    pub miso: u8,
-    pub khz: u32,
-    pub mode: u8,
-    /// Whether any `<spi_component>` rides on this bus.
-    pub used: bool,
-}
-
-/// One `<spi_component>`: a device with its own chip-select.
-#[derive(Debug, Clone)]
-pub struct SpiDeviceDraft {
-    /// The `<spi_component>` id as a Rust identifier.
-    pub name: String,
-    /// The bus id it rides on.
-    pub bus: String,
-    pub cs: u8,
-}
-
-/// The `<spi>` branch of the `# peripherals` loop.
-pub fn lower_spi(n: &ParsedNode) -> Result<SpiBusDraft, EspfError> {
-    // The runtime `SpiBus::build` is typed on `SPI2`; every chip
-    // espforge supports exposes it (GPIO matrix: any pin works).
-    if n.id != "spi2" {
-        return Err(EspfError::at_node(
-            n,
-            "invalid spi id",
-            format!("<spi id=\"{}\">: the id must be spi2", n.id),
-        ));
-    }
-    let pin_attr = |what: &str| -> Result<u8, EspfError> {
-        n.get_attr(what).and_then(|p| p.parse::<u8>().ok()).ok_or_else(|| {
-            EspfError::at_node(
-                n,
-                "invalid spi pin",
-                format!("<spi id=\"{}\"> needs a numeric {what}=\"...\"", n.id),
-            )
-        })
-    };
-    let mode = match n.get_attr("mode") {
-        None => 0,
-        Some("0") => 0,
-        Some("1") => 1,
-        Some("2") => 2,
-        Some("3") => 3,
-        Some(other) => {
-            return Err(EspfError::at_node(
-                n,
-                "invalid spi mode",
-                format!(
-                    "<spi id=\"{}\"> mode=\"{other}\" must be 0, 1, 2 or 3",
-                    n.id
-                ),
-            ));
-        }
-    };
-    let khz = match n.get_attr("frequency") {
-        // The `SpiConfig` default in espforge-runtime (1 MHz).
-        None => 1000,
-        Some(f) => parse_khz(f, "spi", n.id)
-            .map_err(|m| EspfError::at_node(n, "invalid spi frequency", m))?,
-    };
-    Ok(SpiBusDraft {
-        id: n.id.to_string(),
-        sclk: pin_attr("sclk")?,
-        mosi: pin_attr("mosi")?,
-        miso: pin_attr("miso")?,
-        khz,
-        mode,
-        used: false,
-    })
-}
 
 /// The `<spi_component>` branch of the `# components` loop. Pushes into
 /// `devices` and marks the bus used.
@@ -168,44 +89,10 @@ pub fn attach_spi_component(
     Ok(())
 }
 
-pub fn bus_pins(b: &SpiBusDraft) -> [u8; 3] {
-    [b.sclk, b.mosi, b.miso]
-}
-
-/// A bare `<spi>` with no component generates nothing: the app can only
-/// reach the bus through a component anyway.
-pub fn finish_spi(
-    buses: Vec<SpiBusDraft>,
-    devices: Vec<SpiDeviceDraft>,
-) -> (Vec<SpiBusSpec>, Vec<SpiSpec>) {
-    let spis: Vec<SpiSpec> = devices
-        .iter()
-        .map(|d| SpiSpec {
-            name: d.name.clone(),
-            bus: d.bus.clone(),
-            cs: d.cs,
-        })
-        .collect();
-    let bus_specs: Vec<SpiBusSpec> = buses
-        .into_iter()
-        .filter(|b| b.used)
-        .map(|b| SpiBusSpec {
-            id: b.id.clone(),
-            peripheral: "SPI2".to_string(),
-            sclk: b.sclk,
-            mosi: b.mosi,
-            miso: b.miso,
-            khz: b.khz,
-            mode: b.mode,
-        })
-        .collect();
-    (bus_specs, spis)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::lower_sections;
-    use super::*;
+    use crate::lower_sections;
+    use crate::{SpiBusSpec, SpiSpec};
 
     const WITH_SPI: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"6\" frequency=\"100kHz\" />\n# components\n  <spi_component id=\"tester\" spi=\"$spi2\" cs=\"9\" />\n# devices\n# services\n";
 
@@ -215,7 +102,7 @@ mod tests {
         espf::parser::parse_espf(src).sections
     }
 
-    fn lower_src(src: &str) -> Result<super::super::Hardware, String> {
+    fn lower_src(src: &str) -> Result<crate::Hardware, String> {
         lower_sections(&sections(src))
     }
 

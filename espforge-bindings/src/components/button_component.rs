@@ -29,7 +29,7 @@ pub struct ButtonComponent<'a> {
 
 impl<'a> ButtonComponent<'a> {
     /// Validates and resolves a button node against the runtime context.
-    /// Error text matches `espforge-hardware::gpio::attach_button` so the
+    /// Error text matches `espforge-hardware::components::button::attach_button` so the
     /// hardware pilot can swap to this wrapper without changing messages.
     pub fn resolve(node: &'a espf::context::ParsedNode<'a>, ctx: &RuntimeContext<'a>) -> Result<Self, String> {
         let id = node.id;

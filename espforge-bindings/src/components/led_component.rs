@@ -29,7 +29,7 @@ pub struct LedComponent<'a> {
 
 impl<'a> LedComponent<'a> {
     /// Validates and resolves a led node against the runtime context.
-    /// Error text matches `espforge-hardware::gpio::attach_led` so the
+    /// Error text matches `espforge-hardware::components::led::attach_led` so the
     /// hardware pilot can swap to this wrapper without changing messages.
     pub fn resolve(node: &'a espf::context::ParsedNode<'a>, ctx: &RuntimeContext<'a>) -> Result<Self, String> {
         let id = node.id;

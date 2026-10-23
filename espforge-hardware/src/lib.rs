@@ -1,18 +1,23 @@
 //! Hardware lowering: validated sections -> [`Hardware`].
 //!
-//! Step 1d (see `improve.md` item 1): per-bus lowering lives in
-//! `gpio` / `i2c` / `spi` / `uart` / `wifi`, pin/peripheral clashes in
-//! `conflicts`. This module is the thin orchestrator: check `# devices`,
-//! dispatch the `# peripherals` / `# components` loops in spec order (so the
-//! first error in file order wins, exactly like the old `pipeline::hardware`),
-//! run [`conflicts::check_all`], then assemble [`Hardware`].
+//! Per-bus lowering lives in [`peripherals`] (drafts + the `# peripherals`
+//! loop) and [`components`] (the `# components` branches), services in
+//! [`services`], pin/peripheral clashes in [`conflicts`]. This module is the
+//! thin orchestrator: check [`devices`], dispatch the `# peripherals` /
+//! `# components` loops in spec order (so the first error in file order
+//! wins, exactly like the old `pipeline::hardware`), run
+//! [`conflicts::check_all`], then assemble [`Hardware`]
 //!
 //! `lower` takes the parsed sections map instead of the CLI's `Checked` so
 //! this crate stays a pure library (`espforge` -> `espforge-hardware`, not
 //! the reverse). `pipeline::hardware` is a one-line wrapper over it.
 //!
 //! ```text
-//! mod gpio, i2c, spi, uart, wifi, conflicts, util
+//! mod peripherals::{gpio, i2c, spi, uart}
+//! mod components::{led, button, i2c_component, spi_component, uart_component}
+//! mod services::wifi
+//! mod devices  // not buildable yet: rejects any entry
+//! mod conflicts, util
 //! pub fn lower(sections, ctx) -> Result<Hardware, Vec<EspfError>>
 //! pub fn buildable(sections, ctx) -> Result<(), Vec<EspfError>>
 //! ```
@@ -20,13 +25,16 @@
 //! Item 2e: `buildable` is `lower(...).map(|_| ())` — the single validation
 //! path is `lower`; there is no separate buildability check.
 
+pub mod components;
 pub mod conflicts;
-pub mod gpio;
-pub mod i2c;
-pub mod spi;
-pub mod uart;
+pub mod devices;
+pub mod peripherals;
+pub mod services;
 pub mod util;
-pub mod wifi;
+
+use components::{button, i2c_component, led, spi_component, uart_component};
+use peripherals::{gpio, i2c, spi, uart};
+use services::wifi;
 
 // Re-export so lowering modules and callers share one import path.
 pub use espforge_model::hardware::*;
@@ -45,16 +53,7 @@ pub fn lower(
     sections: &HashMap<String, Vec<ParsedNode>>,
     ctx: &RuntimeContext,
 ) -> Result<Hardware, Vec<EspfError>> {
-    if sections
-        .get("devices")
-        .is_some_and(|v| !v.is_empty())
-    {
-        return Err(vec![EspfError::at_span(
-            0..0,
-            "unsupported devices",
-            "`# devices` is not supported by `build` yet (only <gpio> peripherals with <led> and <button> components, <i2c> peripherals with <i2c_component> components, <spi> peripherals with <spi_component> components, and the <wifi> service)",
-        )]);
-    }
+    devices::reject_if_present(sections)?;
 
     let mut gpios: Vec<gpio::GpioEntry> = Vec::new();
     let mut i2c_buses: Vec<i2c::I2cBusDraft> = Vec::new();
@@ -96,16 +95,23 @@ pub fn lower(
         .unwrap_or(&[])
     {
         if n.tag_name == "i2c_component" {
-            i2c::attach_i2c_component(n, &mut i2c_buses, ctx).map_err(|e| vec![e])?;
+            i2c_component::attach_i2c_component(n, &mut i2c_buses, ctx)
+                .map_err(|e| vec![e])?;
         } else if n.tag_name == "spi_component" {
-            spi::attach_spi_component(n, &mut spi_buses, &mut spi_devices, &gpios, ctx)
+            spi_component::attach_spi_component(
+                n,
+                &mut spi_buses,
+                &mut spi_devices,
+                &gpios,
+                ctx,
+            )
                 .map_err(|e| vec![e])?;
         } else if n.tag_name == "uart_component" {
-            uart::attach_uart_component(n, &mut uarts, ctx).map_err(|e| vec![e])?;
+            uart_component::attach_uart_component(n, &mut uarts, ctx).map_err(|e| vec![e])?;
         } else if n.tag_name == "button" {
-            gpio::attach_button(n, &gpios, &leds, &mut buttons, ctx).map_err(|e| vec![e])?;
+            button::attach_button(n, &gpios, &leds, &mut buttons, ctx).map_err(|e| vec![e])?;
         } else if n.tag_name == "led" {
-            gpio::attach_led(n, &gpios, &mut leds, &buttons, ctx).map_err(|e| vec![e])?;
+            led::attach_led(n, &gpios, &mut leds, &buttons, ctx).map_err(|e| vec![e])?;
         } else {
             return Err(vec![EspfError::at_node(
                 n,
