@@ -1,211 +1,14 @@
-//! Renders the embedded project template (`espforge-espgenerate-template`)
-//! with minijinja, deciding per file whether it is emitted, where it goes,
-//! and who owns it.
-//!
-//! * Every file in the template tree is registered by its path, so
-//!   `{% include ".template/partials/main_blocking.rs" %}` resolves.
-//! * `metadata.toml` is not a template; it controls emission (see
-//!   [`parse_metadata`]). Files under `.template/` are partials: includable
-//!   but never emitted themselves.
-//! * Example overlays (`render_project_with_overlay`) layer an example's own
-//!   Wokwi files over the template's.
-//! * A file whose name ends in `.tmpl` is emitted without that suffix
-//!   (`Cargo.toml.tmpl` -> `Cargo.toml`; the suffix keeps cargo from treating
-//!   the template directory as a nested package).
+//! Project planning and overlay layering: which template files are emitted
+//! (`plan`, `Planned`), rendering them (`render_project`), layering example
+//! files over the template (`render_project_with_overlay`, `OverlayFile`,
+//! `Rendered`), and `readme()`.
 
-use anyhow::{Context as _, Result, anyhow, bail};
-use espforge_espgenerate_template::TEMPLATE_DIR;
+use anyhow::{Context as _, Result, anyhow};
 use espforge_model::{Artifact, Asset, Ownership};
-use include_dir::Dir;
-use minijinja::{AutoEscape, Environment, UndefinedBehavior, Value};
-use toml_edit::DocumentMut;
+use minijinja::{Environment, Value};
 
-const METADATA_FILE: &str = "metadata.toml";
-const PARTIALS_PREFIX: &str = ".template/";
-
-// ------------------------------------------------------------- template files
-
-/// Every embedded file as (`/`-separated path, bytes), paths composed level by
-/// level so they do not depend on include_dir's prefix choices.
-fn collect_files(dir: &Dir<'static>, prefix: &str, out: &mut Vec<(String, &'static [u8])>) {
-    let join = |name: &str| {
-        if prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{prefix}/{name}")
-        }
-    };
-    for f in dir.files() {
-        let name = f
-            .path()
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-        out.push((join(name), f.contents()));
-    }
-    for d in dir.dirs() {
-        let name = d
-            .path()
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-        collect_files(d, &join(name), out);
-    }
-}
-
-fn all_files() -> Vec<(String, &'static [u8])> {
-    let mut out = Vec::new();
-    collect_files(&TEMPLATE_DIR, "", &mut out);
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
-}
-
-/// Paths of the files that can be emitted (excludes `metadata.toml` and the
-/// `.template/` partials), sorted.
-pub fn template_paths() -> Vec<String> {
-    all_files()
-        .into_iter()
-        .map(|(p, _)| p)
-        .filter(|p| p != METADATA_FILE && !p.starts_with(PARTIALS_PREFIX))
-        .collect()
-}
-
-/// The minijinja environment: strict about undefined names, no stray blank
-/// lines around `{% %}` blocks, no escaping (these are not HTML), and every
-/// template file (including partials) registered by path.
-pub fn environment() -> Result<Environment<'static>> {
-    let mut env = Environment::new();
-    env.set_undefined_behavior(UndefinedBehavior::Strict);
-    env.set_trim_blocks(true);
-    env.set_lstrip_blocks(true);
-    env.set_keep_trailing_newline(true);
-    // The default callback would JSON-escape values in `*.json` templates.
-    env.set_auto_escape_callback(|_| AutoEscape::None);
-
-    for (path, bytes) in all_files() {
-        if path == METADATA_FILE {
-            continue;
-        }
-        let text = std::str::from_utf8(bytes)
-            .with_context(|| format!("template `{path}` is not valid UTF-8"))?
-            .to_string();
-        env.add_template_owned(path.clone(), text)
-            .map_err(|e| anyhow!("template `{path}`: {e:#}"))?;
-    }
-    Ok(env)
-}
-
-pub fn render_template(env: &Environment, name: &str, ctx: &Value) -> Result<String> {
-    env.get_template(name)
-        .and_then(|t| t.render(ctx))
-        .map_err(|e| anyhow!("rendering `{name}`: {e:#}"))
-}
-
-// ------------------------------------------------------------------ metadata
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EmitEntry {
-    /// Output path (without `.tmpl`).
-    pub path: String,
-    /// minijinja expression; the file is emitted only if it is true.
-    pub when: Option<String>,
-    /// minijinja template for a different output path.
-    pub rename: Option<String>,
-    /// Ownership for this file, overriding the glob rules.
-    pub own: Option<Ownership>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Metadata {
-    pub emit: Vec<EmitEntry>,
-    /// (glob, ownership); first match wins; default is `Owned`.
-    pub ownership: Vec<(String, Ownership)>,
-}
-
-fn parse_own(s: &str) -> Result<Ownership> {
-    match s {
-        "owned" => Ok(Ownership::Owned),
-        "seed-once" => Ok(Ownership::SeedOnce),
-        "not-owned" => Ok(Ownership::NotOwned),
-        other => bail!("unknown ownership \"{other}\" (expected owned, seed-once or not-owned)"),
-    }
-}
-
-/// Globs: an exact path, or `dir/**` for everything below `dir`.
-fn check_glob(g: &str) -> Result<()> {
-    if g.contains('*') && !(g.ends_with("/**") && !g[..g.len() - 3].contains('*')) {
-        bail!("unsupported glob \"{g}\" (use an exact path or `dir/**`)");
-    }
-    Ok(())
-}
-
-pub fn glob_match(glob: &str, path: &str) -> bool {
-    match glob.strip_suffix("/**") {
-        Some(dir) => path.starts_with(&format!("{dir}/")),
-        None => glob == path,
-    }
-}
-
-/// Parse `metadata.toml`:
-///
-/// ```toml
-/// emit = [
-///   { path = "diagram.json", when = "opt.wokwi" },
-///   { path = ".vscode/tasks.json", when = "opt.vscode", own = "seed-once" },
-/// ]
-/// ownership = [
-///   { glob = "src/**", own = "owned" },
-///   { glob = ".cargo/**", own = "seed-once" },
-/// ]
-/// ```
-///
-/// Files not listed under `emit` are always emitted.
-pub fn parse_metadata(src: &str) -> Result<Metadata> {
-    let doc: DocumentMut = src.parse().context("invalid metadata.toml")?;
-    let mut md = Metadata::default();
-
-    if let Some(arr) = doc.get("emit").and_then(|i| i.as_array()) {
-        for item in arr.iter() {
-            let t = item
-                .as_inline_table()
-                .context("each `emit` entry must be an inline table")?;
-            let get = |k: &str| t.get(k).and_then(|v| v.as_str()).map(str::to_string);
-            md.emit.push(EmitEntry {
-                path: get("path").context("an `emit` entry is missing `path`")?,
-                when: get("when"),
-                rename: get("as"),
-                own: get("own").map(|s| parse_own(&s)).transpose()?,
-            });
-        }
-    }
-    if let Some(arr) = doc.get("ownership").and_then(|i| i.as_array()) {
-        for item in arr.iter() {
-            let t = item
-                .as_inline_table()
-                .context("each `ownership` entry must be an inline table")?;
-            let glob = t
-                .get("glob")
-                .and_then(|v| v.as_str())
-                .context("an `ownership` entry is missing `glob`")?;
-            let own = t
-                .get("own")
-                .and_then(|v| v.as_str())
-                .context("an `ownership` entry is missing `own`")?;
-            check_glob(glob)?;
-            md.ownership.push((glob.to_string(), parse_own(own)?));
-        }
-    }
-    Ok(md)
-}
-
-pub fn metadata() -> Result<Metadata> {
-    let file = TEMPLATE_DIR
-        .get_file(METADATA_FILE)
-        .context("the template has no metadata.toml")?;
-    parse_metadata(file.contents_utf8().context("metadata.toml is not UTF-8")?)
-}
-
-// ---------------------------------------------------------------------- plan
+use crate::metadata::{Metadata, glob_match, metadata};
+use crate::template_env::{environment, render_template, template_paths};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Planned {
@@ -442,10 +245,11 @@ REGENERATE:\n\
         ),
     )
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata::*;
+    use crate::template_env::*;
     use crate::context::RuntimeSource;
     use crate::context::build_context;
     use espforge_model::{Console, Meta, Runtime};

@@ -1,5 +1,5 @@
 mod commands;
-mod render;
+mod help_view;
 mod source;
 
 use clap::{Args, CommandFactory, Parser, Subcommand};

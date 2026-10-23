@@ -1,28 +1,36 @@
 //! Turns a resolved project into files.
 //!
-//! * [`context`]  - the minijinja context
-//! * [`render`]   - renders the embedded template (and example overlays)
-//! * [`manifest`] - ownership manifest for drift detection
-//! * [`generate`] is pure (data in, files out); [`write`] and
-//!   [`write_assets`] touch the filesystem.
+//! * [`context`]      - the minijinja context
+//! * [`template_env`] - minijinja environment setup
+//! * [`metadata`]     - `metadata.toml` parsing
+//! * [`project`]      - project planning + overlay layering
+//! * [`manifest`]     - ownership manifest for drift detection
+//!
+//! IO boundary: [`generate`] / [`generate_with_hardware`] /
+//! [`context::build_context`] / [`project::plan`] /
+//! [`project::render_project_with_overlay`] / [`spec`] are pure
+//! (in-memory `Artifact`/`Asset`/`Value` in, data out; no `std::fs`, no
+//! `std::process`). Only [`write`] / [`write_assets`] / [`write_all`] (and
+//! `build.rs::execute` / `cargo_build`) touch disk or processes.
 //!
 //! Host-only: never depend on `espforge-runtime` from this crate.
 
 pub mod context;
 pub mod manifest;
-pub mod render;
+pub mod metadata;
+pub mod project;
+pub mod template_env;
 pub mod wokwi;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use espforge_model::{Artifact, Asset, Meta, Ownership};
 use espforge_options::ResolvedOptions;
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
 pub use context::RuntimeSource;
 use espforge_model::hardware::Hardware;
-pub use render::OverlayFile;
+pub use project::OverlayFile;
 
 /// Everything a build writes: text files and binary assets.
 #[derive(Debug, Clone, Default)]
@@ -32,6 +40,8 @@ pub struct Generated {
 }
 
 /// [`generate_with_hardware`] for a project with no hardware.
+///
+/// Pure: no filesystem access.
 pub fn generate(
     core: &Meta,
     resolved: &ResolvedOptions,
@@ -50,7 +60,8 @@ pub fn generate(
 /// Render the project for `core` + `resolved`, layering an example's files
 /// (`overlay`, empty for a plain project) over the template. Adds `README.txt`
 /// and `.espforge/manifest.json` (which records the template version).
-/// Does not touch the filesystem.
+///
+/// Pure: no filesystem access.
 pub fn generate_with_hardware(
     core: &Meta,
     resolved: &ResolvedOptions,
@@ -59,23 +70,25 @@ pub fn generate_with_hardware(
     hardware: &Hardware,
 ) -> Result<Generated> {
     let ctx = context::build_context_with(core, resolved, runtime_source, hardware)?;
-    let rendered = render::render_project_with_overlay(&ctx, overlay)?;
+    let rendered = project::render_project_with_overlay(&ctx, overlay)?;
     let mut artifacts = rendered.artifacts;
     let assets = rendered.assets;
 
-    artifacts.push(render::readme(&core.crate_name(), &artifacts, &assets));
+    artifacts.push(project::readme(&core.crate_name(), &artifacts, &assets));
     let manifest = manifest::emit_manifest(&artifacts, espforge_espgenerate_template::VERSION)?;
     artifacts.push(manifest);
     Ok(Generated { artifacts, assets })
 }
 
 /// Write artifacts into `out_dir`, respecting ownership:
+///
+/// Impure: creates directories and writes files under `out_dir`.
 /// - `Owned` files are overwritten, unless the previous manifest shows the
 ///   file was edited since we wrote it (drift): then we refuse.
 /// - `SeedOnce` files are written only if absent.
 /// - `NotOwned` files are never written.
 pub fn write(out_dir: &Path, artifacts: &[Artifact]) -> Result<()> {
-    let prev = read_prev_manifest(out_dir)?;
+    let prev = manifest::read_prev_manifest(out_dir)?;
     for a in artifacts {
         if a.ownership == Ownership::NotOwned {
             continue;
@@ -112,6 +125,8 @@ pub fn write(out_dir: &Path, artifacts: &[Artifact]) -> Result<()> {
 
 /// Write binary assets into `out_dir`: `SeedOnce` only if absent, `Owned`
 /// always overwritten (assets are not drift-tracked), `NotOwned` never.
+///
+/// Impure: creates directories and writes files under `out_dir`.
 pub fn write_assets(out_dir: &Path, assets: &[Asset]) -> Result<()> {
     for a in assets {
         let path = out_dir.join(&a.path);
@@ -129,17 +144,11 @@ pub fn write_assets(out_dir: &Path, assets: &[Asset]) -> Result<()> {
 }
 
 /// Convenience: [`write`] then [`write_assets`].
+///
+/// Impure: writes under `out_dir`.
 pub fn write_all(out_dir: &Path, generated: &Generated) -> Result<()> {
     write(out_dir, &generated.artifacts)?;
     write_assets(out_dir, &generated.assets)
-}
-
-fn read_prev_manifest(out_dir: &Path) -> Result<BTreeMap<String, String>> {
-    let p = out_dir.join(".espforge/manifest.json");
-    match fs::read_to_string(&p) {
-        Ok(s) => manifest::parse_manifest(&s).context("corrupt .espforge/manifest.json"),
-        Err(_) => Ok(BTreeMap::new()),
-    }
 }
 
 #[cfg(test)]

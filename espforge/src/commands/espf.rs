@@ -7,7 +7,7 @@
 //!
 //! Layering (cli.md): this file is I/O and paging only. Loading, path
 //! resolution and every string produced live in `espforge-options::catalog`
-//! and `crate::render`.
+//! and `crate::help_view`.
 //!
 //! Exit codes: 0 success, 1 user error (unknown name; already printed), 2
 //! internal failure.
@@ -45,7 +45,7 @@ fn execute(args: &EspfArgs) -> Result<(), u8> {
     // Ok: output for the user. Err: a user error, printed and exit 1.
     let rendered = match &found {
         Ok(m) => render(m, view),
-        Err(e) => Err(crate::render::render_resolution_error(e, catalog)),
+        Err(e) => Err(crate::help_view::render_resolution_error(e, catalog)),
     };
 
     let Ok(text) = rendered else {
@@ -69,15 +69,15 @@ fn execute(args: &EspfArgs) -> Result<(), u8> {
 fn render(m: &Match, view: View) -> Result<String, String> {
     let piped = !stdout_is_terminal();
     match (m, view) {
-        (Match::Root(c), View::Default | View::Help) => Ok(crate::render::render_root(c, piped)),
-        (Match::Overview(c), View::Default | View::Help) => Ok(crate::render::render_overview(c)),
+        (Match::Root(c), View::Default | View::Help) => Ok(crate::help_view::render_root(c, piped)),
+        (Match::Overview(c), View::Default | View::Help) => Ok(crate::help_view::render_overview(c)),
         (Match::Overview(_), View::Examples) => Err(examples_needs_a_leaf()),
         (Match::Section(s), View::Default | View::Help) => {
-            Ok(crate::render::render_section(s, piped))
+            Ok(crate::help_view::render_section(s, piped))
         }
-        (Match::Leaf(e), View::Default) => Ok(crate::render::render_leaf_list(e, piped)),
-        (Match::Leaf(e), View::Help) => Ok(crate::render::render_man(catalog::embedded(), e)),
-        (Match::Leaf(e), View::Examples) => Ok(crate::render::render_examples(e)),
+        (Match::Leaf(e), View::Default) => Ok(crate::help_view::render_leaf_list(e, piped)),
+        (Match::Leaf(e), View::Help) => Ok(crate::help_view::render_man(catalog::embedded(), e)),
+        (Match::Leaf(e), View::Examples) => Ok(crate::help_view::render_examples(e)),
         (Match::Root(_) | Match::Section(_), View::Examples) => Err(examples_needs_a_leaf()),
     }
 }

@@ -10,9 +10,9 @@
 //! Exit codes: 0 success, 1 user errors (diagnostics already printed),
 //! 2 internal / IO failure.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use clap::Args;
-use espforge_emit::{OverlayFile, RuntimeSource};
+use espforge_emit::OverlayFile;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -98,105 +98,12 @@ pub fn run(args: BuildArgs) -> ExitCode {
 }
 
 // -------------------------------------------------------------------- source
+//
+// File collection (Wokwi overlays, app logic, runtime source) lives in
+// `crate::source` (step 3c); only process-spawning `cargo_build` stays here.
 
 fn resolve_source(args: &BuildArgs) -> Result<Source, Failure> {
     resolve_src(args.file.as_deref(), args.example.as_deref()).map_err(user)
-}
-
-/// Files next to a `.espf` that customise the generated Wokwi setup.
-const OVERLAY_FILES: [&str; 4] = ["diagram.json", "wokwi.toml", "chip.json", "chip.wasm"];
-
-fn collect_dir(dir: &Path, prefix: &str, out: &mut Vec<(String, Vec<u8>)>) -> Result<()> {
-    if !dir.is_dir() {
-        return Ok(());
-    }
-    let mut entries = std::fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
-    entries.sort_by_key(|e| e.file_name());
-    for e in entries {
-        let rel = format!("{prefix}/{}", e.file_name().to_string_lossy());
-        let path = e.path();
-        if path.is_dir() {
-            collect_dir(&path, &rel, out)?;
-        } else {
-            out.push((rel, std::fs::read(&path)?));
-        }
-    }
-    Ok(())
-}
-
-/// The example files the template render may layer on top: from the embedded
-/// example, or from the folder the `.espf` lives in (a materialized example).
-fn overlay_files(src: &Source) -> Result<Vec<(String, Vec<u8>)>> {
-    if let Some(ex) = src.example {
-        return Ok(ex
-            .files
-            .iter()
-            .map(|f| (f.path.clone(), f.contents.to_vec()))
-            .collect());
-    }
-    let dir = src.dir.as_ref().context("a file source has a directory")?;
-    let mut out = Vec::new();
-    for name in OVERLAY_FILES {
-        let p = dir.join(name);
-        if p.is_file() {
-            out.push((
-                name.to_string(),
-                std::fs::read(&p).with_context(|| format!("cannot read {}", p.display()))?,
-            ));
-        }
-    }
-    collect_dir(&dir.join("chip"), "chip", &mut out)?;
-    Ok(out)
-}
-
-/// App logic lives in `src/app.rs` first, `app/rust/app.rs` second.
-pub fn find_app(dir: &Path) -> Option<PathBuf> {
-    let preferred = dir.join("src").join("app.rs");
-    if preferred.is_file() {
-        return Some(preferred);
-    }
-    let example_layout = dir.join("app").join("rust").join("app.rs");
-    example_layout.is_file().then_some(example_layout)
-}
-
-fn app_logic(src: &Source) -> Result<Vec<u8>, Failure> {
-    if let Some(ex) = src.example {
-        return ex
-            .files
-            .iter()
-            .find(|f| f.path == "app/rust/app.rs")
-            .map(|f| f.contents.to_vec())
-            .ok_or_else(|| user("this example has no app/rust/app.rs"));
-    }
-    let dir = src.dir.as_ref().expect("a file source has a directory");
-    let found = find_app(dir).ok_or_else(|| {
-        user(format!(
-            "missing {} (or {}): your app logic (setup/forever)",
-            dir.join("src").join("app.rs").display(),
-            dir.join("app").join("rust").join("app.rs").display()
-        ))
-    })?;
-    Ok(std::fs::read(&found)?)
-}
-
-fn runtime_source(args: &BuildArgs) -> Result<RuntimeSource, Failure> {
-    let path = args
-        .runtime_path
-        .clone()
-        .or_else(|| std::env::var_os("ESPFORGE_RUNTIME_PATH").map(PathBuf::from));
-    match path {
-        Some(p) => {
-            let abs = std::path::absolute(&p)?;
-            if !abs.is_dir() {
-                return Err(user(format!(
-                    "runtime path '{}' is not a directory",
-                    p.display()
-                )));
-            }
-            Ok(RuntimeSource::Path(abs.to_string_lossy().into_owned()))
-        }
-        None => Ok(RuntimeSource::Published),
-    }
 }
 
 fn cargo_build(out: &Path, release: bool) -> Result<(), Failure> {
@@ -263,13 +170,13 @@ pub fn execute(args: &BuildArgs) -> Result<(), Failure> {
         println!("build: wrote spec to {}", path.display());
     }
 
-    let runtime = runtime_source(args)?;
-    let overlay_owned = overlay_files(&source)?;
+    let runtime = crate::source::runtime_source(args.runtime_path.clone()).map_err(user)?;
+    let overlay_owned = crate::source::overlay_files(&source)?;
     let overlay: Vec<OverlayFile> = overlay_owned
         .iter()
         .map(|(path, contents)| OverlayFile { path, contents })
         .collect();
-    let app = app_logic(&source)?;
+    let app = crate::source::app_logic(&source).map_err(user)?;
 
     let generated = espforge_emit::generate_with_hardware(
         &checked.meta,
@@ -514,44 +421,6 @@ mod tests {
             std::fs::read_to_string(out.join("src/app.rs")).unwrap(),
             "// preferred"
         );
-    }
-
-    #[test]
-    fn find_app_prefers_src_app_rs() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(find_app(dir.path()).is_none());
-        std::fs::create_dir_all(dir.path().join("app/rust")).unwrap();
-        std::fs::write(dir.path().join("app/rust/app.rs"), "").unwrap();
-        assert!(find_app(dir.path()).unwrap().ends_with("app/rust/app.rs"));
-        std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        std::fs::write(dir.path().join("src/app.rs"), "").unwrap();
-        assert!(find_app(dir.path()).unwrap().ends_with("src/app.rs"));
-    }
-
-    #[test]
-    fn materialized_example_folders_overlay_their_wokwi_files() {
-        let dir = tempfile::tempdir().unwrap();
-        // i2c_scanner has peripherals, so build only its Wokwi overlay logic
-        // through overlay_files on a materialized copy.
-        let ex = espforge_examples::find("04.Communication/i2c_scanner").unwrap();
-        let folder = dir.path().join("ex");
-        espforge_examples::materialize(ex, &folder).unwrap();
-        let src = Source {
-            name: "x".into(),
-            text: String::new(),
-            dir: Some(folder),
-            example: None,
-        };
-        let files = overlay_files(&src).unwrap();
-        let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(
-            names.contains(&"diagram.json")
-                && names.contains(&"chip.json")
-                && names.contains(&"chip.wasm"),
-            "{names:?}"
-        );
-        assert!(names.contains(&"chip/chip.zig"), "{names:?}");
-        assert!(!names.contains(&"example.espf.txt"));
     }
 
     #[test]

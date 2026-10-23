@@ -8,10 +8,12 @@
 //!
 //! `files` maps each `Owned` file to a checksum of what espforge wrote.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use espforge_model::{Artifact, Ownership};
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
 
 /// Build the manifest artifact for every `Owned` artifact in `artifacts`.
 pub fn emit_manifest(artifacts: &[Artifact], template_version: &str) -> Result<Artifact> {
@@ -42,6 +44,19 @@ pub fn parse_manifest(src: &str) -> Result<BTreeMap<String, String>> {
         .flatten()
         .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
         .collect())
+}
+
+/// Read the previous manifest under `out_dir`, if any. Missing or
+/// unreadable files mean "no previous build" (empty map); a corrupt
+/// manifest is an error.
+///
+/// Impure: reads `.espforge/manifest.json` under `out_dir`.
+pub(crate) fn read_prev_manifest(out_dir: &Path) -> Result<BTreeMap<String, String>> {
+    let p = out_dir.join(".espforge/manifest.json");
+    match fs::read_to_string(&p) {
+        Ok(s) => parse_manifest(&s).context("corrupt .espforge/manifest.json"),
+        Err(_) => Ok(BTreeMap::new()),
+    }
 }
 
 /// FNV-1a 64-bit: dependency-free, enough to detect accidental edits.
