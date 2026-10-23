@@ -1,6 +1,9 @@
 //! Writing ESPF: the effective spec for `build --write-spec`, and a fresh
 //! spec for `new`. Both go through `espf::writer`, so output is canonical
 //! and round-trips.
+//!
+//! Query path: `ParsedSections` + `Meta`/`Answers` ->
+//! `spec::effective_document` -> `writer::write_document` -> `String`.
 
 use espf::context::ParsedNode;
 use espf::diag::EspfError;

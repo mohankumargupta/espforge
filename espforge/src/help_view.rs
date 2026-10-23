@@ -1,6 +1,9 @@
 //! Rendering for `espforge espf`: every view is a pure function returning a
 //! `String`. `commands/espf.rs` prints or pages the result.
 //!
+//! Query path: `catalog` (options) -> `help_view` (strings) -> `espf.rs`
+//! (print/page).
+//!
 //! The uniform output shape is plan 3.2: a bare command lists its children as
 //! complete, copyable commands — on a terminal in aligned columns, piped as
 //! `command<TAB>description` (plan 11.5: the section's description paragraph

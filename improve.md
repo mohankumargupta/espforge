@@ -23,7 +23,7 @@ item says otherwise.
 
 ## 1. Break up `espforge/src/commands/pipeline.rs` (1,748 lines)
 
-Status: 1a ✅ 1b ✅ 1c ✅ 1d ✅ 1e ✅ 1f ✅ (2026-10-24) — Item 1 done; Item 2 done (all buses via wrappers/handles, lower -> Vec<EspfError>, buildable is hardware().map, unsupported_section removed); Item 3 not started.
+Status: 1a ✅ 1b ✅ 1c ✅ 1d ✅ 1e ✅ 1f ✅ (2026-10-24) — Item 1 done; Item 2 done (all buses via wrappers/handles, lower -> Vec<EspfError>, buildable is hardware().map, unsupported_section removed); Item 3 done (3a renames + emit split, 3b IO boundary + read_prev_manifest in manifest.rs, 3c file collection in source.rs, 3d query-path docs). Pre-existing: 3 espforge-emit failures (False vs false, tojson) on v3 HEAD.
 
 ### Problem
 
