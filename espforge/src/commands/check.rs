@@ -9,6 +9,7 @@ use std::process::ExitCode;
 
 use super::answers::AnswerArgs;
 use super::pipeline;
+use crate::source::resolve_source;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct CheckArgs {
@@ -31,7 +32,7 @@ pub fn run(args: CheckArgs) -> ExitCode {
 
 fn execute(args: &CheckArgs) -> Result<(), u8> {
     let source =
-        pipeline::resolve_source(args.file.as_deref(), args.example.as_deref()).map_err(|m| {
+        resolve_source(args.file.as_deref(), args.example.as_deref()).map_err(|m| {
             eprintln!("❌ {m}");
             1u8
         })?;

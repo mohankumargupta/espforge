@@ -12,6 +12,7 @@ anyhow = "1"
 espf = { path = "../espf" }
 espforge-bindings = { path = "../espforge-bindings" }
 espforge-model = { path = "../espforge-model" }
+espforge-hardware = { path = "../espforge-hardware" }
 clap = { version = "4", features = ["derive"] }
 # Chip metadata (supported chips, their Rust target triples) used by doctor.
 esp-metadata-generated = { version = "0.5.3", features = ["build-script"] }

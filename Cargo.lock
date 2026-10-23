@@ -1116,6 +1116,7 @@ dependencies = [
  "espforge-bindings",
  "espforge-emit",
  "espforge-espgenerate-template",
+ "espforge-hardware",
  "espforge-model",
  "espforge-options",
  "espforge_examples",

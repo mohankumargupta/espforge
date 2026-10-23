@@ -1,5 +1,6 @@
 mod commands;
 mod render;
+mod source;
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use commands::build::{BuildArgs, Stage};

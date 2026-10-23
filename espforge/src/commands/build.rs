@@ -17,8 +17,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use super::answers::AnswerArgs;
-use super::pipeline::{self, Source};
+use super::pipeline;
 use super::{frontend, spec};
+use crate::source::{Source, resolve_source as resolve_src};
 
 /// How far the pipeline runs. Not a flag: the `gen` / `build` commands pick it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -99,7 +100,7 @@ pub fn run(args: BuildArgs) -> ExitCode {
 // -------------------------------------------------------------------- source
 
 fn resolve_source(args: &BuildArgs) -> Result<Source, Failure> {
-    pipeline::resolve_source(args.file.as_deref(), args.example.as_deref()).map_err(user)
+    resolve_src(args.file.as_deref(), args.example.as_deref()).map_err(user)
 }
 
 /// Files next to a `.espf` that customise the generated Wokwi setup.
