@@ -11,7 +11,8 @@ UART EXAMPLE
   <uart id="uart1" uart="UART1" tx="6" rx="5" />
 
 # components
-  <uart_component id="uart0" uart="$uart1" baud_rate="9600" />
+  <uart_component id="uart1_wokwi_chip" 
+                  uart="$uart1" baud_rate="9600" />
 
 # devices
 

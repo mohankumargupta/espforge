@@ -1,10 +1,9 @@
 #[allow(unused_variables)]
-
 use crate::Context;
 
 pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
-    let uart = component!(ctx, uart0);
+    let uart = component!(ctx, uart1_wokwi_chip);
 
     uart.write_str("Hello\n").expect("uart write failed");
     logger.info("UART ready; type a line terminated by newline");
@@ -22,7 +21,9 @@ pub fn forever(ctx: &mut Context) {
     match uart.read_line(&mut buf) {
         Ok(n) if n > 0 => {
             logger.info("Received:");
-            uart.write_str(core::str::from_utf8(&buf[..n]).unwrap_or("")).ok();
+            logger.info(core::str::from_utf8(&buf[..n]).unwrap_or(""));
+            uart.write_str(core::str::from_utf8(&buf[..n]).unwrap_or(""))
+                .ok();
         }
         Ok(_) => {}
         Err(_) => logger.info("UART read error"),
