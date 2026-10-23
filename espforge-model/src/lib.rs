@@ -1,3 +1,7 @@
+pub mod hardware;
+
+pub use hardware::*;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Runtime {
     Blocking,

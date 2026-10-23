@@ -4,10 +4,10 @@
 
 use espf::context::{ParsedNode, RuntimeContext};
 use espf::diag::EspfError;
-use espforge_emit::{
-    ButtonSpec, Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
-};
 use espforge_model::Meta;
+use espforge_model::hardware::{
+    ButtonSpec, Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec, WifiSpec, is_rust_ident,
+};
 use espforge_options::{Answers, ResolvedOptions};
 use std::path::{Path, PathBuf};
 
@@ -205,12 +205,6 @@ fn uart_attr_peripheral(raw: &str, id: &str) -> Result<String, String> {
     Err(format!(
         "<uart id=\"{id}\"> uart=\"{raw}\" must be UART0, UART1, UART2 or UART3"
     ))
-}
-
-fn is_rust_ident(s: &str) -> bool {
-    !s.is_empty()
-        && !s.starts_with(|c: char| c.is_ascii_digit())
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// `i2c0` -> `I2C0`, `i2c1` -> `I2C1`, `i2c2` -> `I2C2`; anything else is the

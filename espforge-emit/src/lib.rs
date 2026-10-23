@@ -20,8 +20,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-pub use context::{
-    ButtonSpec, Hardware, I2cSpec, LedSpec, RuntimeSource, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
+pub use context::RuntimeSource;
+// Spec structs now live in `espforge-model`; re-exported here for compat
+// until step 1f (see `context.rs` shim).
+pub use espforge_model::hardware::{
+    ButtonSpec, Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
 };
 pub use render::OverlayFile;
 

@@ -1,0 +1,12 @@
+[package]
+name = "espforge-hardware"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# The triangulation for lowering (item 1): `ParsedNode` (espf) +
+# `Meta`/`Answers` (options) -> `Hardware` (model). Only `model` is used
+# until step 1d moves the per-bus lowering here.
+espforge-model = { path = "../espforge-model" }
+espf = { path = "../espf" }
+espforge-options = { path = "../espforge-options" }
