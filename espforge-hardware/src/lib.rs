@@ -13,10 +13,12 @@
 //!
 //! ```text
 //! mod gpio, i2c, spi, uart, wifi, conflicts, util
-//! pub fn lower(sections) -> Result<Hardware, String>
-//! pub fn buildable(sections) -> Result<(), String>
-//! pub fn lower_sections_alias for tests
+//! pub fn lower(sections, ctx) -> Result<Hardware, Vec<EspfError>>
+//! pub fn buildable(sections, ctx) -> Result<(), Vec<EspfError>>
 //! ```
+//!
+//! Item 2e: `buildable` is `lower(...).map(|_| ())` — the single validation
+//! path is `lower`; there is no separate buildability check.
 
 pub mod conflicts;
 pub mod gpio;

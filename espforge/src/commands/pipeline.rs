@@ -4,8 +4,8 @@
 //!
 //! Source discovery lives in [`crate::source`]; hardware lowering lives in
 //! the `espforge-hardware` crate. This module keeps validation
-//! (`Checked`/`validate`/`unsupported_section`) plus thin `hardware` /
-//! `buildable` wrappers so `check.rs`/`build.rs` keep compiling unchanged.
+//! (`Checked`/`validate`) plus a thin `hardware` wrapper (and `buildable`
+//! as `hardware().map(|_| ())`) so `check.rs`/`build.rs` share one path.
 
 use espf::context::RuntimeContext;
 use espf::diag::EspfError;
@@ -96,13 +96,6 @@ pub fn validate<'a>(src: &'a str, flags: &AnswerArgs) -> Result<Checked<'a>, Inv
     })
 }
 
-/// The first section `build` cannot generate firmware for yet.
-pub fn unsupported_section(c: &Checked) -> Option<&'static str> {
-    ["peripherals", "components", "devices", "services"]
-        .into_iter()
-        .find(|n| c.fe.parsed.sections.get(*n).is_some_and(|v| !v.is_empty()))
-}
-
 /// The hardware and services `build` can generate code for today. See
 /// `espforge-hardware::lower` for the per-bus breakdown. `ctx` is the bound
 /// `$` graph from `validate`. Wiring errors are `Invalid::Spans` so
@@ -113,8 +106,11 @@ pub fn hardware(c: &Checked) -> Result<Hardware, Invalid> {
 
 /// Whether `build` can turn this spec into firmware. `build` fails on `Err`;
 /// `check` reports it as a warning (snippets for located wiring errors).
+///
+/// Item 2e: this is `hardware().map(|_| ())` — the single validation path is
+/// `validate()` then `hardware()`; there is no separate "buildable" check.
 pub fn buildable(c: &Checked) -> Result<(), Invalid> {
-    espforge_hardware::buildable(&c.fe.parsed.sections, &c.ctx).map_err(Invalid::Spans)
+    hardware(c).map(|_| ())
 }
 
 #[cfg(test)]
@@ -179,7 +175,8 @@ mod tests {
         let c = validate(src, &AnswerArgs::default())
             .ok()
             .expect("graph is fine");
-        assert_eq!(unsupported_section(&c), Some("peripherals"));
+        // Item 2e: no `unsupported_section` special case — `hardware()`
+        // itself reports the unbuildable `<pwm>` as a snippet.
         let err = buildable(&c).unwrap_err();
         match err {
             Invalid::Spans(errs) => assert!(
