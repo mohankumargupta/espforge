@@ -12,7 +12,7 @@ pub fn setup(ctx: &mut Context) {
 pub fn forever(ctx: &mut Context) {
     let logger = ctx.logger;
     let delay = ctx.delay;
-    let uart = component!(ctx, uart0);
+    let uart = component!(ctx, uart1_wokwi_chip);
 
     // Line reading is backed by esp-hal's `read_buffered` + `\n` scan (§20.5).
     // `read_line` fills `buf` until a newline (or it is full) and returns the
