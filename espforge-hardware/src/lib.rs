@@ -32,6 +32,7 @@ pub use espforge_model::hardware::*;
 use std::collections::HashMap;
 
 use espf::context::{ParsedNode, RuntimeContext};
+use espf::diag::EspfError;
 
 /// The hardware and services `build` can generate code for today: `<gpio>`
 /// peripherals used by `<led>` and `<button>` components, `<i2c>` peripherals
@@ -41,15 +42,16 @@ use espf::context::{ParsedNode, RuntimeContext};
 pub fn lower(
     sections: &HashMap<String, Vec<ParsedNode>>,
     ctx: &RuntimeContext,
-) -> Result<Hardware, String> {
+) -> Result<Hardware, Vec<EspfError>> {
     if sections
         .get("devices")
         .is_some_and(|v| !v.is_empty())
     {
-        return Err(
-            "`# devices` is not supported by `build` yet (only <gpio> peripherals with <led> and <button> components, <i2c> peripherals with <i2c_component> components, <spi> peripherals with <spi_component> components, and the <wifi> service)"
-                .to_string(),
-        );
+        return Err(vec![EspfError::at_span(
+            0..0,
+            "unsupported devices",
+            "`# devices` is not supported by `build` yet (only <gpio> peripherals with <led> and <button> components, <i2c> peripherals with <i2c_component> components, <spi> peripherals with <spi_component> components, and the <wifi> service)",
+        )]);
     }
 
     let mut gpios: Vec<gpio::GpioEntry> = Vec::new();
@@ -63,18 +65,22 @@ pub fn lower(
         .unwrap_or(&[])
     {
         if n.tag_name == "gpio" {
-            gpios.push(gpio::lower_gpio(n)?);
+            gpios.push(gpio::lower_gpio(n).map_err(|e| vec![e])?);
         } else if n.tag_name == "i2c" {
-            i2c_buses.push(i2c::lower_i2c(n)?);
+            i2c_buses.push(i2c::lower_i2c(n).map_err(|e| vec![e])?);
         } else if n.tag_name == "spi" {
-            spi_buses.push(spi::lower_spi(n)?);
+            spi_buses.push(spi::lower_spi(n).map_err(|e| vec![e])?);
         } else if n.tag_name == "uart" {
-            uarts.push(uart::lower_uart(n)?);
+            uarts.push(uart::lower_uart(n).map_err(|e| vec![e])?);
         } else {
-            return Err(format!(
-                "<{}> in `# peripherals` is not supported by `build` yet (only <gpio>, <i2c>, <spi> and <uart>)",
-                n.tag_name
-            ));
+            return Err(vec![EspfError::at_node(
+                n,
+                "unsupported peripheral",
+                format!(
+                    "<{}> in `# peripherals` is not supported by `build` yet (only <gpio>, <i2c>, <spi> and <uart>)",
+                    n.tag_name
+                ),
+            )]);
         }
     }
 
@@ -88,20 +94,25 @@ pub fn lower(
         .unwrap_or(&[])
     {
         if n.tag_name == "i2c_component" {
-            i2c::attach_i2c_component(n, &mut i2c_buses, ctx)?;
+            i2c::attach_i2c_component(n, &mut i2c_buses, ctx).map_err(|e| vec![e])?;
         } else if n.tag_name == "spi_component" {
-            spi::attach_spi_component(n, &mut spi_buses, &mut spi_devices, &gpios, ctx)?;
+            spi::attach_spi_component(n, &mut spi_buses, &mut spi_devices, &gpios, ctx)
+                .map_err(|e| vec![e])?;
         } else if n.tag_name == "uart_component" {
-            uart::attach_uart_component(n, &mut uarts, ctx)?;
+            uart::attach_uart_component(n, &mut uarts, ctx).map_err(|e| vec![e])?;
         } else if n.tag_name == "button" {
-            gpio::attach_button(n, &gpios, &leds, &mut buttons, ctx)?;
+            gpio::attach_button(n, &gpios, &leds, &mut buttons, ctx).map_err(|e| vec![e])?;
         } else if n.tag_name == "led" {
-            gpio::attach_led(n, &gpios, &mut leds, &buttons, ctx)?;
+            gpio::attach_led(n, &gpios, &mut leds, &buttons, ctx).map_err(|e| vec![e])?;
         } else {
-            return Err(format!(
-                "<{}> in `# components` is not supported by `build` yet (only <led>, <button>, <i2c_component>, <spi_component> and <uart_component>)",
-                n.tag_name
-            ));
+            return Err(vec![EspfError::at_node(
+                n,
+                "unsupported component",
+                format!(
+                    "<{}> in `# components` is not supported by `build` yet (only <led>, <button>, <i2c_component>, <spi_component> and <uart_component>)",
+                    n.tag_name
+                ),
+            )]);
         }
     }
 
@@ -113,6 +124,7 @@ pub fn lower(
     )?;
 
     conflicts::check_all(
+        sections,
         &gpios,
         &i2c_buses,
         &spi_buses,
@@ -141,26 +153,36 @@ pub fn lower(
 pub fn buildable(
     sections: &HashMap<String, Vec<ParsedNode>>,
     ctx: &RuntimeContext,
-) -> Result<(), String> {
+) -> Result<(), Vec<EspfError>> {
     lower(sections, ctx).map(|_| ())
 }
 
 /// Test helper: `lower` over a sections map. Builds a bound
 /// `RuntimeContext` via `resolve_and_bind` first, so tests exercise the
 /// same triangulation `pipeline::validate` feeds into `lower`.
+/// Errors are joined to a single `String` (labels concatenated) so existing
+/// per-bus tests keep asserting on message text unchanged.
 pub fn lower_sections(sections: &HashMap<String, Vec<ParsedNode>>) -> Result<Hardware, String> {
+    lower_spans(sections).map_err(|errs| {
+        errs
+            .into_iter()
+            .map(|e| format!("{}: {}", e.title, e.label))
+            .collect::<Vec<_>>()
+            .join("; ")
+    })
+}
+
+/// Span-preserving variant of [`lower_sections`] for snippet tests.
+pub fn lower_spans(
+    sections: &HashMap<String, Vec<ParsedNode>>,
+) -> Result<Hardware, Vec<EspfError>> {
     let mut ctx = RuntimeContext::new();
     ctx.resolve_and_bind(
         sections.get("peripherals").map(Vec::as_slice).unwrap_or(&[]),
         sections.get("components").map(Vec::as_slice).unwrap_or(&[]),
         sections.get("devices").map(Vec::as_slice).unwrap_or(&[]),
     )
-    .map_err(|errs| {
-        errs.into_iter()
-            .map(|e| format!("{}: {}", e.title, e.label))
-            .collect::<Vec<_>>()
-            .join("; ")
-    })?;
+    .map_err(|errs| errs)?;
     lower(sections, &ctx)
 }
 
@@ -246,17 +268,22 @@ mod snapshot_tests {
 /// Builds a bound `RuntimeContext` via `resolve_and_bind` first, so tests
 /// exercise the same triangulation `pipeline::validate` feeds into `lower`.
 pub fn buildable_sections(sections: &HashMap<String, Vec<ParsedNode>>) -> Result<(), String> {
+    buildable_spans(sections).map_err(|errs| {
+        errs.into_iter()
+            .map(|e| format!("{}: {}", e.title, e.label))
+            .collect::<Vec<_>>()
+            .join("; ")
+    })
+}
+
+/// Span-preserving variant of [`buildable_sections`].
+pub fn buildable_spans(sections: &HashMap<String, Vec<ParsedNode>>) -> Result<(), Vec<EspfError>> {
     let mut ctx = RuntimeContext::new();
     ctx.resolve_and_bind(
         sections.get("peripherals").map(Vec::as_slice).unwrap_or(&[]),
         sections.get("components").map(Vec::as_slice).unwrap_or(&[]),
         sections.get("devices").map(Vec::as_slice).unwrap_or(&[]),
     )
-    .map_err(|errs| {
-        errs.into_iter()
-            .map(|e| format!("{}: {}", e.title, e.label))
-            .collect::<Vec<_>>()
-            .join("; ")
-    })?;
+    .map_err(|errs| errs)?;
     buildable(sections, &ctx)
 }

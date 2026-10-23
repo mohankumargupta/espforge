@@ -21,9 +21,7 @@ use std::fs;
 use std::path::Path;
 
 pub use context::RuntimeSource;
-use espforge_model::hardware::{
-    ButtonSpec, Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
-};
+use espforge_model::hardware::Hardware;
 pub use render::OverlayFile;
 
 /// Everything a build writes: text files and binary assets.
@@ -147,6 +145,9 @@ fn read_prev_manifest(out_dir: &Path) -> Result<BTreeMap<String, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use espforge_model::hardware::{
+        ButtonSpec, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
+    };
     use espforge_model::{Console, Runtime};
     use espforge_options::{Answers, DerivedInputs};
 

@@ -8,6 +8,7 @@ use super::gpio::GpioEntry;
 use super::util::parse_khz;
 use super::{SpiBusSpec, SpiSpec, is_rust_ident};
 use espf::context::{ParsedNode, RuntimeContext};
+use espf::diag::EspfError;
 use espforge_bindings::components::SpiComponent;
 
 /// One `<spi>` peripheral (`spi2`), before filtering bare buses.
@@ -35,16 +36,24 @@ pub struct SpiDeviceDraft {
 }
 
 /// The `<spi>` branch of the `# peripherals` loop.
-pub fn lower_spi(n: &ParsedNode) -> Result<SpiBusDraft, String> {
+pub fn lower_spi(n: &ParsedNode) -> Result<SpiBusDraft, EspfError> {
     // The runtime `SpiBus::build` is typed on `SPI2`; every chip
     // espforge supports exposes it (GPIO matrix: any pin works).
     if n.id != "spi2" {
-        return Err(format!("<spi id=\"{}\">: the id must be spi2", n.id));
+        return Err(EspfError::at_node(
+            n,
+            "invalid spi id",
+            format!("<spi id=\"{}\">: the id must be spi2", n.id),
+        ));
     }
-    let pin_attr = |what: &str| {
-        n.get_attr(what)
-            .and_then(|p| p.parse::<u8>().ok())
-            .ok_or_else(|| format!("<spi id=\"{}\"> needs a numeric {what}=\"...\"", n.id))
+    let pin_attr = |what: &str| -> Result<u8, EspfError> {
+        n.get_attr(what).and_then(|p| p.parse::<u8>().ok()).ok_or_else(|| {
+            EspfError::at_node(
+                n,
+                "invalid spi pin",
+                format!("<spi id=\"{}\"> needs a numeric {what}=\"...\"", n.id),
+            )
+        })
     };
     let mode = match n.get_attr("mode") {
         None => 0,
@@ -53,16 +62,21 @@ pub fn lower_spi(n: &ParsedNode) -> Result<SpiBusDraft, String> {
         Some("2") => 2,
         Some("3") => 3,
         Some(other) => {
-            return Err(format!(
-                "<spi id=\"{}\"> mode=\"{other}\" must be 0, 1, 2 or 3",
-                n.id
+            return Err(EspfError::at_node(
+                n,
+                "invalid spi mode",
+                format!(
+                    "<spi id=\"{}\"> mode=\"{other}\" must be 0, 1, 2 or 3",
+                    n.id
+                ),
             ));
         }
     };
     let khz = match n.get_attr("frequency") {
         // The `SpiConfig` default in espforge-runtime (1 MHz).
         None => 1000,
-        Some(f) => parse_khz(f, "spi", n.id)?,
+        Some(f) => parse_khz(f, "spi", n.id)
+            .map_err(|m| EspfError::at_node(n, "invalid spi frequency", m))?,
     };
     Ok(SpiBusDraft {
         id: n.id.to_string(),
@@ -89,19 +103,24 @@ pub fn attach_spi_component(
     spi_devices: &mut Vec<SpiDeviceDraft>,
     gpios: &[GpioEntry],
     ctx: &RuntimeContext,
-) -> Result<(), String> {
+) -> Result<(), EspfError> {
     // Single dispatch path for the `$` ref; wrapper owns `trim_start_matches`.
     // Wrapper accepts numeric `cs` and optional `mode`, so existing
     // `spi_example` specs (no mode, numeric cs) resolve here.
-    let comp = SpiComponent::resolve(n, ctx)?;
+    let comp =
+        SpiComponent::resolve(n, ctx).map_err(|m| EspfError::at_node(n, "invalid spi_component", m))?;
     let target = comp.spi_ref.trim_start_matches('$');
     let bus_idx = spi_buses.iter().position(|b| {
         ctx.interner.get(&b.id) == Some(comp.peripheral_handle)
     });
     if bus_idx.is_none() {
-        return Err(format!(
-            "<spi_component id=\"{}\"> refers to `{target}`, which is not an <spi> in `# peripherals`",
-            n.id
+        return Err(EspfError::at_node(
+            n,
+            "unknown spi bus",
+            format!(
+                "<spi_component id=\"{}\"> refers to `{target}`, which is not an <spi> in `# peripherals`",
+                n.id
+            ),
         ));
     }
     // `cs="9"` is a pin; `cs="gpio5"`/`cs="$gpio5"` resolves via the gpio table.
@@ -111,21 +130,31 @@ pub fn attach_spi_component(
     } else if let Some(g) = gpios.iter().find(|g| g.id == cs_ref) {
         g.pin
     } else {
-        return Err(format!(
-            "<spi_component id=\"{}\"> needs a numeric cs=\"...\"", n.id
+        return Err(EspfError::at_node(
+            n,
+            "invalid cs",
+            format!("<spi_component id=\"{}\"> needs a numeric cs=\"...\"", n.id),
         ));
     };
     let name = n.id.replace('-', "_");
     if !is_rust_ident(&name) {
-        return Err(format!(
-            "<spi_component id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
-            n.id
+        return Err(EspfError::at_node(
+            n,
+            "invalid component id",
+            format!(
+                "<spi_component id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
+                n.id
+            ),
         ));
     }
     if let Some(other) = spi_devices.iter().find(|d| d.cs == cs) {
-        return Err(format!(
-            "<spi_component id=\"{}\"> and <spi_component id=\"{}\"> both use GPIO{cs}",
-            other.name, name
+        return Err(EspfError::at_node(
+            n,
+            "cs pin already used",
+            format!(
+                "<spi_component id=\"{}\"> and <spi_component id=\"{}\"> both use GPIO{cs}",
+                other.name, name
+            ),
         ));
     }
     let idx = bus_idx.expect("checked above");

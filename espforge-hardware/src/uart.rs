@@ -6,6 +6,7 @@
 
 use super::{UartSpec, is_rust_ident};
 use espf::context::{ParsedNode, RuntimeContext};
+use espf::diag::EspfError;
 use espforge_bindings::components::UartComponent;
 
 /// The `<uart_component>` riding on a `<uart>`: its fields are what the
@@ -33,41 +34,55 @@ pub struct UartDraft {
 /// The implicit way to name a `<uart>`'s physical peripheral: `uart0` ->
 /// `UART0`, `uart1` -> `UART1`, ...; anything else is the user's error (the
 /// esp-hal peripheral structs are named exactly this).
-pub fn uart_peripheral_name(id: &str) -> Result<String, String> {
+pub fn uart_peripheral_name(n: &ParsedNode) -> Result<String, EspfError> {
+    let id = n.id;
     if matches!(id, "uart0" | "uart1" | "uart2" | "uart3") {
         return Ok(id.to_ascii_uppercase());
     }
-    Err(format!(
-        "<uart id=\"{id}\">: the id must be uart0, uart1, uart2 or uart3 (or give uart=\"UART1\" explicitly)"
+    Err(EspfError::at_node(
+        n,
+        "invalid uart id",
+        format!(
+            "<uart id=\"{id}\">: the id must be uart0, uart1, uart2 or uart3 (or give uart=\"UART1\" explicitly)"
+        ),
     ))
 }
 
 /// An explicit `uart="UART1"` attribute on `<uart>`: the physical
 /// `Peripherals.UART*` peripheral, case-insensitive. With it, the `<uart>`
 /// id stops being encoded as `uartN` and is a plain reference name.
-pub fn uart_attr_peripheral(raw: &str, id: &str) -> Result<String, String> {
+pub fn uart_attr_peripheral(n: &ParsedNode, raw: &str) -> Result<String, EspfError> {
     let upper = raw.trim().to_ascii_uppercase();
     if matches!(upper.as_str(), "UART0" | "UART1" | "UART2" | "UART3") {
         return Ok(upper);
     }
-    Err(format!(
-        "<uart id=\"{id}\"> uart=\"{raw}\" must be UART0, UART1, UART2 or UART3"
+    Err(EspfError::at_node(
+        n,
+        "invalid uart peripheral",
+        format!(
+            "<uart id=\"{}\"> uart=\"{raw}\" must be UART0, UART1, UART2 or UART3",
+            n.id
+        ),
     ))
 }
 
 /// The `<uart>` branch of the `# peripherals` loop.
-pub fn lower_uart(n: &ParsedNode) -> Result<UartDraft, String> {
+pub fn lower_uart(n: &ParsedNode) -> Result<UartDraft, EspfError> {
     let peripheral = match n.get_attr("uart") {
         // Explicit physical peripheral (`uart="UART1"`); the id is
         // then just a reference name.
-        Some(raw) => uart_attr_peripheral(raw, n.id)?,
+        Some(raw) => uart_attr_peripheral(n, raw)?,
         // Backwards compatible: the id itself names the peripheral.
-        None => uart_peripheral_name(n.id)?,
+        None => uart_peripheral_name(n)?,
     };
-    let pin_attr = |what: &str| {
-        n.get_attr(what)
-            .and_then(|p| p.parse::<u8>().ok())
-            .ok_or_else(|| format!("<uart id=\"{}\"> needs a numeric {what}=\"...\"", n.id))
+    let pin_attr = |what: &str| -> Result<u8, EspfError> {
+        n.get_attr(what).and_then(|p| p.parse::<u8>().ok()).ok_or_else(|| {
+            EspfError::at_node(
+                n,
+                "invalid uart pin",
+                format!("<uart id=\"{}\"> needs a numeric {what}=\"...\"", n.id),
+            )
+        })
     };
     Ok(UartDraft {
         id: n.id.to_string(),
@@ -87,42 +102,63 @@ pub fn attach_uart_component(
     n: &ParsedNode,
     uarts: &mut [UartDraft],
     ctx: &RuntimeContext,
-) -> Result<(), String> {
+) -> Result<(), EspfError> {
     // Single dispatch path for the `$` ref; wrapper owns `trim_start_matches`.
-    let comp = UartComponent::resolve(n, ctx)?;
+    let comp =
+        UartComponent::resolve(n, ctx).map_err(|m| EspfError::at_node(n, "invalid uart_component", m))?;
     // Locate the draft via the resolved handle, not a string `find`.
     let idx = uarts
         .iter()
         .position(|u| ctx.interner.get(&u.id) == Some(comp.peripheral_handle))
         .ok_or_else(|| {
             let target = comp.uart_ref.trim_start_matches('$');
-            format!(
-                "<uart_component id=\"{}\"> refers to `{target}`, which is not an <uart> in `# peripherals`",
-                n.id
+            EspfError::at_node(
+                n,
+                "unknown uart",
+                format!(
+                    "<uart_component id=\"{}\"> refers to `{target}`, which is not an <uart> in `# peripherals`",
+                    n.id
+                ),
             )
         })?;
     let target = uarts[idx].id.clone();
     let draft = &mut uarts[idx];
     if let Some(other) = &draft.component {
-        return Err(format!(
-            "<uart_component id=\"{}\"> and <uart_component id=\"{}\"> both use <uart id=\"{target}\">",
-            other.name,
-            n.id.replace('-', "_")
+        return Err(EspfError::at_node(
+            n,
+            "uart already used",
+            format!(
+                "<uart_component id=\"{}\"> and <uart_component id=\"{}\"> both use <uart id=\"{target}\">",
+                other.name,
+                n.id.replace('-', "_")
+            ),
         ));
     }
     let baud_raw = n.get_attr("baud_rate").ok_or_else(|| {
-        format!("<uart_component id=\"{}\"> needs baud_rate=\"...\"", n.id)
+        EspfError::at_node(
+            n,
+            "missing baud_rate",
+            format!("<uart_component id=\"{}\"> needs baud_rate=\"...\"", n.id),
+        )
     })?;
     let baud: u32 = baud_raw.parse().map_err(|_| {
-        format!(
-            "<uart_component id=\"{}\"> baud_rate=\"{baud_raw}\" is not a number",
-            n.id
+        EspfError::at_node(
+            n,
+            "invalid baud_rate",
+            format!(
+                "<uart_component id=\"{}\"> baud_rate=\"{baud_raw}\" is not a number",
+                n.id
+            ),
         )
     })?;
     if baud == 0 {
-        return Err(format!(
-            "<uart_component id=\"{}\"> baud_rate=\"{baud_raw}\" must be greater than 0",
-            n.id
+        return Err(EspfError::at_node(
+            n,
+            "invalid baud_rate",
+            format!(
+                "<uart_component id=\"{}\"> baud_rate=\"{baud_raw}\" must be greater than 0",
+                n.id
+            ),
         ));
     }
     let parity = match n.get_attr("parity") {
@@ -130,9 +166,13 @@ pub fn attach_uart_component(
         Some("even") => "Even".to_string(),
         Some("odd") => "Odd".to_string(),
         Some(other) => {
-            return Err(format!(
-                "<uart_component id=\"{}\"> parity=\"{other}\" must be \"none\", \"even\" or \"odd\"",
-                n.id
+            return Err(EspfError::at_node(
+                n,
+                "invalid parity",
+                format!(
+                    "<uart_component id=\"{}\"> parity=\"{other}\" must be \"none\", \"even\" or \"odd\"",
+                    n.id
+                ),
             ));
         }
     };
@@ -140,17 +180,25 @@ pub fn attach_uart_component(
         None | Some("1") => "_1".to_string(),
         Some("2") => "_2".to_string(),
         Some(other) => {
-            return Err(format!(
-                "<uart_component id=\"{}\"> stop_bits=\"{other}\" must be \"1\" or \"2\"",
-                n.id
+            return Err(EspfError::at_node(
+                n,
+                "invalid stop_bits",
+                format!(
+                    "<uart_component id=\"{}\"> stop_bits=\"{other}\" must be \"1\" or \"2\"",
+                    n.id
+                ),
             ));
         }
     };
     let name = n.id.replace('-', "_");
     if !is_rust_ident(&name) {
-        return Err(format!(
-            "<uart_component id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
-            n.id
+        return Err(EspfError::at_node(
+            n,
+            "invalid component id",
+            format!(
+                "<uart_component id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
+                n.id
+            ),
         ));
     }
     draft.component = Some(UartCompDraft {

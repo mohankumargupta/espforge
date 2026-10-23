@@ -54,8 +54,14 @@ fn execute(args: &CheckArgs) -> Result<(), u8> {
     }
 
     // Valid, but say so when `build` cannot generate it yet.
-    if let Err(msg) = pipeline::buildable(&checked) {
-        eprintln!("warning: {msg}");
+    // Located wiring errors render as snippets; flag problems as a warning line.
+    if let Err(invalid) = pipeline::buildable(&checked) {
+        match invalid {
+            pipeline::Invalid::Spans(errs) => {
+                super::frontend::report(&source.name, &source.text, &errs)
+            }
+            pipeline::Invalid::Message(m) => eprintln!("warning: {m}"),
+        }
     }
 
     println!("✓ {} is valid", source.name);

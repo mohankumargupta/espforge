@@ -26,7 +26,7 @@
 use anyhow::{Context as _, Result};
 use espforge_model::{Console, Meta, Runtime};
 use espforge_model::hardware::{
-    ButtonSpec, Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec, WifiSpec,
+    ButtonSpec, Hardware, I2cSpec, LedSpec, SpiBusSpec, SpiSpec, UartSpec,
 };
 use espforge_options::{OptValue, ResolvedOptions};
 use minijinja::{Value, context};
@@ -283,6 +283,7 @@ pub fn build_context_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use espforge_model::hardware::WifiSpec;
     use espforge_options::{Answers, DerivedInputs};
 
     pub fn meta(runtime: Runtime, chip: &str) -> Meta {

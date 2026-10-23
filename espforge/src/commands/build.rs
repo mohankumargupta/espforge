@@ -241,7 +241,14 @@ pub fn execute(args: &BuildArgs) -> Result<(), Failure> {
     }
 
     // Be explicit rather than silently generating firmware that lacks devices.
-    let hardware = pipeline::hardware(&checked).map_err(user)?;
+    // Wiring errors render as snippets, like the `validate` path above.
+    let hardware = match pipeline::hardware(&checked) {
+        Ok(hw) => hw,
+        Err(invalid) => {
+            invalid.report(&source.name, &source.text);
+            return Err(Failure::User);
+        }
+    };
 
     if let Some(path) = &args.write_spec {
         let doc =

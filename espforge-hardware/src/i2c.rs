@@ -7,6 +7,7 @@
 use super::util::parse_khz;
 use super::I2cSpec;
 use espf::context::{ParsedNode, RuntimeContext};
+use espf::diag::EspfError;
 use espforge_bindings::components::I2cComponent;
 use espforge_model::hardware::is_rust_ident;
 
@@ -24,29 +25,39 @@ pub struct I2cBusDraft {
 
 /// `i2c0` -> `I2C0`, `i2c1` -> `I2C1`, `i2c2` -> `I2C2`; anything else is the
 /// user's error (the esp-hal peripheral structs are named exactly this).
-pub fn i2c_peripheral_name(id: &str) -> Result<String, String> {
+fn i2c_peripheral_name(n: &ParsedNode) -> Result<String, EspfError> {
+    let id = n.id;
     if id == "i2c0" || id == "i2c1" || id == "i2c2" {
         return Ok(id.to_ascii_uppercase());
     }
-    Err(format!(
-        "<i2c id=\"{id}\">: the id must be i2c0, i2c1 or i2c2"
+    Err(EspfError::at_node(
+        n,
+        "invalid i2c id",
+        format!("<i2c id=\"{id}\">: the id must be i2c0, i2c1 or i2c2"),
     ))
 }
 
 /// The `<i2c>` branch of the `# peripherals` loop.
-pub fn lower_i2c(n: &ParsedNode) -> Result<I2cBusDraft, String> {
-    let pin_attr = |what: &str| {
+pub fn lower_i2c(n: &ParsedNode) -> Result<I2cBusDraft, EspfError> {
+    let pin_attr = |what: &str| -> Result<u8, EspfError> {
         n.get_attr(what)
             .and_then(|p| p.parse::<u8>().ok())
-            .ok_or_else(|| format!("<i2c id=\"{}\"> needs a numeric {what}=\"...\"", n.id))
+            .ok_or_else(|| {
+                EspfError::at_node(
+                    n,
+                    "invalid i2c pin",
+                    format!("<i2c id=\"{}\"> needs a numeric {what}=\"...\"", n.id),
+                )
+            })
     };
     let khz = match n.get_attr("frequency") {
         None => 100, // esp-hal's default
-        Some(f) => parse_khz(f, "i2c", n.id)?,
+        Some(f) => parse_khz(f, "i2c", n.id)
+            .map_err(|m| EspfError::at_node(n, "invalid i2c frequency", m))?,
     };
     Ok(I2cBusDraft {
         id: n.id.to_string(),
-        peripheral: i2c_peripheral_name(n.id)?,
+        peripheral: i2c_peripheral_name(n)?,
         sda: pin_attr("sda")?,
         scl: pin_attr("scl")?,
         khz,
@@ -64,32 +75,47 @@ pub fn attach_i2c_component(
     n: &ParsedNode,
     i2c_buses: &mut [I2cBusDraft],
     ctx: &RuntimeContext,
-) -> Result<(), String> {
+) -> Result<(), EspfError> {
     // Single dispatch path for the `$` ref; wrapper owns `trim_start_matches`.
-    let comp = I2cComponent::resolve(n, ctx)?;
+    // Wrapper `String` errors are located at this node so `Invalid::report`
+    // renders them as snippets with identical text.
+    let comp =
+        I2cComponent::resolve(n, ctx).map_err(|m| EspfError::at_node(n, "invalid i2c_component", m))?;
     // Locate the draft via the resolved handle, not a string `find`.
     let idx = i2c_buses
         .iter()
         .position(|b| ctx.interner.get(&b.id) == Some(comp.peripheral_handle))
         .ok_or_else(|| {
             let target = comp.i2c_ref.trim_start_matches('$');
-            format!(
-                "<i2c_component id=\"{}\"> refers to `{target}`, which is not an <i2c> in `# peripherals`",
-                n.id
+            EspfError::at_node(
+                n,
+                "unknown i2c bus",
+                format!(
+                    "<i2c_component id=\"{}\"> refers to `{target}`, which is not an <i2c> in `# peripherals`",
+                    n.id
+                ),
             )
         })?;
     let target = i2c_buses[idx].id.clone();
     if let Some(other) = i2c_buses[idx].used.as_deref() {
-        return Err(format!(
-            "<i2c_component id=\"{other}\"> and <i2c_component id=\"{}\"> both use <i2c id=\"{target}\">",
-            n.id
+        return Err(EspfError::at_node(
+            n,
+            "i2c bus already used",
+            format!(
+                "<i2c_component id=\"{other}\"> and <i2c_component id=\"{}\"> both use <i2c id=\"{target}\">",
+                n.id
+            ),
         ));
     }
     let name = n.id.replace('-', "_");
     if !is_rust_ident(&name) {
-        return Err(format!(
-            "<i2c_component id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
-            n.id
+        return Err(EspfError::at_node(
+            n,
+            "invalid component id",
+            format!(
+                "<i2c_component id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
+                n.id
+            ),
         ));
     }
     i2c_buses[idx].used = Some(name);

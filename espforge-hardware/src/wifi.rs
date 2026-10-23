@@ -4,71 +4,99 @@
 //! the `# services` loop. One network only: `network1.ssid` (required) and
 //! `network1.password` (optional; empty or absent means an open network).
 
-use super::util::plain;
 use super::WifiSpec;
 use espf::context::ParsedNode;
+use espf::diag::EspfError;
 
 /// The `<wifi>` service. Both strings end up inside Rust string literals in
 /// `generated.rs`.
-pub fn wifi_spec(n: &ParsedNode) -> Result<WifiSpec, String> {
+pub fn wifi_spec(n: &ParsedNode) -> Result<WifiSpec, Vec<EspfError>> {
     let id = n.id;
-    let obj = n
-        .to_object()
-        .map_err(|errs| errs.into_iter().map(plain).collect::<Vec<_>>().join("; "))?;
+    let obj = n.to_object().map_err(|errs| errs)?;
 
     if let Some(key) = obj
         .fields
         .keys()
         .find(|k| !matches!(k.as_str(), "id" | "network1"))
     {
-        return Err(format!(
-            "<wifi id=\"{id}\"> has `{key}`, which is not supported yet (only network1.ssid and network1.password: one network)"
-        ));
+        return Err(vec![EspfError::at_node(
+            n,
+            "unsupported wifi field",
+            format!(
+                "<wifi id=\"{id}\"> has `{key}`, which is not supported yet (only network1.ssid and network1.password: one network)"
+            ),
+        )]);
     }
 
     let net = obj
         .get_object("network1")
-        .map_err(plain)?
-        .ok_or_else(|| format!("<wifi id=\"{id}\"> needs network1.ssid=\"...\""))?;
+        .map_err(|e| vec![e])?
+        .ok_or_else(|| {
+            vec![EspfError::at_node(
+                n,
+                "missing wifi ssid",
+                format!("<wifi id=\"{id}\"> needs network1.ssid=\"...\""),
+            )]
+        })?;
     if let Some(key) = net
         .fields
         .keys()
         .find(|k| !matches!(k.as_str(), "ssid" | "password"))
     {
-        return Err(format!(
-            "<wifi id=\"{id}\"> has `network1.{key}`, which is not supported yet (only ssid and password)"
-        ));
+        return Err(vec![EspfError::at_node(
+            n,
+            "unsupported wifi field",
+            format!(
+                "<wifi id=\"{id}\"> has `network1.{key}`, which is not supported yet (only ssid and password)"
+            ),
+        )]);
     }
 
     let ssid = net
         .get_str("ssid")
-        .map_err(plain)?
-        .ok_or_else(|| format!("<wifi id=\"{id}\"> needs network1.ssid=\"...\""))?
+        .map_err(|e| vec![e])?
+        .ok_or_else(|| {
+            vec![EspfError::at_node(
+                n,
+                "missing wifi ssid",
+                format!("<wifi id=\"{id}\"> needs network1.ssid=\"...\""),
+            )]
+        })?
         .value
         .clone();
     let password = net
         .get_str("password")
-        .map_err(plain)?
+        .map_err(|e| vec![e])?
         .map(|p| p.value.clone())
         .unwrap_or_default();
 
     if ssid.is_empty() || ssid.len() > 32 {
-        return Err(format!(
-            "<wifi id=\"{id}\"> network1.ssid must be 1 to 32 bytes, got {}",
-            ssid.len()
-        ));
+        return Err(vec![EspfError::at_node(
+            n,
+            "invalid wifi ssid",
+            format!(
+                "<wifi id=\"{id}\"> network1.ssid must be 1 to 32 bytes, got {}",
+                ssid.len()
+            ),
+        )]);
     }
     if !(password.is_empty() || (8..=63).contains(&password.len())) {
-        return Err(format!(
-            "<wifi id=\"{id}\"> network1.password must be empty (open network) or 8 to 63 characters, got {}",
-            password.len()
-        ));
+        return Err(vec![EspfError::at_node(
+            n,
+            "invalid wifi password",
+            format!(
+                "<wifi id=\"{id}\"> network1.password must be empty (open network) or 8 to 63 characters, got {}",
+                password.len()
+            ),
+        )]);
     }
     for (what, value) in [("ssid", &ssid), ("password", &password)] {
         if value.contains('\\') {
-            return Err(format!(
-                "<wifi id=\"{id}\"> network1.{what} cannot contain a backslash"
-            ));
+            return Err(vec![EspfError::at_node(
+                n,
+                "invalid wifi value",
+                format!("<wifi id=\"{id}\"> network1.{what} cannot contain a backslash"),
+            )]);
         }
     }
 
@@ -76,19 +104,27 @@ pub fn wifi_spec(n: &ParsedNode) -> Result<WifiSpec, String> {
 }
 
 /// The `# services` loop: only `<wifi>` is buildable, at most one.
-pub fn lower_services(services: &[ParsedNode]) -> Result<Option<WifiSpec>, String> {
+pub fn lower_services(services: &[ParsedNode]) -> Result<Option<WifiSpec>, Vec<EspfError>> {
     let mut wifi: Option<WifiSpec> = None;
     for n in services {
         if n.tag_name != "wifi" {
-            return Err(format!(
-                "<{}> in `# services` is not supported by `build` yet (only <wifi>)",
-                n.tag_name
-            ));
+            return Err(vec![EspfError::at_node(
+                n,
+                "unsupported service",
+                format!(
+                    "<{}> in `# services` is not supported by `build` yet (only <wifi>)",
+                    n.tag_name
+                ),
+            )]);
         }
         if wifi.is_some() {
-            return Err("only one <wifi> is supported in `# services`".to_string());
+            return Err(vec![EspfError::at_node(
+                n,
+                "duplicate wifi",
+                "only one <wifi> is supported in `# services`".to_string(),
+            )]);
         }
-        wifi = Some(wifi_spec(n)?);
+        wifi = Some(wifi_spec(n).map_err(|errs| errs)?);
     }
     Ok(wifi)
 }

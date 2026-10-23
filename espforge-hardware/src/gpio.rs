@@ -6,6 +6,7 @@
 
 use super::{ButtonSpec, LedSpec, is_rust_ident};
 use espf::context::{ParsedNode, RuntimeContext};
+use espf::diag::EspfError;
 use espforge_bindings::components::{ButtonComponent, LedComponent};
 
 /// One `<gpio>` peripheral: id -> pin + optional direction.
@@ -17,11 +18,17 @@ pub struct GpioEntry {
 }
 
 /// The `<gpio>` branch of the `# peripherals` loop.
-pub fn lower_gpio(n: &ParsedNode) -> Result<GpioEntry, String> {
+pub fn lower_gpio(n: &ParsedNode) -> Result<GpioEntry, EspfError> {
     let pin = n
         .get_attr("pin")
         .and_then(|p| p.parse::<u8>().ok())
-        .ok_or_else(|| format!("<gpio id=\"{}\"> needs a numeric pin=\"...\"", n.id))?;
+        .ok_or_else(|| {
+            EspfError::at_node(
+                n,
+                "invalid gpio pin",
+                format!("<gpio id=\"{}\"> needs a numeric pin=\"...\"", n.id),
+            )
+        })?;
     Ok(GpioEntry {
         id: n.id.to_string(),
         pin,
@@ -36,17 +43,21 @@ fn gpio_for_handle<'a>(
     gpios: &'a [GpioEntry],
     ctx: &RuntimeContext,
     handle: espf::context::Handle,
-    owner_tag: &str,
-    owner_id: &str,
+    owner: &ParsedNode,
     ref_raw: &str,
-) -> Result<&'a GpioEntry, String> {
+) -> Result<&'a GpioEntry, EspfError> {
     gpios
         .iter()
         .find(|g| ctx.interner.get(&g.id) == Some(handle))
         .ok_or_else(|| {
             let target = ref_raw.trim_start_matches('$');
-            format!(
-                "<{owner_tag} id=\"{owner_id}\"> refers to `{target}`, which is not a <gpio> in `# peripherals`"
+            EspfError::at_node(
+                owner,
+                "unknown gpio",
+                format!(
+                    "<{} id=\"{}\"> refers to `{target}`, which is not a <gpio> in `# peripherals`",
+                    owner.tag_name, owner.id
+                ),
             )
         })
 }
@@ -63,47 +74,68 @@ pub fn attach_button(
     leds: &[LedSpec],
     buttons: &mut Vec<ButtonSpec>,
     ctx: &RuntimeContext,
-) -> Result<(), String> {
+) -> Result<(), EspfError> {
     // Single dispatch path for the `$` ref; wrapper error text already matches
     // hardware's "not a <gpio>" / pull_up / slug messages.
-    let comp = ButtonComponent::resolve(n, ctx)?;
-    let gpio = gpio_for_handle(gpios, ctx, comp.peripheral_handle, "button", n.id, comp.gpio_ref)?;
+    let comp =
+        ButtonComponent::resolve(n, ctx).map_err(|m| EspfError::at_node(n, "invalid button", m))?;
+    let gpio = gpio_for_handle(gpios, ctx, comp.peripheral_handle, n, comp.gpio_ref)?;
     let (pin, direction) = (gpio.pin, gpio.direction.as_deref());
     if matches!(direction, Some(d) if d != "input") {
-        return Err(format!(
-            "<button id=\"{}\"> needs an input pin, but `{}` has direction=\"{}\"",
-            n.id,
-            gpio.id,
-            direction.unwrap_or("")
+        return Err(EspfError::at_node(
+            n,
+            "wrong gpio direction",
+            format!(
+                "<button id=\"{}\"> needs an input pin, but `{}` has direction=\"{}\"",
+                n.id,
+                gpio.id,
+                direction.unwrap_or("")
+            ),
         ));
     }
     let pull_up = match n.get_attr("pull_up") {
         None | Some("false") => false,
         Some("true") => true,
         Some(other) => {
-            return Err(format!(
-                "<button id=\"{}\"> pull_up=\"{other}\" must be \"true\" or \"false\"",
-                n.id
+            return Err(EspfError::at_node(
+                n,
+                "invalid pull_up",
+                format!(
+                    "<button id=\"{}\"> pull_up=\"{other}\" must be \"true\" or \"false\"",
+                    n.id
+                ),
             ));
         }
     };
     let name = n.id.replace('-', "_");
     if !is_rust_ident(&name) {
-        return Err(format!(
-            "<button id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
-            n.id
+        return Err(EspfError::at_node(
+            n,
+            "invalid component id",
+            format!(
+                "<button id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
+                n.id
+            ),
         ));
     }
     if let Some(other) = buttons.iter().find(|b| b.pin == pin) {
-        return Err(format!(
-            "<button id=\"{}\"> and <button id=\"{}\"> both use GPIO{pin}",
-            other.name, n.id
+        return Err(EspfError::at_node(
+            n,
+            "pin already used",
+            format!(
+                "<button id=\"{}\"> and <button id=\"{}\"> both use GPIO{pin}",
+                other.name, n.id
+            ),
         ));
     }
     if leds.iter().any(|l| l.pin == pin) {
-        return Err(format!(
-            "<led id=\"{}\"> and <button id=\"{}\">: one pin cannot be both input and output",
-            n.id, name
+        return Err(EspfError::at_node(
+            n,
+            "pin direction clash",
+            format!(
+                "<led id=\"{}\"> and <button id=\"{}\">: one pin cannot be both input and output",
+                n.id, name
+            ),
         ));
     }
     buttons.push(ButtonSpec {
@@ -126,47 +158,68 @@ pub fn attach_led(
     leds: &mut Vec<LedSpec>,
     buttons: &[ButtonSpec],
     ctx: &RuntimeContext,
-) -> Result<(), String> {
+) -> Result<(), EspfError> {
     // Single dispatch path for the `$` ref; wrapper error text already matches
     // hardware's "not a <gpio>" / active_low / slug messages.
-    let comp = LedComponent::resolve(n, ctx)?;
-    let gpio = gpio_for_handle(gpios, ctx, comp.peripheral_handle, "led", n.id, comp.gpio_ref)?;
+    let comp =
+        LedComponent::resolve(n, ctx).map_err(|m| EspfError::at_node(n, "invalid led", m))?;
+    let gpio = gpio_for_handle(gpios, ctx, comp.peripheral_handle, n, comp.gpio_ref)?;
     let (pin, direction) = (gpio.pin, gpio.direction.as_deref());
     if matches!(direction, Some(d) if d != "output") {
-        return Err(format!(
-            "<led id=\"{}\"> needs an output pin, but `{}` has direction=\"{}\"",
-            n.id,
-            gpio.id,
-            direction.unwrap_or("")
+        return Err(EspfError::at_node(
+            n,
+            "wrong gpio direction",
+            format!(
+                "<led id=\"{}\"> needs an output pin, but `{}` has direction=\"{}\"",
+                n.id,
+                gpio.id,
+                direction.unwrap_or("")
+            ),
         ));
     }
     let active_low = match n.get_attr("active_low") {
         None | Some("false") => false,
         Some("true") => true,
         Some(other) => {
-            return Err(format!(
-                "<led id=\"{}\"> active_low=\"{other}\" must be \"true\" or \"false\"",
-                n.id
+            return Err(EspfError::at_node(
+                n,
+                "invalid active_low",
+                format!(
+                    "<led id=\"{}\"> active_low=\"{other}\" must be \"true\" or \"false\"",
+                    n.id
+                ),
             ));
         }
     };
     let name = n.id.replace('-', "_");
     if !is_rust_ident(&name) {
-        return Err(format!(
-            "<led id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
-            n.id
+        return Err(EspfError::at_node(
+            n,
+            "invalid component id",
+            format!(
+                "<led id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
+                n.id
+            ),
         ));
     }
     if let Some(other) = leds.iter().find(|l| l.pin == pin) {
-        return Err(format!(
-            "<led id=\"{}\"> and <led id=\"{}\"> both use GPIO{pin}",
-            other.name, n.id
+        return Err(EspfError::at_node(
+            n,
+            "pin already used",
+            format!(
+                "<led id=\"{}\"> and <led id=\"{}\"> both use GPIO{pin}",
+                other.name, n.id
+            ),
         ));
     }
     if let Some(b) = buttons.iter().find(|b| b.pin == pin) {
-        return Err(format!(
-            "<button id=\"{}\"> and <led id=\"{}\">: one pin cannot be both input and output",
-            b.name, n.id
+        return Err(EspfError::at_node(
+            n,
+            "pin direction clash",
+            format!(
+                "<button id=\"{}\"> and <led id=\"{}\">: one pin cannot be both input and output",
+                b.name, n.id
+            ),
         ));
     }
     leds.push(LedSpec {
