@@ -8,7 +8,7 @@ UART EXAMPLE (ASYNC)
   <runtime type="embassy" />
 
 # peripherals
-  <uart id="uart1" tx="6" rx="5" />
+  <uart id="uart1" uart="UART1" tx="6" rx="5" />
 
 # components
   <uart_component id="uart0" uart="$uart1" baud_rate="9600" />

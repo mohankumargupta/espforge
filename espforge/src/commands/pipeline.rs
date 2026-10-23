@@ -182,14 +182,28 @@ pub fn unsupported_section(c: &Checked) -> Option<&'static str> {
         .find(|n| c.fe.parsed.sections.get(*n).is_some_and(|v| !v.is_empty()))
 }
 
-/// `uart0` -> `UART0`, `uart1` -> `UART1`, ...; anything else is the user's
-/// error (the esp-hal peripheral structs are named exactly this).
+/// The implicit way to name a `<uart>`'s physical peripheral: `uart0` ->
+/// `UART0`, `uart1` -> `UART1`, ...; anything else is the user's error (the
+/// esp-hal peripheral structs are named exactly this).
 fn uart_peripheral_name(id: &str) -> Result<String, String> {
     if matches!(id, "uart0" | "uart1" | "uart2" | "uart3") {
         return Ok(id.to_ascii_uppercase());
     }
     Err(format!(
-        "<uart id=\"{id}\">: the id must be uart0, uart1, uart2 or uart3"
+        "<uart id=\"{id}\">: the id must be uart0, uart1, uart2 or uart3 (or give uart=\"UART1\" explicitly)"
+    ))
+}
+
+/// An explicit `uart="UART1"` attribute on `<uart>`: the physical
+/// `Peripherals.UART*` peripheral, case-insensitive. With it, the `<uart>`
+/// id stops being encoded as `uartN` and is a plain reference name.
+fn uart_attr_peripheral(raw: &str, id: &str) -> Result<String, String> {
+    let upper = raw.trim().to_ascii_uppercase();
+    if matches!(upper.as_str(), "UART0" | "UART1" | "UART2" | "UART3") {
+        return Ok(upper);
+    }
+    Err(format!(
+        "<uart id=\"{id}\"> uart=\"{raw}\" must be UART0, UART1, UART2 or UART3"
     ))
 }
 
@@ -440,7 +454,13 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
                 used: false,
             });
         } else if n.tag_name == "uart" {
-            let peripheral = uart_peripheral_name(n.id)?;
+            let peripheral = match n.get_attr("uart") {
+                // Explicit physical peripheral (`uart="UART1"`); the id is
+                // then just a reference name.
+                Some(raw) => uart_attr_peripheral(raw, n.id)?,
+                // Backwards compatible: the id itself names the peripheral.
+                None => uart_peripheral_name(n.id)?,
+            };
             let pin_attr = |what: &str| {
                 n.get_attr(what)
                     .and_then(|p| p.parse::<u8>().ok())
@@ -869,6 +889,19 @@ pub fn hardware(c: &Checked) -> Result<Hardware, String> {
         }
     }
 
+    // Two `<uart>`s claiming one physical peripheral would clash at init:
+    // `Peripherals.UART1` (say) can only be consumed once.
+    for i in 0..uarts.len() {
+        for other in &uarts[..i] {
+            if other.peripheral == uarts[i].peripheral {
+                return Err(format!(
+                    "<uart id=\"{}\"> and <uart id=\"{}\"> both use {}",
+                    other.id, uarts[i].id, uarts[i].peripheral
+                ));
+            }
+        }
+    }
+
     // UART pins are owned wiring, exactly like the I2C and SPI pins above:
     // nothing else may drive or listen on a UART's TX/RX, and full-duplex TX
     // and RX may not even share a pin with each other.
@@ -1193,6 +1226,69 @@ mod tests {
             .and_then(|c| buildable(&c).err())
             .expect("led on tx is a wiring bug");
         assert!(err.contains("both use GPIO6"), "{err}");
+    }
+
+    #[test]
+    fn a_uart_can_select_its_peripheral_explicitly_and_frees_the_id() {
+        // `uart="UART1"` names the physical peripheral; the id is then just a
+        // reference name.
+        let src = WITH_UART
+            .replace(
+                "<uart id=\"uart1\" tx=\"6\" rx=\"5\" />",
+                "<uart id=\"gps\" uart=\"UART1\" tx=\"6\" rx=\"5\" />",
+            )
+            .replace("uart=\"$uart1\"", "uart=\"$gps\"");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        let spec = &hardware(&c).unwrap().uarts[0];
+        assert_eq!(spec.peripheral, "UART1");
+
+        // Lowercase is accepted too (the id spelling no longer matters).
+        let src = WITH_UART.replace("uart=\"$uart1\"", "uart=\"$gps\"")
+            .replace(
+                "<uart id=\"uart1\" tx=\"6\" rx=\"5\" />",
+                "<uart id=\"gps\" uart=\"uart1\" tx=\"6\" rx=\"5\" />",
+            );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        assert_eq!(hardware(&c).unwrap().uarts[0].peripheral, "UART1");
+
+        // A nonsensical peripheral name is refused.
+        let bad = WITH_UART.replace("tx=\"6\" rx=\"5\"", "uart=\"UART9\" tx=\"6\" rx=\"5\"");
+        let c = validate(&bad, &AnswerArgs::default()).ok().expect("valid");
+        let err = hardware(&c).unwrap_err();
+        assert!(err.contains("must be UART0, UART1, UART2 or UART3"), "{err}");
+
+        // Without the attribute the old rule still applies: the id must be
+        // `uart0`..`uart3`.
+        let src = WITH_UART
+            .replace("<uart id=\"uart1\"", "<uart id=\"gps\"")
+            .replace("uart=\"$uart1\"", "uart=\"$gps\"");
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        let err = hardware(&c).unwrap_err();
+        assert!(err.contains("the id must be uart0, uart1, uart2 or uart3"), "{err}");
+    }
+
+    #[test]
+    fn two_uarts_on_one_peripheral_are_refused() {
+        // Both via explicit `uart=` attributes...
+        let src = WITH_UART.replace(
+            "rx=\"5\" />\n# components",
+            "rx=\"5\" />\n  <uart id=\"other\" uart=\"UART1\" tx=\"7\" rx=\"8\" />\n# components",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        let err = hardware(&c).unwrap_err();
+        assert!(
+            err.contains("<uart id=\"uart1\">") && err.contains("both use UART1"),
+            "{err}"
+        );
+
+        // ...and when one derives it from its id.
+        let src = WITH_UART.replace(
+            "rx=\"5\" />\n# components",
+            "rx=\"5\" />\n  <uart id=\"gps\" uart=\"uart1\" tx=\"7\" rx=\"8\" />\n# components",
+        );
+        let c = validate(&src, &AnswerArgs::default()).ok().expect("valid");
+        let err = hardware(&c).unwrap_err();
+        assert!(err.contains("both use UART1"), "{err}");
     }
 
     #[test]

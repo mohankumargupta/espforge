@@ -122,9 +122,13 @@ element "spi" section="peripherals" {
 element "uart" section="peripherals" {
     summary "UART port"
     attr "id" kind="ident" required=#true
+    attr "uart" kind="str" {
+        help "Physical peripheral, e.g. UART1. Optional: without it the id itself must be uart0, uart1, uart2 or uart3 and names the peripheral."
+    }
     attr "tx" kind="pin" required=#true
     attr "rx" kind="pin" required=#true
     example "minimal" #"<uart id="uart1" tx="20" rx="21" />"#
+    example "explicit peripheral" #"<uart id="gps" uart="UART1" tx="20" rx="21" />"#
     see_also "components/uart_component"
 }
 
