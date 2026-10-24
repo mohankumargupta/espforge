@@ -132,6 +132,26 @@ const CASES: &[Case] = &[
         files: &[],
     },
     Case {
+        name: "espf-components",
+        args: &["espf", "components"],
+        files: &[],
+    },
+    Case {
+        name: "espf-led-man-page",
+        args: &["espf", "components", "led", "help"],
+        files: &[],
+    },
+    Case {
+        name: "espf-led-examples",
+        args: &["espf", "components", "led", "examples"],
+        files: &[],
+    },
+    Case {
+        name: "espf-gpio-man-page",
+        args: &["espf", "peripherals", "gpio", "help"],
+        files: &[],
+    },
+    Case {
         name: "espf-i2c-man-page",
         args: &["espf", "peripherals", "i2c", "help"],
         files: &[],

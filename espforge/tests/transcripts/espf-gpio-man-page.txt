@@ -1,0 +1,24 @@
+$ espforge espf peripherals gpio help
+exit: 0
+--- stdout ---
+NAME
+    gpio - A single GPIO pin
+
+SYNOPSIS
+    <gpio id="..." pin="PIN" [direction="output"] />
+
+ATTRIBUTES
+    id        (required, ident)
+    pin       (required, pin)
+    direction (optional, output | input)
+
+REFERENCED BY
+    components/led              via gpio="$id"
+    components/button           via gpio="$id"
+    components/gpio_component   via gpio="$id"
+    devices/ili9341             via dc="$id"
+
+SEE ALSO
+    espforge espf components gpio_component
+    espforge espf peripherals gpio examples
+--- stderr ---

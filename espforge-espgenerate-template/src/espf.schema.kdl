@@ -4,9 +4,14 @@
 // Consumers:
 //   * `espforge-options::catalog` loads it for `espforge espf` (man pages,
 //     examples, completions data).
-//   * `espforge-bindings` reads it at build time and generates its component
-//     vocabulary (`src/components/generated_vocab.rs`): tags and their
-//     required attributes. Nothing else may declare those by hand.
+//   * `espforge-bindings` reads it at build time and generates
+//     `src/components/generated_vocab.rs`: the tags that `resolve_component`
+//     dispatches, i.e. the elements marked `bus_component=#true` below.
+//     Nothing else may declare that list by hand.
+//
+// `<led>` and `<button>` are components too — an element is a component when
+// it lives in the `components` section — but they have their own typed
+// wrappers and are not bus dispatchers, so they carry no `bus_component`.
 //
 //   section "name" { summary ...; description ... }
 //   element "tag" section="name" [status="planned"] {
@@ -147,7 +152,33 @@ section "components" {
     description #"A component binds a peripheral to a purpose. It refers to its peripheral with $id, for example i2c="$i2c0"."#
 }
 
-element "gpio_component" section="components" {
+element "led" section="components" bus_component=#false {
+    summary "An LED on a GPIO output"
+    description #"A component over <gpio>: gpio="$<gpio id>" must name an output pin."#
+    attr "id" kind="ident" required=#true
+    attr "gpio" kind="ref" to="gpio" required=#true
+    attr "active_low" kind="bool" default="false" {
+        help "true when the LED lights on a LOW pin."
+    }
+    example "minimal" #"<led id="red_led" gpio="$gpio18" />"#
+    example "active low" #"<led id="status" gpio="$gpio18" active_low="true" />"#
+    see_also "peripherals/gpio"
+}
+
+element "button" section="components" bus_component=#false {
+    summary "A push button on a GPIO input"
+    description #"A component over <gpio>: gpio="$<gpio id>" must name an input pin."#
+    attr "id" kind="ident" required=#true
+    attr "gpio" kind="ref" to="gpio" required=#true
+    attr "pull_up" kind="bool" default="false" {
+        help "true when the pin has an external pull-up (button to GND)."
+    }
+    example "minimal" #"<button id="btn" gpio="$gpio9" />"#
+    example "pull-up" #"<button id="btn" gpio="$gpio9" pull_up="true" />"#
+    see_also "peripherals/gpio"
+}
+
+element "gpio_component" section="components" bus_component=#true {
     summary "A GPIO pin used as an input or an output"
     attr "id" kind="ident" required=#true
     attr "gpio" kind="ref" to="gpio" required=#true
@@ -158,7 +189,7 @@ element "gpio_component" section="components" {
     see_also "peripherals/gpio"
 }
 
-element "i2c_component" section="components" {
+element "i2c_component" section="components" bus_component=#true {
     summary "A device address on an I2C bus"
     attr "id" kind="ident" required=#true
     attr "i2c" kind="ref" to="i2c" required=#true
@@ -168,7 +199,7 @@ element "i2c_component" section="components" {
     see_also "peripherals/i2c"
 }
 
-element "spi_component" section="components" {
+element "spi_component" section="components" bus_component=#true {
     summary "A chip-select on an SPI bus"
     attr "id" kind="ident" required=#true
     attr "spi" kind="ref" to="spi" required=#true
@@ -181,7 +212,7 @@ element "spi_component" section="components" {
     see_also "peripherals/spi"
 }
 
-element "uart_component" section="components" {
+element "uart_component" section="components" bus_component=#true {
     summary "Serial settings on a UART port"
     attr "id" kind="ident" required=#true
     attr "uart" kind="ref" to="uart" required=#true
