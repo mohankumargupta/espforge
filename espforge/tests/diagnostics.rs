@@ -1,6 +1,8 @@
-//! A snapshot corpus of rendered diagnostics: one bad spec per file under
-//! `tests/diagnostics/specs/`, one expected transcript under
-//! `tests/diagnostics/expected/`.
+//! A snapshot corpus of rendered diagnostics: mostly one bad spec per file
+//! under `tests/diagnostics/specs/`, one expected transcript under
+//! `tests/diagnostics/expected/`. `peripheral-many` is the deliberate valid
+//! case: it pins that a spec with more peripherals than the old fixed table
+//! held is still accepted.
 //!
 //! This is the Phase 0 contract freeze from `extreme.md` §7: the refactor may
 //! change *how* diagnostics are produced, but every message, title and primary

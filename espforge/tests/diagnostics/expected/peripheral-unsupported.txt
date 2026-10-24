@@ -1,0 +1,11 @@
+$ espforge check peripheral-unsupported.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: unsupported peripheral
+ --> peripheral-unsupported.espf.txt:7:3
+  |
+7 |   <pwm id="pwm0" pin="4" />
+  |   ^^^^ <pwm> in `# peripherals` is not supported by `build` yet (only <gpio>, <i2c>, <spi> and <uart>)
+
+❌ Found 1 problem(s) in 'peripheral-unsupported.espf.txt'; fix them and re-run.

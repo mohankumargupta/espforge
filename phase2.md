@@ -1,14 +1,18 @@
 # Phase 2: typed IR + diagnostics (extreme.md §3.3, §3.4, §7)
 
-**Status:** in progress. Increments 1–5 landed on 2026-10-24. `check` and `build` lower
-into a `Board` and emit its `Hardware` projection; the `$` graph is the owned
-`espf::context::Refs`; and the old middle — `RuntimeContext`, the typed wrappers, the
-drafts/`attach_*` steps, `conflicts.rs` and the dual-run test — is deleted. `check` is
+**Status:** complete at increment 6 (2026-10-24). Increments 1–6 landed. `check` and
+`build` lower into a `Board` and emit its `Hardware` projection; the `$` graph is the
+owned `espf::context::Refs`; and the old middle — `RuntimeContext`, the typed wrappers,
+the drafts/`attach_*` steps, `conflicts.rs` and the dual-run test — is deleted. `check` is
 now the same single act as `build` (a hardware error exits 1 and never prints
 `✓ … is valid`), every diagnostic carries a stable code, and `check --format json`
-returns the diagnostics plus the board. Increment 6 remains: the panic audit, metrics
-and the final gate evidence. Phase 1 is complete (`phase1.md`): the schema is the single
-source of truth and both halves are generated.
+returns the diagnostics plus the board. The panic audit is
+`espforge/tests/panic_audit.rs`: 129-peripheral and 129-component specs, huge numbers,
+malformed attributes, bad references, truncated/duplicated files and a 1 MiB line all
+end in a diagnostic, a clean refusal or a board. §5's metrics are measured at close and
+§7 has the gate evidence. D7's four examples remain the only known corpus gap and stay
+a separate reviewed decision. Phase 1 is complete (`phase1.md`): the schema is the
+single source of truth and both halves are generated.
 
 This file is the phase's plan and progress log. §2 lists what must be decided before the
 first increment, §3 the increments and their gates, §5 the baseline this phase is measured
@@ -143,7 +147,7 @@ unless the increment explicitly says otherwise.
 | 3 | Lowering onto the IR, one element family at a time, with projection equality | **landed (dual-run) 2026-10-24** |
 | 4 | Delete `RuntimeContext`, wrappers, drafts, `conflicts.rs` | **landed 2026-10-24** |
 | 5 | One pipeline path: `check` builds a `Board`, `--format json`, baseline defects | **landed 2026-10-24** |
-| 6 | Close: panic audit, metrics, gate evidence | not started |
+| 6 | Close: panic audit, metrics, gate evidence | **landed 2026-10-24** |
 
 ### Increment 1 — the diagnostics crate
 
@@ -345,6 +349,37 @@ Audit the panic paths the phase claims to remove: the 128-slot tables, the
 129-peripheral spec. Add the adversarial specs to the corpus if they are not there.
 Re-measure §5's table, fill §7, and check the gate in §6 line by line.
 
+**Landed 2026-10-24.** The named panic sites are gone with their modules: `rg` finds no
+`RuntimeContext`, `*Draft`, `attach_*`, `conflicts::check_all`, `parse_u8_attr`,
+`resolve_component`, `at_span(0..0)` or `unreachable!` in any `.rs` file (only
+historical prose in this file, `extreme.md` and two design notes). The 128-slot table
+cannot overflow because there is no table.
+
+**Adversarial cases now pin it three ways.** Three corpus specs were added, so the
+text snapshots and the JSON contract both cover them: `peripheral-unsupported`
+(`<pwm>` is refused, not ignored), `gpio-empty-pin` (an empty attribute value) and
+`peripheral-many` (129 `<gpio>` entries, valid — the corpus deliberately contains one
+success case now). `tests/panic_audit.rs` generates the rest without snapshots: 129
+peripherals, 129 components claiming 129 pins, numbers past `u8`/`u32`/`u64`, negative
+and space-prefixed pins, missing/empty ids and attributes, bare/dotted/unknown `$`
+references, empty/header-only/CRLF/duplicated-section files, and a 1 MiB line. Every
+case must exit 0 or 1, write nothing to stderr in JSON mode, parse as one document,
+keep every span inside the source, assign a non-sentinel code, and carry a board
+exactly when there are no diagnostics. A separate case runs human mode and fails on
+`panicked at` or a spurious `is valid`.
+
+One real `expect` was removed on the way: `source::app_logic` now returns a user-facing
+error when a `Source` has no directory, matching `overlay_files`, instead of panicking
+on an impossible-looking state. The remaining `expect`s in production code are build
+scripts, `serde_json::Value` serialization, a piped-stdin child handle and a
+`split('.').split_first()`, none reachable from a spec; the audit is about behaviour,
+not a blanket ban on `expect`.
+
+Gate: 8 new panic-audit tests, 3 new corpus cases (27 total), all green; workspace
+**307 passed, 1 ignored, 0 failed**; compile gate green (19.72 s); `check_json`
+enumerates the three new specs and still passes; goldens and transcripts unchanged.
+Metrics are in §5 and the gate walk is in §7.
+
 ## 4. What Phase 1 handed over that Phase 2 must not undo
 
 - The generated `Attrs` and their coercion helpers are the attribute layer; the IR must
@@ -358,41 +393,54 @@ Re-measure §5's table, fill §7, and check the gate in §6 line by line.
 - The golden projects, transcripts and diagnostics corpus are the contract. A change to
   any of them is a product decision recorded here, not a test refresh.
 
-## 5. Baseline at Phase 1 close
+## 5. Baseline and close
 
-Measured 2026-10-24, before any Phase 2 code.
+Phase 0 and Phase 1 columns measured before Phase 2; the close column measured
+2026-10-24 on the final tree.
 
-| Metric | Phase 0 | Now | Phase 2 target |
-|---|---|---|---|
-| `cargo test --workspace` | 288 passed | **294 passed, 1 ignored** | green throughout |
-| Rust lines (excl. `target/`, goldens) | 18,795 | 22,597 | lower; Phase 1 added 1,843 generated lines |
-| `#[test]` functions in source | 288 | 303 attributes (294 run; 8 sit in the undeclared `sections/` module) | fewer, stronger; goldens subsume string fragments |
-| Files printing `❌` | 18 (13 live) | 18 files, 59 occurrences | 1 renderer, CLI only |
-| `process::exit` in the CLI | 4 | 4 (`doctor` 1, `examples` 3) | 0 (Phase 4) |
-| Error conventions | 5 | `EspfError`, `Invalid`, `String`, `anyhow`, `u8` | 1 (`Diagnostics`) + exit mapping |
-| Panics reachable from a valid-ish spec | ≥ 2 | 128-slot tables, `at_span(0..0)`, `unreachable!` | 0 |
-| `check` machine output | none | none | `--format json` |
-| Dead modules | 2 | `espf/build.rs` + `generated_registry.rs`, `espforge/src/sections/` (232) | Phase 4 |
+| Metric | Phase 0 | Phase 1 close | Phase 2 close | Phase 2 target |
+|---|---|---|---|---|
+| `cargo test --workspace` | 288 passed | 294 passed, 1 ignored | **307 passed, 1 ignored, 0 failed** | green throughout |
+| Rust lines (excl. `target/`, goldens) | 18,795 | 22,597 | **23,964** (baseline +1,367) | lower; Phase 1 added 1,843 generated lines |
+| `#[test]` functions in source | 288 | 303 attributes (294 run) | **316 attributes (307 run)** | fewer, stronger; goldens subsume string fragments |
+| Files printing `❌` | 18 (13 live) | 18 files, 59 occurrences | **10 files, 38 occurrences** | 1 renderer, CLI only |
+| `process::exit` in the CLI | 4 | 4 | **4** (`doctor` 1, `examples` 3) | 0 (Phase 4) |
+| Error conventions | 5 | `EspfError`, `Invalid`, `String`, `anyhow`, `u8` | **`Diagnostics` at the CLI**, plus `Invalid::Message` for a flag with no span | 1 (`Diagnostics`) + exit mapping |
+| Panics reachable from a valid-ish spec | ≥ 2 | 128-slot tables, `at_span(0..0)`, `unreachable!` | **0** (`tests/panic_audit.rs`) | 0 |
+| `check` machine output | none | none | **`--format json`** | `--format json` |
+| Dead modules | 2 | `espf/build.rs` + `generated_registry.rs`, `espforge/src/sections/` (232) | `espf/build.rs` gone; `espforge/src/sections/` (232) still there | Phase 4 |
 
-The phase's own size, from extreme.md §5.6: graph/IR/lowering 3.6k → 2.2k, diagnostics
-+0.7k. Those are estimates; §7 records what actually happened.
+Two targets were not met, and the table says so rather than hiding it. The line count
+**rose** by 1,367: deleting the old middle removed ~2,000 net lines, but increment 1's
+diagnostics crate, the IR, the board lowering and its tests, the JSON serializer and the
+two contract suites added more than that. Similarly, tests went from 294 to 307 run,
+not down. The phase's size estimate in extreme.md §5.6 (3.6k → 2.2k for
+graph/IR/lowering, +0.7k diagnostics) described the moved code, not the new contract
+tests; both are reported here as measured. The `❌` count is 10 files, but only the CLI
+files render it — 18 of the 38 occurrences are the historical `❌ [...]` text inside
+`espforge-hardware/src/board.rs` labels, which the corpus pins byte-for-byte. Removing
+that prefix is a wording change for Phase 3/4, not something to smuggle into a close-out.
 
 ## 6. The gate
 
 extreme.md §7, restated as checks that can fail:
 
 1. **Every existing human diagnostic keeps its message and primary span.** The 24
-   diagnostics corpus files and the 31 CLI transcripts are byte-identical, except where
-   §3's increment 5 table says a defect is fixed — the wrong-owner label landed early, in
-   increment 4, and 13 corpus cases now exit 1 with no `✓ ... is valid` after a hardware
-   error. Each such diff is reviewed and listed in §7.
+   original diagnostics corpus files and the 35 CLI transcripts are byte-identical,
+   except where §3's increment 5 table says a defect is fixed — the wrong-owner label
+   landed early, in increment 4, and 13 corpus cases now exit 1 with no `✓ ... is valid`
+   after a hardware error. Increment 6 added three cases without changing those 24
+   (27 total). Each such diff is reviewed and listed in §7.
 2. **`Board` JSON is stable and covers every example** (that validates — see D7).
    `tests/check_json.rs` enumerates the corpus and every embedded example, requires a
    board exactly when diagnostics are empty, checks every code/span, and pins the
    `01.Basics/blink` shape.
 3. **The panic cases are gone.** The 129-peripheral spec, a malformed pin, a missing
    attribute, a zero-length span and a `<pwm>` all produce diagnostics or a clean refusal,
-   never a panic.
+   never a panic. `peripheral-many`, `gpio-empty-pin` and `peripheral-unsupported` pin
+   the first, second and last in the corpus; `structure-missing-sections` already pins the
+   zero-width span; `tests/panic_audit.rs` generates the rest, including 129 components
+   and values too large for the destination integer.
 4. **The old middle is deleted, not bypassed.** No `RuntimeContext`, `*Draft`,
    `attach_*`, `conflicts.rs`; no second validation pass in the CLI. (Landed in increment 4;
    `grep` for the definitions is empty.)
@@ -418,6 +466,33 @@ cargo test -p espforge --test golden_projects -- --ignored   # compile gate
 | 2026-10-24 | 4 (graph + wrappers) | `espf::context::Refs` replaces `RuntimeContext::resolve_and_bind` for the production `$` graph: owned ids/peripheral kinds, same titles/labels/spans, same order. `board::build` calls it, and parses the generated `Attrs` directly for all five component families (the wrappers' wording is copied, not imported). `pipeline::validate` uses `Refs`; `Checked` no longer carries a context. Workspace **329 passed, 1 ignored, 0 failed**; compile gate green (19.4 s); diagnostics corpus (24 cases), transcripts (31) and goldens unchanged. `check` still builds a `RuntimeContext` only for `route_driver`, which is the remaining deletion blocker. |
 | 2026-10-24 | 4 (delete) | Deleted `RuntimeContext`/`Handle`/`IdInterner`/`Active*`/`ResolvedDevice`, the six wrappers + `resolve_component`, the hardware `components/` + `attach_*`, the `*Draft` types and `finish_*`, `conflicts.rs`, the old `lower*`/`buildable*` helpers, the dual-run test and the dead `espf/build.rs`. `route_driver` now takes `(tag, &ParsedNode)`; the three driver `init`s are tag placeholders because devices are not lowered. Four board tests added for the deleted units' key wording (input/output direction, bad i2c address, undefined cs ref). Workspace **291 passed, 1 ignored, 0 failed**; compile gate green (19.0 s); 23 corpus cases unchanged plus the recorded owner fix; transcripts and goldens unchanged. |
 | 2026-10-24 | 5 | `check` runs `validate` then `pipeline::board`; a hardware error exits 1 and prints no `✓ ... is valid` (13 corpus snapshots moved, messages/spans unchanged). `Invalid::Spans` became `Diagnostics`; `Invalid::Message` stays the CLI-level flag error allowed by D5. `codes.rs` assigns one code per message (E0101–E0809, `E0999` sentinel) and `Diagnostic::code` is no longer optional. `check --format json` returns diagnostics + board; the serializer lives in `espforge/src/commands/board_json.rs`, so `espforge-model` is still dependency-free. `tests/check_json.rs` enumerates all 24 corpus specs and every embedded example, checks codes/spans/board-null rules, pins `blink`, and asserts a hardware error is never reported valid. Workspace **299 passed, 1 ignored, 0 failed**; compile gate green (18.6 s on the final run); transcripts and goldens unchanged. |
+| 2026-10-24 | 6 | Panic audit: the named sites are gone (`rg` for `RuntimeContext`, `*Draft`, `attach_*`, `conflicts::check_all`, `parse_u8_attr`, `resolve_component`, `at_span(0..0)`, `unreachable!` finds only prose). `source::app_logic`'s `expect` became a user-facing error. Corpus grew to 27: `<pwm>` refusal, empty pin, and a valid 129-peripheral case. New `tests/panic_audit.rs` (8 tests) generates 129 peripherals/components, oversized integers, malformed/missing attributes, broken `$` refs, empty/header-only/CRLF/duplicate-section files and a 1 MiB line; it requires exit 0/1, one JSON document, empty stderr, in-range spans, non-sentinel codes and a board iff clean. Workspace **307 passed, 1 ignored, 0 failed**; compile gate green (`generated_projects_compile`, 19.72 s); goldens and transcripts unchanged. Close metrics in §5: lines 23,964 (+1,367), tests 307 run, `❌` 10 files/38 occurrences, `process::exit` 4, panic cases 0, machine output present. |
+
+### Gate walk at close
+
+1. **Messages and spans.** `cargo test -p espforge --test diagnostics` passes all 27
+   snapshots; the 24 originals are unchanged from increment 5's reviewed state, and the
+   three new cases are additions. The 35 CLI transcripts pass unchanged in the workspace
+   run. The only moved wording remains the increment-4 wrong-owner label and increment 5's
+   13 exit-code/`✓` changes, both listed above.
+2. **Board JSON.** `tests/check_json.rs` enumerates all 27 corpus specs and every embedded
+   example: a board exactly when diagnostics are empty, every diagnostic coded and every
+   span in range, and the `blink` shape pinned. The D7 examples fail validation and
+   therefore report no board, which is the documented rule, not a gap in the enumerator.
+3. **Panics.** `tests/panic_audit.rs` (8 tests) and the three corpus cases above cover the
+   129-peripheral spec, malformed and missing attributes, the zero-width span (already in
+   `structure-missing-sections`), `<pwm>`, oversized integers, broken references, empty
+   and duplicated structure, and a 1 MiB line. No case exits by signal, prints
+   `panicked at`, or emits a sentinel code.
+4. **Old middle deleted.** `rg` across `.rs` files finds no `RuntimeContext`, `*Draft`,
+   `attach_*`, `conflicts::check_all`, `parse_u8_attr`, `resolve_component`,
+   `at_span(0..0)` or `unreachable!`; the only hits are historical prose in this file,
+   `extreme.md`, `espforge-model`'s design note and the audit test's own doc comment.
+   The CLI has one snippet renderer (`frontend::report` -> `to_human`); `Invalid::Message`
+   is the single no-span flag error D5 allowed.
+5. **Contracts.** The grammar, CLI words and exit codes, generated layout, runtime API and
+   embedded examples are untouched; goldens and transcripts pass unchanged, and the
+   compile gate builds the generated projects.
 
 ## 8. Open questions carried in
 
@@ -430,5 +505,10 @@ cargo test -p espforge --test golden_projects -- --ignored   # compile gate
   `route_driver`'s input from `RuntimeContext` handles to the validated `ParsedNode` and
   leaves the generated registry itself unchanged; driver bodies are placeholders until
   devices are lowered.
+- **D7** is the one gate caveat that survives close: `04.Communication/i2c_scanner`,
+  `i2c_example`, `spi_example_async`, `uart_example_async` and
+  `examples/example.espf.txt` still fail validation, so "every example" in §6.2 means
+  every example that validates. Fixing the specs or making `address` optional for a
+  bus-only component is a separate reviewed corpus change, not a Phase 2 patch.
 - **Phase 1 leftovers:** `kind="freq"` parsing moves in increment 3; `range=` is consumed
   by codegen but not rendered in docs, which remains a docs-surface question.

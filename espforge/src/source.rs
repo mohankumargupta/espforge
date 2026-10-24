@@ -170,7 +170,10 @@ pub fn app_logic(src: &Source) -> Result<Vec<u8>, String> {
             .map(|f| f.contents.to_vec())
             .ok_or_else(|| "this example has no app/rust/app.rs".to_string());
     }
-    let dir = src.dir.as_ref().expect("a file source has a directory");
+    let dir = src
+        .dir
+        .as_ref()
+        .ok_or_else(|| "this source has no directory to read app logic from".to_string())?;
     let found = find_app(dir).ok_or_else(|| {
         format!(
             "missing {} (or {}): your app logic (setup/forever)",
@@ -186,15 +189,13 @@ pub fn app_logic(src: &Source) -> Result<Vec<u8>, String> {
 ///
 /// `Err` is a user-facing message (the caller reports it and stops).
 pub fn runtime_source(runtime_path: Option<PathBuf>) -> Result<RuntimeSource, String> {
-    let path = runtime_path.or_else(|| std::env::var_os("ESPFORGE_RUNTIME_PATH").map(PathBuf::from));
+    let path =
+        runtime_path.or_else(|| std::env::var_os("ESPFORGE_RUNTIME_PATH").map(PathBuf::from));
     match path {
         Some(p) => {
             let abs = std::path::absolute(&p).map_err(|e| e.to_string())?;
             if !abs.is_dir() {
-                return Err(format!(
-                    "runtime path '{}' is not a directory",
-                    p.display()
-                ));
+                return Err(format!("runtime path '{}' is not a directory", p.display()));
             }
             Ok(RuntimeSource::Path(abs.to_string_lossy().into_owned()))
         }
