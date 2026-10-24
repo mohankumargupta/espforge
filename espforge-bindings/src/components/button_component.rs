@@ -2,11 +2,18 @@
 //!
 //! `<button>` is a component over `<gpio>` the same way `i2c_component` is
 //! over `<i2c>`: `gpio="$<gpio id>"` must resolve to an active GPIO
-//! peripheral, used as an input pin. `pull_up` defaults to `false`.
+//! peripheral, used as an input pin. Presence and the `pull_up` kind come from
+//! `espf.schema.kdl`, generated into
+//! [`schema::Attrs`](crate::components::generated_elements::button).
 //!
-//! Required attributes: `id`, `gpio`. Optional: `pull_up` (`true`/`false`).
+//! This module owns the reference lookup, the slug check and the wording of
+//! the errors — which match `espforge-hardware::components::button::attach_button`
+//! so the hardware pilot can consume the wrapper without changing messages.
 
-use espf::context::{ActivePeripheral, Handle, RuntimeContext};
+use espf::context::{ActivePeripheral, Handle, ParsedNode, RuntimeContext};
+
+use crate::components::attrs::Issue;
+use crate::components::generated_elements::button as schema;
 
 /// A fully validated `<button>` node.
 #[derive(Debug, Clone)]
@@ -25,29 +32,11 @@ pub struct ButtonComponent<'a> {
 
 impl<'a> ButtonComponent<'a> {
     /// Validates and resolves a button node against the runtime context.
-    /// Error text matches `espforge-hardware::components::button::attach_button` so the
-    /// hardware pilot can swap to this wrapper without changing messages.
-    pub fn resolve(node: &'a espf::context::ParsedNode<'a>, ctx: &RuntimeContext<'a>) -> Result<Self, String> {
-        let id = node.id;
-        if id.is_empty() {
-            return Err("Missing required attribute 'id'".to_string());
-        }
+    pub fn resolve(node: &'a ParsedNode<'a>, ctx: &RuntimeContext<'a>) -> Result<Self, String> {
+        let attrs = schema::Attrs::from_node(node).map_err(|issue| message(node.id, issue))?;
+        let id = attrs.id.value;
+        let name = attrs.gpio.name;
 
-        let gpio_ref = node
-            .get_attr("gpio")
-            .ok_or_else(|| format!("<button id=\"{id}\"> needs gpio=\"$<gpio id>\""))?;
-
-        let pull_up = match node.get_attr("pull_up") {
-            None | Some("false") => false,
-            Some("true") => true,
-            Some(other) => {
-                return Err(format!(
-                    "<button id=\"{id}\"> pull_up=\"{other}\" must be \"true\" or \"false\""
-                ));
-            }
-        };
-
-        let name = gpio_ref.trim_start_matches('$');
         let handle = ctx.interner.get(name).ok_or_else(|| {
             format!(
                 "<button id=\"{id}\"> refers to `{name}`, which is not a <gpio> in `# peripherals`"
@@ -76,11 +65,24 @@ impl<'a> ButtonComponent<'a> {
 
         Ok(Self {
             id,
-            gpio_ref,
-            pull_up,
+            gpio_ref: attrs.gpio.raw,
+            pull_up: attrs.pull_up.value,
             peripheral_handle: handle,
             peripheral: *peripheral,
         })
+    }
+}
+
+/// This element's wording for a schema-level problem.
+fn message(id: &str, issue: Issue<'_>) -> String {
+    match issue {
+        Issue::Missing { attr: "gpio" } => {
+            format!("<button id=\"{id}\"> needs gpio=\"$<gpio id>\"")
+        }
+        Issue::Missing { attr } => format!("Missing required attribute '{attr}'"),
+        Issue::Invalid { attr, value } => {
+            format!("<button id=\"{id}\"> {attr}=\"{value}\" must be \"true\" or \"false\"")
+        }
     }
 }
 

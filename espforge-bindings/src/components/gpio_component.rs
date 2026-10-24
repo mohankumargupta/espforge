@@ -1,32 +1,20 @@
 //! Typed wrapper for the `<gpio_component>` bus component.
 //!
-//! Schema (from `examples/example.espf.txt`):
 //!   `<gpio_component id="blue_led" gpio="$gpio4" direction="output" />`
 //!
-//! Required attributes: `id`, `gpio` (a `$`-prefixed reference to a `<gpio>`
-//! peripheral), `direction` (`output` | `input`).
+//! Which attributes exist, which are required and which `direction` values are
+//! allowed is read from `espf.schema.kdl` and generated into
+//! [`schema::Attrs`](crate::components::generated_elements::gpio_component).
+//! This module owns the `$` reference lookup and the wording of the errors.
 
-use espf::context::{ActivePeripheral, Handle, RuntimeContext};
+use espf::context::{ActivePeripheral, Handle, ParsedNode, RuntimeContext};
 
-/// Valid values for the `direction` attribute.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GpioDirection {
-    Output,
-    Input,
-}
+use crate::components::attrs::Issue;
+use crate::components::generated_elements::gpio_component as schema;
 
-impl GpioDirection {
-    /// Parses the `direction` attribute value.
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "output" => Ok(Self::Output),
-            "input" => Ok(Self::Input),
-            other => Err(format!(
-                "❌ [gpio_component] Invalid direction '{other}': expected \"output\" or \"input\""
-            )),
-        }
-    }
-}
+/// Valid values for the `direction` attribute, generated from the schema's
+/// `choices` list.
+pub use crate::components::generated_elements::gpio_component::Direction as GpioDirection;
 
 /// A fully validated `<gpio_component>` node.
 #[derive(Debug, Clone)]
@@ -45,32 +33,22 @@ pub struct GpioComponent<'a> {
 
 impl<'a> GpioComponent<'a> {
     /// Validates and resolves a gpio_component node against the runtime context.
-    pub fn resolve(node: &'a espf::context::ParsedNode<'a>, ctx: &RuntimeContext<'a>) -> Result<Self, String> {
-        let id = node.id;
-        if id.is_empty() {
-            return Err("❌ [gpio_component] Missing required attribute 'id'".to_string());
-        }
-
-        let gpio_ref = node
-            .get_attr("gpio")
-            .ok_or_else(|| format!("❌ [gpio_component] '{id}' missing required attribute 'gpio'"))?;
-
-        let direction_raw = node
-            .get_attr("direction")
-            .ok_or_else(|| format!("❌ [gpio_component] '{id}' missing required attribute 'direction'"))?;
-        let direction = GpioDirection::parse(direction_raw)?;
+    pub fn resolve(node: &'a ParsedNode<'a>, ctx: &RuntimeContext<'a>) -> Result<Self, String> {
+        let attrs = schema::Attrs::from_node(node).map_err(|issue| message(node.id, issue))?;
+        let id = attrs.id.value;
+        let name = attrs.gpio.name;
 
         // Resolve the `$peripheral` reference through the context tables,
         // exactly like drivers do (integer-offset lookup, no string searching
         // after resolution).
-        let name = gpio_ref.trim_start_matches('$');
-        let handle = ctx
-            .interner
-            .get(name)
-            .ok_or_else(|| format!("❌ [gpio_component] '{id}' references undefined gpio peripheral '{name}'"))?;
+        let handle = ctx.interner.get(name).ok_or_else(|| {
+            format!("❌ [gpio_component] '{id}' references undefined gpio peripheral '{name}'")
+        })?;
         let peripheral = ctx.active_peripherals[handle.0 as usize]
             .as_ref()
-            .ok_or_else(|| format!("❌ [gpio_component] '{id}' gpio peripheral '{name}' is not active"))?;
+            .ok_or_else(|| {
+                format!("❌ [gpio_component] '{id}' gpio peripheral '{name}' is not active")
+            })?;
 
         if !matches!(peripheral, ActivePeripheral::Gpio) {
             return Err(format!(
@@ -80,10 +58,27 @@ impl<'a> GpioComponent<'a> {
 
         Ok(Self {
             id,
-            gpio_ref,
-            direction,
+            gpio_ref: attrs.gpio.raw,
+            direction: attrs.direction.value,
             peripheral_handle: handle,
             peripheral: *peripheral,
         })
+    }
+}
+
+/// This element's wording for a schema-level problem. The message is not
+/// generated: it is the text users already see, and it moves to a diagnostic
+/// code as a unit (extreme.md §3.4).
+fn message(id: &str, issue: Issue<'_>) -> String {
+    match issue {
+        Issue::Missing { attr } if id.is_empty() => {
+            format!("❌ [gpio_component] Missing required attribute '{attr}'")
+        }
+        Issue::Missing { attr } => {
+            format!("❌ [gpio_component] '{id}' missing required attribute '{attr}'")
+        }
+        Issue::Invalid { attr, value } => format!(
+            "❌ [gpio_component] Invalid {attr} '{value}': expected \"output\" or \"input\""
+        ),
     }
 }

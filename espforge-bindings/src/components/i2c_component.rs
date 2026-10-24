@@ -1,12 +1,16 @@
 //! Typed wrapper for the `<i2c_component>` bus component.
 //!
-//! Schema (from `examples/example.espf.txt`):
 //!   `<i2c_component id="temp_bus" i2c="$i2c0" address="0x48" />`
 //!
-//! Required attributes: `id`, `i2c` (a `$`-prefixed reference to an `<i2c>`
-//! peripheral), `address` (hex or decimal, e.g. `0x48`).
+//! Presence, the `0x..`-or-decimal address kind and the `$`-reference target
+//! come from `espf.schema.kdl`, generated into
+//! [`schema::Attrs`](crate::components::generated_elements::i2c_component).
+//! This module owns the reference lookup and the wording of the errors.
 
-use espf::context::{ActivePeripheral, Handle, RuntimeContext};
+use espf::context::{ActivePeripheral, Handle, ParsedNode, RuntimeContext};
+
+use crate::components::attrs::Issue;
+use crate::components::generated_elements::i2c_component as schema;
 
 /// A fully validated `<i2c_component>` node.
 #[derive(Debug, Clone)]
@@ -25,32 +29,20 @@ pub struct I2cComponent<'a> {
 
 impl<'a> I2cComponent<'a> {
     /// Validates and resolves an i2c_component node against the runtime context.
-    pub fn resolve(node: &'a espf::context::ParsedNode<'a>, ctx: &RuntimeContext<'a>) -> Result<Self, String> {
-        let id = node.id;
-        if id.is_empty() {
-            return Err("❌ [i2c_component] Missing required attribute 'id'".to_string());
-        }
+    pub fn resolve(node: &'a ParsedNode<'a>, ctx: &RuntimeContext<'a>) -> Result<Self, String> {
+        let attrs = schema::Attrs::from_node(node).map_err(|issue| message(node.id, issue))?;
+        let id = attrs.id.value;
+        let address = attrs.address.value;
+        let name = attrs.i2c.name;
 
-        let i2c_ref = node
-            .get_attr("i2c")
-            .ok_or_else(|| format!("❌ [i2c_component] '{id}' missing required attribute 'i2c'"))?;
-
-        let address_raw = node
-            .get_attr("address")
-            .ok_or_else(|| format!("❌ [i2c_component] '{id}' missing required attribute 'address'"))?;
-
-        // Accept both `0x48` (hex) and plain decimal, matching the lenient
-        // behaviour of `RuntimeContext::resolve_and_bind`.
-        let address = parse_address(id, address_raw)?;
-
-        let name = i2c_ref.trim_start_matches('$');
-        let handle = ctx
-            .interner
-            .get(name)
-            .ok_or_else(|| format!("❌ [i2c_component] '{id}' references undefined i2c peripheral '{name}'"))?;
+        let handle = ctx.interner.get(name).ok_or_else(|| {
+            format!("❌ [i2c_component] '{id}' references undefined i2c peripheral '{name}'")
+        })?;
         let peripheral = ctx.active_peripherals[handle.0 as usize]
             .as_ref()
-            .ok_or_else(|| format!("❌ [i2c_component] '{id}' i2c peripheral '{name}' is not active"))?;
+            .ok_or_else(|| {
+                format!("❌ [i2c_component] '{id}' i2c peripheral '{name}' is not active")
+            })?;
 
         if !matches!(peripheral, ActivePeripheral::I2c { .. }) {
             return Err(format!(
@@ -69,7 +61,7 @@ impl<'a> I2cComponent<'a> {
 
         Ok(Self {
             id,
-            i2c_ref,
+            i2c_ref: attrs.i2c.raw,
             address,
             peripheral_handle: handle,
             peripheral: *peripheral,
@@ -77,19 +69,28 @@ impl<'a> I2cComponent<'a> {
     }
 }
 
+/// This element's wording for a schema-level problem. `0x..` and decimal
+/// addresses still get their own sentence, because that is what users see
+/// today (`espforge/tests/diagnostics`).
+fn message(id: &str, issue: Issue<'_>) -> String {
+    match issue {
+        Issue::Missing { attr } if id.is_empty() => {
+            format!("❌ [i2c_component] Missing required attribute '{attr}'")
+        }
+        Issue::Missing { attr } => {
+            format!("❌ [i2c_component] '{id}' missing required attribute '{attr}'")
+        }
+        Issue::Invalid { value, .. } if value.starts_with("0x") || value.starts_with("0X") => {
+            format!("❌ [i2c_component] '{id}' invalid hex address '{value}'")
+        }
+        Issue::Invalid { value, .. } => {
+            format!("❌ [i2c_component] '{id}' invalid decimal address '{value}'")
+        }
+    }
+}
+
 fn is_rust_ident(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with(|c: char| c.is_ascii_digit())
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-/// Parses an I2C device address: `0x48`-style hex or decimal.
-pub fn parse_address(component_id: &str, raw: &str) -> Result<u8, String> {
-    if let Some(hex) = raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X")) {
-        u8::from_str_radix(hex, 16)
-            .map_err(|_| format!("❌ [i2c_component] '{component_id}' invalid hex address '{raw}'"))
-    } else {
-        raw.parse::<u8>()
-            .map_err(|_| format!("❌ [i2c_component] '{component_id}' invalid decimal address '{raw}'"))
-    }
 }

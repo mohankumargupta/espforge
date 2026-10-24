@@ -5,18 +5,24 @@
 //   * `espforge-options::catalog` loads it for `espforge espf` (man pages,
 //     examples, completions data).
 //   * `espforge-bindings` reads it at build time and generates
-//     `src/components/generated_vocab.rs`: the tags that `resolve_component`
-//     dispatches, i.e. the elements marked `bus_component=#true` below.
-//     Nothing else may declare that list by hand.
+//     `src/components/generated_vocab.rs` (the tags that `resolve_component`
+//     dispatches, i.e. the elements marked `bus_component=#true` below) and
+//     `src/components/generated_elements.rs` (one typed `Attrs` struct per
+//     element: presence, `kind`, `choices`, `range` and `default` are read
+//     from here, never restated in a wrapper). Nothing else may declare that
+//     list by hand.
 //
 // `<led>` and `<button>` are components too — an element is a component when
 // it lives in the `components` section — but they have their own typed
 // wrappers and are not bus dispatchers, so they carry no `bus_component`.
 //
 //   section "name" { summary ...; description ... }
-//   element "tag" section="name" [status="planned"] {
+//   element "tag" section="name" [status="planned"] [bus_component=#false] {
 //       summary, description, attr, example, see_also, compatible
 //   }
+//   attr "name" kind="ident|str|pin|freq|hex|u32|bool|choice|ref|list"
+//       [required=#true] [default=".."] [range="low..=high"] [to="tag"] [of="str"]
+//       { choices "a" "b"; help ".." }
 //
 // Every element needs at least one `example`. Examples are parsed by the
 // tests, so they cannot drift from the attributes declared here.
@@ -125,8 +131,9 @@ element "spi" section="peripherals" {
     attr "miso" kind="pin" {
         help "Displays generally omit it."
     }
-    // TODO(11.11): `mode` is on <spi> in the examples but required on <spi_component> in the wrapper.
-    attr "mode" kind="u32"
+    // Optional on both <spi> and <spi_component>; the wrapper defaults it to 0
+    // and rejects anything outside 0..=3, which is what `range` records.
+    attr "mode" kind="u32" default="0" range="0..=3"
     attr "frequency" kind="freq"
     example "write-only" #"<spi id="spi2" sclk="6" mosi="7" />"#
     see_also "components/spi_component"
@@ -203,7 +210,7 @@ element "spi_component" section="components" bus_component=#true {
     summary "A chip-select on an SPI bus"
     attr "id" kind="ident" required=#true
     attr "spi" kind="ref" to="spi" required=#true
-    attr "mode" kind="u32" {
+    attr "mode" kind="u32" default="0" range="0..=3" {
         help "SPI mode, 0 to 3. Optional on the component; the SPI examples keep it on <spi>."
     }
     attr "cs" kind="str" required=#true
