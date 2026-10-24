@@ -625,7 +625,7 @@ pub struct UartComponent{ pub id: Ident, pub port: BusId, pub baud: u32, pub fra
 
 pub enum Bus {
     I2c { id: Ident, sda: Pin, scl: Pin, khz: u32, used_by: Option<Ident> },
-    Spi { id: Ident, sclk: Pin, mosi: Pin, miso: Pin, khz: u32, mode: u8 },
+    Spi { id: Ident, sclk: Pin, mosi: Pin, miso: Option<Pin>, khz: u32, mode: u8 },
     Uart{ id: Ident, tx: Pin, rx: Pin, used_by: Option<Ident> },
 }
 ```

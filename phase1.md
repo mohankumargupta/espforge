@@ -1,6 +1,6 @@
 # Phase 1: one schema (extreme.md §3.2 / §7)
 
-**Status:** increments 1, 1.1, 2, 3, 4, 5 and 6 landed; Phase 1 is complete.
+**Status:** increments 1, 1.1, 2, 3, 4, 5, 6 and 7 landed; Phase 1 is complete.
 `espf.schema.kdl` is the single source of truth for the element vocabulary, the attribute
 rules, the attribute coercion and the build options, and both halves are generated:
 nothing parses a schema attribute by hand (`grep -r 'get_attr(' espforge-hardware/src`
@@ -174,19 +174,46 @@ Five generated files, one gate: CI's `git diff --exit-code` list names
   `needs gpio="$<gpio id>"`. Plus `a_zero_baud_rate_is_refused`, the one rule hardware
   still adds to a coerced value.
 
-## 7. Next increments, in order
+## 7. The two open drifts, decided (increment 7)
+
+The drift the generated layer made visible was settled in favour of the schema both
+times, so the schema keeps saying what the language means and code follows it.
+
+**`<spi>` without `miso`: the schema was right.** A missing `miso` is now an error
+nowhere; `SpiBusDraft`/`SpiBusSpec` carry `Option<u8>` and the generated call is
+`SpiBus::build_write_only(..)` (new, both runtimes) instead of `SpiBus::build(..)`. The
+bus ownership list for the clash checks holds two pins for such a bus, not a zero-filled
+third — that was the one real hazard, pinned by
+`an_absent_miso_does_not_become_gpio0_in_the_clash_checks`. The template branch only fires
+for a write-only bus, so every golden project (all of which wire MISO) is byte-identical.
+
+**`<spi_component cs>`: a new `pin_or_ref` kind.** `cs="9"`, `cs="gpio5"` and
+`cs="$gpio5"` are one attribute kind now, declared in `espf.schema.kdl` and read as
+`attrs::PinOrRef` (`Pin(Spanned<u8>)` or `Ref`). It needed a variant in `AttrKind` and a
+`display()` spelling (`pin or ref`), a placeholder in `help_view`, and a `pin_or_ref`
+helper in `attrs.rs` — the generated `Attrs` field and the wrapper's `cs` field follow
+from it. The transcriber had no arm for the new kind, so the equality test failed
+immediately (`kind: Str` vs `PinOrRef`) and the missing three lines showed up where they
+belong: in `espforge-options/build.rs`, not in a user's build.
+
+That change surfaced a second, pre-existing bug: **`cs="gpio5"` could never work.** The
+wrapper requires the referenced id to exist, and the clash check then refused any
+`<gpio>` sharing the CS pin — so the spelling the schema itself used in its example was
+rejected as "both use GPIO5". `SpiDeviceDraft` now records which `<gpio>` the `cs` named,
+and that one entry is exempt from the cs-vs-gpio loop; a `<led>`/`<button>` on the same
+pin is still caught by its own loop. Tested both ways in
+`a_cs_may_name_a_gpio_instead_of_a_number` and
+`a_cs_named_gpio_still_clashes_with_a_component_on_that_pin`.
+
+Gate evidence: `cargo test --workspace` green, **294 passed, 1 ignored**; the compile gate
+green; golden trees unchanged given a MISO. Both new runtime paths were compiled for the
+chip, not just rendered: a blocking project with `cs="gpio9"` and an embassy one with a
+write-only bus and `cs="gpio9"` each `cargo check` cleanly against `esp32c3`.
+
+## 8. Next increment
 
 1. Phase 2 (typed IR), which deletes the wrapper structs, the `*Draft`s and the parallel
    `Vec`s in `Hardware`.
-
-Open drift the earlier increments made visible, for a decision before Phase 2:
-
-- **`<spi>` without `miso`.** The schema marks `miso` optional ("displays generally omit
-  it"), but `lower_spi` still requires it (`needs a numeric miso="..."`). The generated
-  layer follows the schema and yields `Option`, so hardware adds the requirement back
-  locally; either the schema is wrong or the lowering is.
-- **`<spi_component cs>`** is `kind="str"` in the schema but is a pin in hardware
-  (`cs="9"` or `cs="gpio5"`). It wants a `pin`-or-`ref` kind before Phase 2 relies on it.
 
 Still open from Appendix E: **Q1 the formatting/drift contract** (needed before Phase 3,
 not before these increments), **Q3 where docs prose lives** (today it is inline in

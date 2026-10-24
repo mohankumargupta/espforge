@@ -47,7 +47,9 @@ pub struct SpiBusSpec {
     pub peripheral: String,
     pub sclk: u8,
     pub mosi: u8,
-    pub miso: u8,
+    /// `None` is a write-only bus (displays): the generated code calls
+    /// `SpiBus::build_write_only` and attaches no MISO pin.
+    pub miso: Option<u8>,
     /// Bus frequency in kHz. Bus clock: the one `SpiBus` carries.
     pub khz: u32,
     /// SPI mode 0..=3 (`Mode::_0`..`Mode::_3` in the template).

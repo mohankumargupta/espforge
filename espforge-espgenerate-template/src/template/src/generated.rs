@@ -35,7 +35,8 @@ impl Components {
     pub fn new(registry: &mut PeripheralRegistry) -> Self {
 {% for bus in spi_buses %}
         // SAFETY: espforge checked that no other component uses this
-        // peripheral or GPIO{{ bus.sclk }}/GPIO{{ bus.mosi }}/GPIO{{ bus.miso }}.
+        // peripheral or GPIO{{ bus.sclk }}/GPIO{{ bus.mosi }}{% if bus.miso %}/GPIO{{ bus.miso }}{% endif %}.
+{% if bus.miso %}
         let {{ bus.id }}_bus = espforge_runtime::SpiBus::build(
             unsafe { registry.peripherals.{{ bus.peripheral }}.clone_unchecked() },
             unsafe { registry.peripherals.GPIO{{ bus.sclk }}.clone_unchecked() },
@@ -47,6 +48,19 @@ impl Components {
             },
         )
         .expect("SPI bus configuration failed");
+{% else %}
+        // No miso: a write-only bus (displays).
+        let {{ bus.id }}_bus = espforge_runtime::SpiBus::build_write_only(
+            unsafe { registry.peripherals.{{ bus.peripheral }}.clone_unchecked() },
+            unsafe { registry.peripherals.GPIO{{ bus.sclk }}.clone_unchecked() },
+            unsafe { registry.peripherals.GPIO{{ bus.mosi }}.clone_unchecked() },
+            espforge_runtime::SpiConfig {
+                frequency: esp_hal::time::Rate::from_khz({{ bus.khz }}),
+                mode: esp_hal::spi::Mode::_{{ bus.mode }},
+            },
+        )
+        .expect("SPI bus configuration failed");
+{% endif %}
 {% endfor %}
         Self {
 {% for led in leds %}

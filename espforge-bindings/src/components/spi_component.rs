@@ -6,14 +6,14 @@
 //! [`schema::Attrs`](crate::components::generated_elements::spi_component).
 //! The schema records `mode` as `default="0"` with `range="0..=3"`, which is
 //! what the SPI examples and the wrapper agreed on (the examples keep `mode`
-//! on `<spi>`; the component defaults it). `cs` is either a numeric pin like
-//! `cs="9"` or a gpio id like `cs="gpio5"`.
+//! on `<spi>`; the component defaults it). `cs` is `kind="pin_or_ref"`: a
+//! numeric pin like `cs="9"` or a gpio id like `cs="gpio5"`.
 //!
 //! This module owns the cs/reference lookup and the wording of the errors.
 
 use espf::context::{ActivePeripheral, Handle, ParsedNode, RuntimeContext};
 
-use crate::components::attrs::Issue;
+use crate::components::attrs::{Issue, PinOrRef};
 use crate::components::generated_elements::spi_component as schema;
 
 /// A fully validated `<spi_component>` node.
@@ -25,9 +25,9 @@ pub struct SpiComponent<'a> {
     pub spi_ref: &'a str,
     /// Parsed `mode` attribute (0..=3).
     pub mode: u32,
-    /// Raw chip-select reference string from the `cs` attribute — a plain
-    /// gpio id, no `$` prefix (a legacy `$`-prefixed value is tolerated).
-    pub cs_ref: &'a str,
+    /// The chip-select: a GPIO number, or a reference to the `<gpio>` that
+    /// owns it.
+    pub cs: PinOrRef<'a>,
     /// Raw `frequency` attribute, if supplied.
     pub frequency: Option<&'a str>,
     /// Handle of the referenced parent spi peripheral.
@@ -41,13 +41,15 @@ impl<'a> SpiComponent<'a> {
     pub fn resolve(node: &'a ParsedNode<'a>, ctx: &RuntimeContext<'a>) -> Result<Self, String> {
         let attrs = schema::Attrs::from_node(node).map_err(|issue| message(node.id, issue))?;
         let id = attrs.id.value;
-        let cs_ref = attrs.cs.value.trim_start_matches('$');
         // Numeric `cs="9"` (the `spi_example`s) is a pin number, not a gpio
         // id — accept it without an interner lookup. Otherwise it must point
         // at a known gpio peripheral.
-        if cs_ref.parse::<u8>().is_err() {
-            ctx.interner.get(cs_ref).ok_or_else(|| {
-                format!("❌ [spi_component] '{id}' cs references undefined gpio '{cs_ref}'")
+        if let PinOrRef::Ref(reference) = attrs.cs {
+            ctx.interner.get(reference.name).ok_or_else(|| {
+                format!(
+                    "❌ [spi_component] '{id}' cs references undefined gpio '{}'",
+                    reference.name
+                )
             })?;
         }
 
@@ -71,7 +73,7 @@ impl<'a> SpiComponent<'a> {
             id,
             spi_ref: attrs.spi.raw,
             mode: attrs.mode.value,
-            cs_ref,
+            cs: attrs.cs,
             frequency: attrs.frequency.map(|frequency| frequency.value),
             peripheral_handle: handle,
             peripheral: *peripheral,

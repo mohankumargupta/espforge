@@ -346,7 +346,7 @@ mod tests {
                 peripheral: "SPI2".into(),
                 sclk: 8,
                 mosi: 7,
-                miso: 6,
+                miso: Some(6),
                 khz: 100,
                 mode: 0,
             }],
@@ -406,6 +406,49 @@ mod tests {
             !generated.contains("SpiDevice<esp_hal::Blocking>"),
             "{generated}"
         );
+    }
+
+    #[test]
+    fn a_spi_bus_without_miso_builds_a_write_only_bus() {
+        let m = core();
+        let opts = espforge_options::resolve(&m, &Answers::empty(0..0), &DerivedInputs::default())
+            .unwrap();
+        let hw = Hardware {
+            spi_buses: vec![SpiBusSpec {
+                id: "spi2".into(),
+                peripheral: "SPI2".into(),
+                sclk: 8,
+                mosi: 7,
+                miso: None,
+                khz: 40000,
+                mode: 3,
+            }],
+            spis: vec![SpiSpec {
+                name: "display_bus".into(),
+                bus: "spi2".into(),
+                cs: 9,
+            }],
+            ..Default::default()
+        };
+        let g = generate_with_hardware(&m, &opts, &RuntimeSource::Published, &[], &hw).unwrap();
+        let generated = &find(&g, "src/generated.rs").content;
+        assert!(
+            generated.contains("let spi2_bus = espforge_runtime::SpiBus::build_write_only("),
+            "{generated}"
+        );
+        assert!(
+            !generated.contains("espforge_runtime::SpiBus::build(\n"),
+            "{generated}"
+        );
+        assert!(generated.contains("GPIO8.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("GPIO7.clone_unchecked()"), "{generated}");
+        assert!(generated.contains("Rate::from_khz(40000)"), "{generated}");
+        assert!(generated.contains("Mode::_3"), "{generated}");
+        assert!(
+            generated.contains("GPIO8/GPIO7.") || generated.contains("GPIO8/GPIO7\n"),
+            "the SAFETY note names only the pins that exist: {generated}"
+        );
+        assert!(!generated.contains("\n\n\n"), "{generated}");
     }
 
     #[test]
@@ -477,7 +520,7 @@ mod tests {
                 peripheral: "SPI2".into(),
                 sclk: 8,
                 mosi: 7,
-                miso: 6,
+                miso: Some(6),
                 khz: 1000,
                 mode: 0,
             }],

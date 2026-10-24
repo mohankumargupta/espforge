@@ -188,7 +188,10 @@ pub fn check_all(
     for dev in spi_devices {
         let pin = dev.cs;
         for gpio in gpios {
-            if gpio.pin == pin {
+            // `cs="gpio9"` names the pin it takes; that `<gpio>` is the
+            // chip-select itself, not a second thing driving the pin. A
+            // component on it is still caught by the led/button loops below.
+            if gpio.pin == pin && dev.cs_gpio.as_deref() != Some(gpio.id.as_str()) {
                 return Err(conflict_err(
                     sections,
                     "gpio",

@@ -16,7 +16,7 @@
 //! | `leds`         | list of `{ name, pin, active_low }`, one per `<led>` component |
 //! | `buttons`      | list of `{ name, pin, pull_up }`, one per `<button>` component |
 //! | `i2cs`         | list of `{ name, peripheral, sda, scl, khz }`, one per `<i2c_component>` |
-//! | `spi_buses`    | list of `{ id, peripheral, sclk, mosi, miso, khz, mode }`, one used `<spi>` |
+//! | `spi_buses`    | list of `{ id, peripheral, sclk, mosi, miso, khz, mode }` (`miso` is null when the bus is write-only), one used `<spi>` |
 //! | `spis`         | list of `{ name, bus, cs }`, one per `<spi_component>`, by component id |
 //! | `uarts`        | list of `{ name, peripheral, tx, rx, baud, parity, stop_bits }`, one per `<uart_component>` |
 //! | `<led name>`   | each led again, by its component id (`red_led.pin` in diagram.json) |
@@ -403,7 +403,7 @@ mod tests {
                 peripheral: "SPI2".into(),
                 sclk: 8,
                 mosi: 7,
-                miso: 6,
+                miso: Some(6),
                 khz: 100,
                 mode: 0,
             }],

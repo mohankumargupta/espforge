@@ -9,6 +9,7 @@ use crate::peripherals::spi::{SpiBusDraft, SpiDeviceDraft};
 use espf::context::{ParsedNode, RuntimeContext};
 use espf::diag::EspfError;
 use espforge_bindings::components::SpiComponent;
+use espforge_bindings::components::attrs::PinOrRef;
 
 /// The `<spi_component>` branch of the `# components` loop. Pushes into
 /// `devices` and marks the bus used.
@@ -45,17 +46,24 @@ pub fn attach_spi_component(
         ));
     }
     // `cs="9"` is a pin; `cs="gpio5"`/`cs="$gpio5"` resolves via the gpio table.
-    let cs_ref = comp.cs_ref.trim_start_matches('$');
-    let cs: u8 = if let Ok(pin) = cs_ref.parse::<u8>() {
-        pin
-    } else if let Some(g) = gpios.iter().find(|g| g.id == cs_ref) {
-        g.pin
-    } else {
-        return Err(EspfError::at_node(
-            n,
-            "invalid cs",
-            format!("<spi_component id=\"{}\"> needs a numeric cs=\"...\"", n.id),
-        ));
+    // The schema's `pin_or_ref` kind decides which of the two it is; the
+    // wrapper has already checked that a reference names a known element, so
+    // only a reference to something that is not a `<gpio>` lands here.
+    let (cs, cs_gpio) = match comp.cs {
+        PinOrRef::Pin(pin) => (pin.value, None),
+        PinOrRef::Ref(reference) => {
+            let gpio = gpios
+                .iter()
+                .find(|g| g.id == reference.name)
+                .ok_or_else(|| {
+                    EspfError::at_node(
+                        n,
+                        "invalid cs",
+                        format!("<spi_component id=\"{}\"> needs a numeric cs=\"...\"", n.id),
+                    )
+                })?;
+            (gpio.pin, Some(gpio.id.clone()))
+        }
     };
     let name = n.id.replace('-', "_");
     if !is_rust_ident(&name) {
@@ -85,6 +93,7 @@ pub fn attach_spi_component(
         name,
         bus: bus_id,
         cs,
+        cs_gpio,
     });
     Ok(())
 }
@@ -116,7 +125,7 @@ mod tests {
                 peripheral: "SPI2".into(),
                 sclk: 8,
                 mosi: 7,
-                miso: 6,
+                miso: Some(6),
                 khz: 100,
                 mode: 0,
             }]
@@ -143,6 +152,33 @@ mod tests {
 
         let mhz = WITH_SPI.replace("100kHz", "105MHZ");
         assert!(lower_src(&mhz).unwrap_err().contains("not supported yet"));
+    }
+
+    #[test]
+    fn an_absent_miso_lowers_to_a_write_only_bus() {
+        let src = WITH_SPI.replace(" miso=\"6\"", "");
+        let hw = lower_src(&src).unwrap();
+        assert_eq!(hw.spi_buses[0].miso, None);
+        assert_eq!(hw.spi_buses[0].sclk, 8);
+    }
+
+    #[test]
+    fn an_absent_miso_does_not_become_gpio0_in_the_clash_checks() {
+        // The pin list of a write-only bus holds two pins, not a zero-filled
+        // third: GPIO0 must stay free for the led below.
+        let src = WITH_SPI
+            .replace(" miso=\"6\"", "")
+            .replace(
+                "# peripherals",
+                "# peripherals\n  <gpio id=\"gpio0\" pin=\"0\" direction=\"output\" />",
+            )
+            .replace(
+                "# components",
+                "# components\n  <led id=\"zero\" gpio=\"$gpio0\" />",
+            );
+        let hw = lower_src(&src).unwrap();
+        assert_eq!(hw.spi_buses[0].miso, None);
+        assert_eq!(hw.leds[0].pin, 0);
     }
 
     #[test]
@@ -197,6 +233,34 @@ mod tests {
             err.contains("tester") && err.contains("second") && err.contains("both use GPIO9"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn a_cs_may_name_a_gpio_instead_of_a_number() {
+        let src = WITH_SPI
+            .replace(
+                "# peripherals",
+                "# peripherals\n  <gpio id=\"gpio9\" pin=\"9\" direction=\"output\" />",
+            )
+            .replace("cs=\"9\"", "cs=\"gpio9\"");
+        let hw = lower_src(&src).unwrap();
+        assert_eq!(hw.spis[0].cs, 9);
+    }
+
+    #[test]
+    fn a_cs_named_gpio_still_clashes_with_a_component_on_that_pin() {
+        let src = WITH_SPI
+            .replace(
+                "# peripherals",
+                "# peripherals\n  <gpio id=\"gpio9\" pin=\"9\" direction=\"output\" />",
+            )
+            .replace(
+                "# components",
+                "# components\n  <led id=\"red\" gpio=\"$gpio9\" />",
+            )
+            .replace("cs=\"9\"", "cs=\"gpio9\"");
+        let err = lower_src(&src).unwrap_err();
+        assert!(err.contains("GPIO9"), "{err}");
     }
 
     #[test]

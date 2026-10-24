@@ -103,6 +103,9 @@ pub enum AttrKind {
     Choice(Vec<String>),
     /// A `$id` reference to elements of these tags.
     Ref { to: Vec<String> },
+    /// A GPIO number or a reference to a `<gpio>`: `cs="9"`, `cs="gpio5"`,
+    /// `cs="$gpio5"`.
+    PinOrRef,
     /// Repeated with `+=` on every entry, the first one included.
     List(Box<AttrKind>),
 }
@@ -120,6 +123,7 @@ impl AttrKind {
             AttrKind::Bool => "bool".into(),
             AttrKind::Choice(c) => c.join(" | "),
             AttrKind::Ref { to } => format!("ref to {}", to.join(", ")),
+            AttrKind::PinOrRef => "pin or ref".into(),
             AttrKind::List(inner) => format!("list of {}", inner.display()),
         }
     }
@@ -782,6 +786,7 @@ fn build_kind(
             }
             AttrKind::Choice(choices)
         }
+        "pin_or_ref" => AttrKind::PinOrRef,
         "ref" => {
             let targets: Vec<String> = to.iter().map(|(t, _)| t.clone()).collect();
             if targets.is_empty() {
@@ -825,7 +830,7 @@ fn build_kind(
             errors.push(err(
                 kind_span,
                 format!("unknown kind \"{other}\""),
-                "expected ident, str, pin, freq, hex, u32, bool, choice, ref or list",
+                "expected ident, str, pin, freq, hex, u32, bool, choice, ref, pin_or_ref or list",
             ));
             AttrKind::Str
         }

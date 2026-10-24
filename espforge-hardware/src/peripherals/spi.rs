@@ -18,7 +18,9 @@ pub struct SpiBusDraft {
     pub id: String,
     pub sclk: u8,
     pub mosi: u8,
-    pub miso: u8,
+    /// `None` is a write-only bus: the schema lets `miso` be omitted, and a
+    /// display never reads from the bus anyway.
+    pub miso: Option<u8>,
     pub khz: u32,
     pub mode: u8,
     /// Whether any `<spi_component>` rides on this bus.
@@ -33,6 +35,10 @@ pub struct SpiDeviceDraft {
     /// The bus id it rides on.
     pub bus: String,
     pub cs: u8,
+    /// The `<gpio>` id the `cs` named, when it was written as `cs="gpio5"`
+    /// rather than `cs="5"`. That gpio is this device's chip-select, not a
+    /// second user of the pin, so the clash check skips it.
+    pub cs_gpio: Option<String>,
 }
 
 /// The `<spi>` branch of the `# peripherals` loop.
@@ -52,16 +58,9 @@ pub fn lower_spi(n: &ParsedNode) -> Result<SpiBusDraft, EspfError> {
     })?;
     // `mode` is schema-checked (0..=3, default 0); hardware turns it into u8.
     let mode = attrs.mode.value as u8;
-    // The schema lets `miso` be omitted (displays do); this runtime does not,
-    // so the requirement and its message stay here until the diagram side
-    // decides what an absent MISO means.
-    let miso = attrs.miso.map(|miso| miso.value).ok_or_else(|| {
-        EspfError::at_node(
-            n,
-            "invalid spi pin",
-            format!("<spi id=\"{}\"> needs a numeric miso=\"...\"", n.id),
-        )
-    })?;
+    // `miso` is optional in the schema (displays omit it) and optional here:
+    // an absent one means the generated bus is write-only.
+    let miso = attrs.miso.map(|miso| miso.value);
     let khz = match attrs.frequency {
         // The `SpiConfig` default in espforge-runtime (1 MHz).
         None => 1000,
@@ -97,8 +96,11 @@ fn describe(id: &str, issue: Issue<'_>) -> (&'static str, String) {
     }
 }
 
-pub fn bus_pins(b: &SpiBusDraft) -> [u8; 3] {
-    [b.sclk, b.mosi, b.miso]
+/// The pins this bus owns. A write-only bus owns two.
+pub fn bus_pins(b: &SpiBusDraft) -> Vec<u8> {
+    let mut pins = vec![b.sclk, b.mosi];
+    pins.extend(b.miso);
+    pins
 }
 
 /// A bare `<spi>` with no component generates nothing: the app can only

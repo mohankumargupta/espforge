@@ -26,9 +26,12 @@
 //   element "tag" section="name" [status="planned"] [bus_component=#false] {
 //       summary, description, attr, example, see_also, compatible
 //   }
-//   attr "name" kind="ident|str|pin|freq|hex|u32|bool|choice|ref|list"
+//   attr "name" kind="ident|str|pin|freq|hex|u32|bool|choice|ref|pin_or_ref|list"
 //       [required=#true] [default=".."] [range="low..=high"] [to="tag"] [of="str"]
 //       { choices "a" "b"; help ".." }
+//
+// `pin_or_ref` is a chip-select: a GPIO number (`cs="9"`) or a <gpio> id
+// (`cs="gpio5"`, `cs="$gpio5"`), resolved by the element that uses it.
 //
 // Every element needs at least one `example`. Examples are parsed by the
 // tests, so they cannot drift from the attributes declared here.
@@ -220,7 +223,9 @@ element "spi_component" section="components" bus_component=#true {
     attr "mode" kind="u32" default="0" range="0..=3" {
         help "SPI mode, 0 to 3. Optional on the component; the SPI examples keep it on <spi>."
     }
-    attr "cs" kind="str" required=#true
+    attr "cs" kind="pin_or_ref" required=#true {
+        help "A GPIO number (`cs=\"9\"`), a <gpio> id (`cs=\"gpio5\"`) or a reference to one (`cs=\"$gpio5\"`)."
+    }
     attr "frequency" kind="freq"
     example "display bus" #"<spi_component id="display_bus" spi="$spi2" mode="0" cs="gpio5" frequency="40MHz" />"#
     see_also "peripherals/spi"

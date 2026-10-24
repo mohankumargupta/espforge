@@ -207,6 +207,7 @@ fn placeholder(kind: &AttrKind) -> String {
         AttrKind::Ref { to } => {
             format!("\"${}\"", to.first().map(String::as_str).unwrap_or("id"))
         }
+        AttrKind::PinOrRef => "\"PIN\"".to_string(),
         AttrKind::List(inner) => format!("\"{}+=\"", placeholder(inner)),
     }
 }

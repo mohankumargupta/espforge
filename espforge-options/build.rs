@@ -450,6 +450,7 @@ fn kind_literal(
         "bool" => "AttrKind::Bool".to_string(),
         "choice" => format!("AttrKind::Choice({})", string_vec(choices)),
         "ref" => format!("AttrKind::Ref {{ to: {} }}", string_vec(to)),
+        "pin_or_ref" => "AttrKind::PinOrRef".to_string(),
         "list" => {
             let inner = match of {
                 Some("ident") => "AttrKind::Ident",

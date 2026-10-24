@@ -259,6 +259,10 @@ fn element_module(node: &kdl::KdlNode) -> String {
                 "Option<Spanned<u8>>".to_string(),
                 format!("opt_hex(node, {lit})?"),
             ),
+            ("pin_or_ref", true, _) => (
+                "PinOrRef<'a>".to_string(),
+                format!("pin_or_ref(node, {lit})?"),
+            ),
             ("ref", true, _) => ("Ref<'a>".to_string(), format!("reference(node, {lit})?")),
             ("ref", false, None) => (
                 "Option<Ref<'a>>".to_string(),

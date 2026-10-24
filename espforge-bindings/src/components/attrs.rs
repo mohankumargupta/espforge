@@ -66,6 +66,19 @@ impl<'a> Ref<'a> {
     }
 }
 
+/// A chip-select (`kind="pin_or_ref"`): a GPIO number or a `<gpio>` id.
+///
+/// Both spellings are a pin in the end; which one the author wrote is kept
+/// because turning a `<gpio>` id into a number needs the gpio table, which is
+/// the element's business, not this layer's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinOrRef<'a> {
+    /// `cs="9"`: the GPIO number itself.
+    Pin(Spanned<u8>),
+    /// `cs="gpio5"` or `cs="$gpio5"`: a `<gpio>` id.
+    Ref(Ref<'a>),
+}
+
 /// Why an attribute could not be read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Issue<'a> {
@@ -357,6 +370,20 @@ fn hex_value<'a>(attr: &'a TagAttribute<'a>, name: &'static str) -> Result<Spann
     Ok(Spanned {
         value: parsed.map_err(|_| invalid(name, attr.val))?,
         span: span_of(attr),
+    })
+}
+
+/// A required `kind="pin_or_ref"` value: a GPIO number, or anything else as
+/// a `<gpio>` reference.
+pub fn pin_or_ref<'a>(
+    node: &'a ParsedNode<'a>,
+    name: &'static str,
+) -> Result<PinOrRef<'a>, Issue<'a>> {
+    let attr = find(node, name).ok_or(missing(name))?;
+    let span = span_of(attr);
+    Ok(match attr.val.parse::<u8>() {
+        Ok(pin) => PinOrRef::Pin(Spanned { value: pin, span }),
+        Err(_) => PinOrRef::Ref(Ref::at(attr.val, span)),
     })
 }
 

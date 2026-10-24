@@ -131,6 +131,25 @@ impl SpiBus<Blocking> {
         let inner = CELL.init(RefCell::new(esp));
         Ok(SpiBus { inner })
     }
+
+    /// Build a bus with no MISO pin: a display or other write-only device.
+    /// The peripheral still shifts data in, but nothing is wired to receive
+    /// it, so `read`/`transfer` return whatever the bus samples — use
+    /// `write` or a write-only `transaction` on such a bus.
+    pub fn build_write_only(
+        spi: SPI2<'static>,
+        sclk: impl OutputPin + 'static,
+        mosi: impl OutputPin + 'static,
+        config: SpiConfig,
+    ) -> Result<SpiBus<Blocking>, esp_hal::spi::master::ConfigError> {
+        static CELL: static_cell::StaticCell<RefCell<Spi<'static, Blocking>>> =
+            static_cell::StaticCell::new();
+        let esp = Spi::new(spi, EspConfig::from(config))?
+            .with_sck(sclk)
+            .with_mosi(mosi);
+        let inner = CELL.init(RefCell::new(esp));
+        Ok(SpiBus { inner })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +175,27 @@ impl SpiBus<Async> {
             .with_sck(sclk)
             .with_mosi(mosi)
             .with_miso(miso)
+            .into_async();
+        let inner = CELL.init(embassy_sync::mutex::Mutex::new(esp));
+        Ok(SpiBus { inner })
+    }
+
+    /// Write-only bus: no MISO pin attached (see `build_write_only` above).
+    pub fn build_write_only(
+        spi: SPI2<'static>,
+        sclk: impl OutputPin + 'static,
+        mosi: impl OutputPin + 'static,
+        config: SpiConfig,
+    ) -> Result<SpiBus<Async>, esp_hal::spi::master::ConfigError> {
+        static CELL: static_cell::StaticCell<
+            embassy_sync::mutex::Mutex<
+                embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+                Spi<'static, Async>,
+            >,
+        > = static_cell::StaticCell::new();
+        let esp = Spi::new(spi, EspConfig::from(config))?
+            .with_sck(sclk)
+            .with_mosi(mosi)
             .into_async();
         let inner = CELL.init(embassy_sync::mutex::Mutex::new(esp));
         Ok(SpiBus { inner })

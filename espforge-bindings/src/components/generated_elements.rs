@@ -496,8 +496,8 @@ pub mod spi_component {
         pub spi: Ref<'a>,
         /// `mode` (`u32`, optional, default "0")
         pub mode: Spanned<u32>,
-        /// `cs` (`str`, required)
-        pub cs: Spanned<&'a str>,
+        /// `cs` (`pin_or_ref`, required)
+        pub cs: PinOrRef<'a>,
         /// `frequency` (`freq`, optional)
         pub frequency: Option<Spanned<&'a str>>,
     }
@@ -509,7 +509,7 @@ pub mod spi_component {
                 id: ident(node, "id")?,
                 spi: reference(node, "spi")?,
                 mode: number_in_or(node, "mode", 0, 3, 0)?,
-                cs: text(node, "cs")?,
+                cs: pin_or_ref(node, "cs")?,
                 frequency: opt_frequency(node, "frequency")?,
             })
         }
