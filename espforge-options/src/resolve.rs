@@ -144,7 +144,7 @@ impl Answers {
                 errors.push(EspfError::at_span(
                     key_span,
                     format!("unknown option `{key}`"),
-                    "this is not an option in options.kdl",
+                    "this is not an option in espf.schema.kdl",
                 ));
                 continue;
             };
@@ -296,7 +296,7 @@ impl ResolvedOptions {
 
 // ------------------------------------------------------------------ resolver
 
-/// Resolve against the embedded `options.kdl`.
+/// Resolve against the option schema embedded from `espf.schema.kdl`.
 pub fn resolve(
     core: &Meta,
     answers: &Answers,

@@ -194,7 +194,7 @@ fn gather(args: &NewArgs, ui: &mut dyn Ui) -> Result<Gathered, Stop> {
     a.apply_options(schema, &mut answers, &mut Vec::new())
         .map_err(Stop::User)?;
 
-    // Remaining options: accept defaults, or walk options.kdl.
+    // Remaining options: accept defaults, or walk the schema's option block.
     if interactive {
         let eligible: Vec<_> = schema
             .options

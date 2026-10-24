@@ -1,4 +1,4 @@
-//! `options.kdl` schema types and loader (KDL v2).
+//! The option half of `espf.schema.kdl`: types and loader (KDL v2).
 //!
 //! ```kdl
 //! required "chip"
@@ -10,6 +10,9 @@
 //!     }
 //! }
 //! ```
+//!
+//! The same file also holds the element vocabulary (`section`/`element`); this
+//! loader skips those nodes and the catalog in [`crate::catalog`] skips these.
 //!
 //! Option properties: `display_name`, `selection_group`, `requires_nightly`,
 //! `kind` (`bool` default, `string`, `choice`, `list`) and `default`.
@@ -81,7 +84,7 @@ pub struct OptionDef {
     pub requires: Requires,
     pub compat: Compat,
     pub selection_group: Option<String>,
-    /// Span of the `option` node in options.kdl.
+    /// Span of the `option` node in `espf.schema.kdl`.
     pub span: Range<usize>,
 }
 
@@ -98,16 +101,16 @@ impl Schema {
     }
 }
 
-/// The schema embedded from `espforge-espgenerate-template/src/options.kdl`.
+/// The schema embedded from `espforge-espgenerate-template/src/espf.schema.kdl`.
 /// Panics (with a rendered diagnostic) if the embedded file is invalid; the
 /// unit tests make sure it is not.
 pub fn embedded_schema() -> &'static Schema {
     static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
-        let src = espforge_espgenerate_template::OPTIONS_KDL;
+        let src = espforge_espgenerate_template::SCHEMA_KDL;
         load(src).unwrap_or_else(|errs| {
             panic!(
-                "embedded options.kdl is invalid:\n{}",
-                render_errors("options.kdl", src, &errs)
+                "embedded espf.schema.kdl is invalid:\n{}",
+                render_errors("espf.schema.kdl", src, &errs)
             )
         })
     });
@@ -144,8 +147,9 @@ fn positional_strings(node: &KdlNode, errors: &mut Vec<EspfError>) -> Vec<(Strin
     out
 }
 
-/// Parse `options.kdl` text. All problems are reported, each with the byte
-/// span of the offending KDL node or argument.
+/// Parse the option half of a schema file. `section`/`element` nodes belong to
+/// the element catalog and are skipped. All problems are reported, each with
+/// the byte span of the offending KDL node or argument.
 pub fn load(src: &str) -> Result<Schema, Vec<EspfError>> {
     let doc = match KdlDocument::parse_v2(src) {
         Ok(d) => d,
@@ -195,10 +199,13 @@ pub fn load(src: &str) -> Result<Schema, Vec<EspfError>> {
                     }
                 }
             }
+            // The element vocabulary lives in the same file; `catalog::load`
+            // reads it.
+            "section" | "element" => {}
             other => errors.push(err(
                 node_range(node),
                 format!("unknown top-level node `{other}`"),
-                "expected `required` or `options`",
+                "expected `section`, `element`, `required` or `options`",
             )),
         }
     }
@@ -505,7 +512,7 @@ options {
     }
 
     #[test]
-    fn embedded_options_kdl_loads_cleanly() {
+    fn the_embedded_schema_options_load_cleanly() {
         let s = embedded_schema();
         for name in ["wifi", "embassy", "alloc", "unstable-hal", "probe-rs"] {
             assert!(s.get(name).is_some(), "missing {name}");

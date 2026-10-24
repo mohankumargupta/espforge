@@ -379,10 +379,13 @@ pub fn load(src: &str) -> Result<Catalog, Vec<EspfError>> {
         match node.name().value() {
             "section" => parse_section(node, &mut sections, &mut errors),
             "element" => parse_element(node, &mut sections, &mut errors),
+            // The build-option schema lives in the same file;
+            // `schema::load` reads it.
+            "required" | "options" => {}
             other => errors.push(err(
                 node_range(node),
                 format!("unknown top-level node `{other}`"),
-                "expected `section` or `element`",
+                "expected `section`, `element`, `required` or `options`",
             )),
         }
     }

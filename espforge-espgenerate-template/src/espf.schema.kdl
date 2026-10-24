@@ -1,14 +1,20 @@
-// The element schema (KDL v2): the single source of truth for what an ESPF
-// file may contain.
+// The schema (KDL v2): the single source of truth for what an ESPF file may
+// contain, and for the build options it can turn on.
+//
+// Two documents live in one file — `section`/`element` nodes (the ESPF
+// vocabulary) and `required`/`options` nodes (the build options). Each reader
+// skips the other's nodes, so there is one file to keep true and no second
+// schema to drift from it.
 //
 // Consumers:
-//   * `espforge-options::catalog` loads it for `espforge espf` (man pages,
-//     examples, completions data).
-//   * `espforge-bindings` reads it at build time and generates
-//     `src/components/generated_vocab.rs` (the tags that `resolve_component`
-//     dispatches, i.e. the elements marked `bus_component=#true` below) and
+//   * `espforge-options::catalog` loads the element half for `espforge espf`
+//     (man pages, examples, completions data).
+//   * `espforge-options::schema` loads the option half for the resolver.
+//   * `espforge-bindings` reads the element half at build time and generates
+//     `src/components/generated_vocab.rs` (the tags `resolve_component`
+//     dispatches: the elements marked `bus_component=#true` below) and
 //     `src/components/generated_elements.rs` (one typed `Attrs` struct per
-//     element: presence, `kind`, `choices`, `range` and `default` are read
+//     element: `required`, `kind`, `choices`, `range` and `default` are read
 //     from here, never restated in a wrapper). Nothing else may declare that
 //     list by hand.
 //
@@ -75,8 +81,9 @@ element "console" section="espforge" {
 }
 
 element "options" section="espforge" {
-    summary "Build options from options.kdl"
-    // TODO: the other option names are generated from options.kdl.
+    summary "Build options from the schema's options block"
+    // TODO: the other option names come from the `options` block at the end of
+    // this file.
     attr "defaults" kind="bool" default="true" {
         help "false turns every unspecified option off."
     }
@@ -292,3 +299,63 @@ element "ntp" section="services" status="planned" {
     example "two servers" #"<ntp id="ntp0" servers+="pool.ntp.org" servers+="time.google.com" />"#
 }
 
+
+// ------------------------------------------------------------------- options
+//
+// The build-option schema: what `<options ... />` and the `--option` flags can
+// turn on. Read by `espforge-options::schema`; the element catalog ignores
+// these nodes, and the generated `Attrs` for `<options>` covers only the
+// `defaults` attribute above.
+
+required "chip"
+
+options {
+    option "unstable-hal" display_name="Enable unstable HAL features." default=#true {
+        help "This configuration enables unstable esp-hal features. These come with no stability guarantees, and could be changed or removed at any time."
+    }
+
+    option "alloc" display_name="Enable allocations via the esp-alloc crate." default=#true {
+        help "esp-alloc comes with no stability guarantees at this time."
+    }
+
+    option "wifi" display_name="Enable Wi-Fi via the esp-radio crate." {
+        help "esp-radio comes with no stability guarantees at this time."
+        requires "alloc" "unstable-hal" "embassy"
+        compatible {
+            chip "esp32" "esp32c2" "esp32c3" "esp32c5" "esp32c6" "esp32c61" "esp32s2" "esp32s3" "esp32s31"
+        }
+    }
+
+    option "ble-trouble" display_name="Enable BLE via the esp-radio crate (embassy-trouble)." {
+        help "esp-radio comes with no stability guarantees at this time."
+        requires "alloc" "unstable-hal" "embassy"
+        compatible {
+            chip "esp32" "esp32c2" "esp32c3" "esp32c5" "esp32c6" "esp32c61" "esp32h2" "esp32s3"
+        }
+    }
+
+    option "embassy" display_name="Add embassy framework support." selection_group="base-template" {
+        help "esp-rtos module responsible for embassy support comes with no stability guarantees at this time."
+        requires "unstable-hal"
+    }
+
+    option "stack-smashing-protection" display_name="Enable stack smashing protection." requires_nightly=#true {
+        help "Requires nightly Rust. Note that this option generates additional checks in most functions and will slow down your code."
+    }
+
+    option "probe-rs" display_name="Use probe-rs to flash and monitor instead of espflash." {
+        requires_tools "probe-rs"
+        help "probe-rs is a debugger that connects"
+    }
+
+    // Emit the Wokwi simulation files (diagram.json, wokwi.toml).
+    option "wokwi" display_name="Generate Wokwi simulation files." default=#true {
+        help "Writes diagram.json and wokwi.toml so the project can be simulated in Wokwi."
+    }
+
+    // Examples with a custom Wokwi chip ship its Zig sources next to the
+    // prebuilt chip.json / chip.wasm (which are always copied).
+    option "keep-zig-source" display_name="Keep the Zig source of custom Wokwi chips." {
+        help "Copies the example's chip/ directory (Zig sources and build files) into the project. chip.json and chip.wasm are always copied."
+    }
+}

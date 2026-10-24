@@ -1,10 +1,11 @@
 # Phase 1: one schema (extreme.md §3.2 / §7)
 
-**Status:** increments 1, 1.1, 2 and 3 landed. `espf.schema.kdl` is the source of truth
-for the element vocabulary, the attribute rules and the attribute coercion. Nothing in
-`espforge-bindings` or `espforge-hardware` parses a schema attribute by hand any more:
-`grep -r 'get_attr(' espforge-hardware/src` is empty. Still to do in Phase 1: the merged
-options schema and catalog data at build time.
+**Status:** increments 1, 1.1, 2, 3 and 4 landed. `espf.schema.kdl` is the single source
+of truth for the element vocabulary, the attribute rules, the attribute coercion and the
+build options. Nothing in `espforge-bindings` or `espforge-hardware` parses a schema
+attribute by hand any more (`grep -r 'get_attr(' espforge-hardware/src` is empty), and
+`options.kdl` no longer exists. Still to do in Phase 1: generating the option types
+(instead of parsing the option half at runtime) and catalog data at build time.
 
 ---
 
@@ -104,7 +105,27 @@ One behaviour change falls out of this, and it is the schema finally being enfor
 error (`invalid gpio direction`) instead of being accepted and ignored. Nothing in the
 examples, the golden projects or the diagnostics corpus used another value.
 
-## 5. Gate evidence
+## 5. One file: the options merged in
+
+`espforge-espgenerate-template/src/options.kdl` is gone. `required "chip"` and the
+`options { … }` block now sit at the end of `espf.schema.kdl`, under a `// options`
+heading, and the header states the rule that makes one file workable: **each reader skips
+the other's nodes and still rejects anything unknown.**
+
+- `catalog::load` ignores `required` and `options`; its unknown-node message now lists all
+  four (`section`, `element`, `required`, `options`), so a typo is still caught.
+- `schema::load` ignores `section` and `element`; same message.
+- `OPTIONS_KDL` is deleted, `SCHEMA_KDL` is the only embedded text, and
+  `embedded_schema()` names `espf.schema.kdl` when it renders a panic.
+- The template crate's `build.rs` no longer watches a second file.
+
+That is the whole of extreme.md §3.2's "start with the two KDL files merged" step. What is
+not done yet is the other half of it: the option types are still parsed at runtime by
+`schema::load` (once, behind a `LazyLock`), not generated. Doing that is the next
+increment, and it is the same shape as the element work: generate the `OptionDef` table,
+keep the loader for the tests that exercise its diagnostics.
+
+## 6. Gate evidence
 
 - `cargo test --workspace`: green, **287 passed, 1 ignored**.
 - The compile gate (`cargo test -p espforge --test golden_projects -- --ignored`): green.
@@ -119,17 +140,17 @@ examples, the golden projects or the diagnostics corpus used another value.
   `needs gpio="$<gpio id>"`. Plus `a_zero_baud_rate_is_refused`, the one rule hardware
   still adds to a coerced value.
 
-## 6. Next increments, in order
+## 7. Next increments, in order
 
-1. **Merge `options.kdl` into `espf.schema.kdl`** so there is one file, then generate the
-   option types. The catalog loader has to skip `option` nodes; the options loader has to
-   skip `section`/`element` nodes; `OPTIONS_KDL` and `SCHEMA_KDL` become one constant.
-2. **Catalog data at build time** instead of parsing KDL at runtime, once the schema is
-   stable enough that regenerating on every build is cheap.
+1. **Generate the option types** from the merged schema (the table `embedded_schema()`
+   returns today), which retires the runtime parse of the option half. The loader stays
+   for its diagnostics tests; build-time validation should reuse it.
+2. **Catalog data at build time** instead of parsing the element half at runtime, once the
+   schema is stable enough that regenerating on every build is cheap.
 3. Then Phase 2 (typed IR), which deletes the wrapper structs, the `*Draft`s and the
    parallel `Vec`s in `Hardware`.
 
-Open drift this increment made visible, for a decision before Phase 2:
+Open drift the earlier increments made visible, for a decision before Phase 2:
 
 - **`<spi>` without `miso`.** The schema marks `miso` optional ("displays generally omit
   it"), but `lower_spi` still requires it (`needs a numeric miso="..."`). The generated

@@ -8,14 +8,11 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Rendered by `espforge-emit` (see its `render` module).
 pub static TEMPLATE_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/src/template");
 
-/// The option schema (KDL v2), embedded at compile time.
-/// Loaded by `espforge-options`.
-pub const OPTIONS_KDL: &str = include_str!("options.kdl");
-
-/// The element schema (KDL v2): the single source of truth for the elements
-/// ESPF accepts. Embedded at compile time; loaded by `espforge-options::catalog`
-/// for `espforge espf`, and read at build time by `espforge-bindings` to
-/// generate its component vocabulary.
+/// The schema (KDL v2): the single source of truth for the elements ESPF
+/// accepts and for the build options. Embedded at compile time; the element
+/// half is loaded by `espforge-options::catalog` for `espforge espf`, the
+/// option half by `espforge-options::schema`, and the element half is also read
+/// at build time by `espforge-bindings` to generate its types.
 pub const SCHEMA_KDL: &str = include_str!("espf.schema.kdl");
 
 /// The prose of `espforge espf overview`, embedded at compile time.
