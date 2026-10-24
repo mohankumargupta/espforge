@@ -14,3 +14,5 @@ I2C EXAMPLE
   <i2c_component id="i2c_tester" i2c="$i2c0" />
 
 # devices
+
+# services

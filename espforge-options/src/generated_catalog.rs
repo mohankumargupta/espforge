@@ -551,10 +551,10 @@ pub(crate) fn catalog() -> Catalog {
                             AttrDef {
                                 name: "address".to_string(),
                                 kind: AttrKind::Hex,
-                                required: true,
+                                required: false,
                                 default: None,
-                                help: None,
-                                span: 9178..9218,
+                                help: Some("Omit for a bus-only component (for example an I2C scanner).".to_string()),
+                                span: 9241..9349,
                             },
                         ],
                         examples: vec![
@@ -565,7 +565,7 @@ pub(crate) fn catalog() -> Catalog {
                         ],
                         see_also: vec!["peripherals/i2c".to_string()],
                         compat: Compat { chips: None },
-                        span: 8892..9347,
+                        span: 8892..9478,
                     },
                     ElementDef {
                         tag: "spi_component".to_string(),
@@ -580,7 +580,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 9462..9499,
+                                span: 9593..9630,
                             },
                             AttrDef {
                                 name: "spi".to_string(),
@@ -588,7 +588,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 9504..9549,
+                                span: 9635..9680,
                             },
                             AttrDef {
                                 name: "mode".to_string(),
@@ -596,7 +596,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: false,
                                 default: Some("0".to_string()),
                                 help: Some("SPI mode, 0 to 3. Optional on the component; the SPI examples keep it on <spi>.".to_string()),
-                                span: 9554..9705,
+                                span: 9685..9836,
                             },
                             AttrDef {
                                 name: "cs".to_string(),
@@ -604,7 +604,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: Some("A GPIO number (`cs=\"9\"`), a <gpio> id (`cs=\"gpio5\"`) or a reference to one (`cs=\"$gpio5\"`).".to_string()),
-                                span: 9710..9873,
+                                span: 9841..10004,
                             },
                             AttrDef {
                                 name: "frequency".to_string(),
@@ -612,7 +612,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: false,
                                 default: None,
                                 help: None,
-                                span: 9878..9906,
+                                span: 10009..10037,
                             },
                         ],
                         examples: vec![
@@ -623,7 +623,7 @@ pub(crate) fn catalog() -> Catalog {
                         ],
                         see_also: vec!["peripherals/spi".to_string()],
                         compat: Compat { chips: None },
-                        span: 9349..10054,
+                        span: 9480..10185,
                     },
                     ElementDef {
                         tag: "uart_component".to_string(),
@@ -638,7 +638,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 10173..10210,
+                                span: 10304..10341,
                             },
                             AttrDef {
                                 name: "uart".to_string(),
@@ -646,7 +646,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 10215..10262,
+                                span: 10346..10393,
                             },
                             AttrDef {
                                 name: "baud_rate".to_string(),
@@ -654,7 +654,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 10267..10309,
+                                span: 10398..10440,
                             },
                             AttrDef {
                                 name: "parity".to_string(),
@@ -662,7 +662,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: false,
                                 default: Some("none".to_string()),
                                 help: None,
-                                span: 10314..10400,
+                                span: 10445..10531,
                             },
                             AttrDef {
                                 name: "stop_bits".to_string(),
@@ -670,7 +670,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: false,
                                 default: Some("1".to_string()),
                                 help: None,
-                                span: 10405..10479,
+                                span: 10536..10610,
                             },
                         ],
                         examples: vec![
@@ -681,7 +681,7 @@ pub(crate) fn catalog() -> Catalog {
                         ],
                         see_also: vec!["peripherals/uart".to_string()],
                         compat: Compat { chips: None },
-                        span: 10056..10607,
+                        span: 10187..10738,
                     },
                 ],
             },
@@ -703,7 +703,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 11001..11038,
+                                span: 11132..11169,
                             },
                             AttrDef {
                                 name: "gpio_component".to_string(),
@@ -711,7 +711,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 11043..11110,
+                                span: 11174..11241,
                             },
                         ],
                         examples: vec![
@@ -722,7 +722,7 @@ pub(crate) fn catalog() -> Catalog {
                         ],
                         see_also: vec!["components/gpio_component".to_string()],
                         compat: Compat { chips: None },
-                        span: 10918..11233,
+                        span: 11049..11364,
                     },
                     ElementDef {
                         tag: "ili9341".to_string(),
@@ -737,7 +737,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 11318..11355,
+                                span: 11449..11486,
                             },
                             AttrDef {
                                 name: "spi_component".to_string(),
@@ -745,7 +745,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 11360..11425,
+                                span: 11491..11556,
                             },
                             AttrDef {
                                 name: "dc".to_string(),
@@ -753,7 +753,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: false,
                                 default: None,
                                 help: None,
-                                span: 11514..11544,
+                                span: 11645..11675,
                             },
                             AttrDef {
                                 name: "rst".to_string(),
@@ -761,7 +761,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: false,
                                 default: None,
                                 help: None,
-                                span: 11549..11580,
+                                span: 11680..11711,
                             },
                             AttrDef {
                                 name: "cs".to_string(),
@@ -769,7 +769,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: false,
                                 default: None,
                                 help: None,
-                                span: 11585..11615,
+                                span: 11716..11746,
                             },
                         ],
                         examples: vec![
@@ -780,7 +780,7 @@ pub(crate) fn catalog() -> Catalog {
                         ],
                         see_also: vec!["components/spi_component".to_string()],
                         compat: Compat { chips: None },
-                        span: 11235..11785,
+                        span: 11366..11916,
                     },
                     ElementDef {
                         tag: "tmp102".to_string(),
@@ -795,7 +795,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 11875..11912,
+                                span: 12006..12043,
                             },
                             AttrDef {
                                 name: "i2c_component".to_string(),
@@ -803,7 +803,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 11917..11982,
+                                span: 12048..12113,
                             },
                         ],
                         examples: vec![
@@ -814,7 +814,7 @@ pub(crate) fn catalog() -> Catalog {
                         ],
                         see_also: vec!["components/i2c_component".to_string()],
                         compat: Compat { chips: None },
-                        span: 11787..12105,
+                        span: 11918..12236,
                     },
                 ],
             },
@@ -836,7 +836,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 12444..12481,
+                                span: 12575..12612,
                             },
                             AttrDef {
                                 name: "network1.ssid".to_string(),
@@ -844,7 +844,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 12563..12609,
+                                span: 12694..12740,
                             },
                             AttrDef {
                                 name: "network1.password".to_string(),
@@ -852,7 +852,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: false,
                                 default: None,
                                 help: None,
-                                span: 12614..12649,
+                                span: 12745..12780,
                             },
                         ],
                         examples: vec![
@@ -863,7 +863,7 @@ pub(crate) fn catalog() -> Catalog {
                         ],
                         see_also: Vec::new(),
                         compat: Compat { chips: None },
-                        span: 12348..12745,
+                        span: 12479..12876,
                     },
                     ElementDef {
                         tag: "ntp".to_string(),
@@ -878,7 +878,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: true,
                                 default: None,
                                 help: None,
-                                span: 12830..12867,
+                                span: 12961..12998,
                             },
                             AttrDef {
                                 name: "servers".to_string(),
@@ -886,7 +886,7 @@ pub(crate) fn catalog() -> Catalog {
                                 required: false,
                                 default: None,
                                 help: None,
-                                span: 12872..12907,
+                                span: 13003..13038,
                             },
                         ],
                         examples: vec![
@@ -897,7 +897,7 @@ pub(crate) fn catalog() -> Catalog {
                         ],
                         see_also: Vec::new(),
                         compat: Compat { chips: None },
-                        span: 12747..13008,
+                        span: 12878..13139,
                     },
                 ],
             },

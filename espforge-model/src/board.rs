@@ -409,7 +409,9 @@ pub struct Button {
 pub struct I2cComponent {
     pub id: Ident,
     pub bus: BusId,
-    pub address: u8,
+    /// The address the component declares, when it has one. A bus-level
+    /// component such as an I2C scanner deliberately has none.
+    pub address: Option<u8>,
 }
 
 /// One `<spi_component>` on a bus, with its own chip-select claim.
@@ -971,7 +973,7 @@ mod tests {
                 Component::I2c(I2cComponent {
                     id: id("oled", 100),
                     bus: i2c,
-                    address: 0x3c,
+                    address: Some(0x3c),
                 }),
                 Component::Spi(SpiComponent {
                     id: id("display", 160),

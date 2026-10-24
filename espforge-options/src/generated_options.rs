@@ -26,7 +26,7 @@ pub(crate) fn schema() -> Schema {
                 },
                 compat: Compat { chips: None },
                 selection_group: None,
-                span: 13386..13629,
+                span: 13517..13760,
             },
             OptionDef {
                 name: "alloc".to_string(),
@@ -41,7 +41,7 @@ pub(crate) fn schema() -> Schema {
                 },
                 compat: Compat { chips: None },
                 selection_group: None,
-                span: 13635..13804,
+                span: 13766..13935,
             },
             OptionDef {
                 name: "wifi".to_string(),
@@ -56,7 +56,7 @@ pub(crate) fn schema() -> Schema {
                 },
                 compat: Compat { chips: Some(vec!["esp32".to_string(), "esp32c2".to_string(), "esp32c3".to_string(), "esp32c5".to_string(), "esp32c6".to_string(), "esp32c61".to_string(), "esp32s2".to_string(), "esp32s3".to_string(), "esp32s31".to_string()]) },
                 selection_group: None,
-                span: 13810..14146,
+                span: 13941..14277,
             },
             OptionDef {
                 name: "ble-trouble".to_string(),
@@ -71,7 +71,7 @@ pub(crate) fn schema() -> Schema {
                 },
                 compat: Compat { chips: Some(vec!["esp32".to_string(), "esp32c2".to_string(), "esp32c3".to_string(), "esp32c5".to_string(), "esp32c6".to_string(), "esp32c61".to_string(), "esp32h2".to_string(), "esp32s3".to_string()]) },
                 selection_group: None,
-                span: 14152..14500,
+                span: 14283..14631,
             },
             OptionDef {
                 name: "embassy".to_string(),
@@ -86,7 +86,7 @@ pub(crate) fn schema() -> Schema {
                 },
                 compat: Compat { chips: None },
                 selection_group: Some("base-template".to_string()),
-                span: 14506..14752,
+                span: 14637..14883,
             },
             OptionDef {
                 name: "stack-smashing-protection".to_string(),
@@ -101,7 +101,7 @@ pub(crate) fn schema() -> Schema {
                 },
                 compat: Compat { chips: None },
                 selection_group: None,
-                span: 14758..15008,
+                span: 14889..15139,
             },
             OptionDef {
                 name: "probe-rs".to_string(),
@@ -116,7 +116,7 @@ pub(crate) fn schema() -> Schema {
                 },
                 compat: Compat { chips: None },
                 selection_group: None,
-                span: 15014..15195,
+                span: 15145..15326,
             },
             OptionDef {
                 name: "wokwi".to_string(),
@@ -131,7 +131,7 @@ pub(crate) fn schema() -> Schema {
                 },
                 compat: Compat { chips: None },
                 selection_group: None,
-                span: 15268..15444,
+                span: 15399..15575,
             },
             OptionDef {
                 name: "keep-zig-source".to_string(),
@@ -146,7 +146,7 @@ pub(crate) fn schema() -> Schema {
                 },
                 compat: Compat { chips: None },
                 selection_group: None,
-                span: 15589..15822,
+                span: 15720..15953,
             },
         ],
     }

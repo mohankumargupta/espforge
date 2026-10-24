@@ -210,8 +210,11 @@ element "i2c_component" section="components" bus_component=#true {
     summary "A device address on an I2C bus"
     attr "id" kind="ident" required=#true
     attr "i2c" kind="ref" to="i2c" required=#true
-    // TODO(11.11): the wrapper requires `address`; the I2C examples omit it.
-    attr "address" kind="hex" required=#true
+    // Optional: a bus-level component (an I2C scanner) has no one address;
+    // a driver that talks to a fixed part may still declare it.
+    attr "address" kind="hex" {
+        help "Omit for a bus-only component (for example an I2C scanner)."
+    }
     example "temperature sensor" #"<i2c_component id="temp_bus" i2c="$i2c0" address="0x48" />"#
     see_also "peripherals/i2c"
 }

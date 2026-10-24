@@ -732,7 +732,10 @@ fn button_node<'a>(n: &'a ParsedNode<'a>, refs: &Refs) -> Result<(bool, &'a str)
 }
 
 /// Resolve `<i2c_component>`: schema attributes, the `$i2c` kind and the slug.
-fn i2c_node<'a>(n: &'a ParsedNode<'a>, refs: &Refs) -> Result<(u8, &'a str), Vec<EspfError>> {
+fn i2c_node<'a>(
+    n: &'a ParsedNode<'a>,
+    refs: &Refs,
+) -> Result<(Option<u8>, &'a str), Vec<EspfError>> {
     let attrs = i2c_schema::Attrs::from_node(n).map_err(|issue| {
         vec![EspfError::at_node(
             n,
@@ -752,7 +755,7 @@ fn i2c_node<'a>(n: &'a ParsedNode<'a>, refs: &Refs) -> Result<(u8, &'a str), Vec
         "non-I2C",
     )?;
     require_slug(n, "invalid i2c_component", "i2c_component")?;
-    Ok((attrs.address.value, name))
+    Ok((attrs.address.map(|address| address.value), name))
 }
 
 /// Resolve `<spi_component>`: schema attrs, the `cs` ref and the `$spi` kind.

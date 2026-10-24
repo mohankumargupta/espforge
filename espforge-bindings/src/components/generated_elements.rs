@@ -466,8 +466,8 @@ pub mod i2c_component {
         pub id: Spanned<&'a str>,
         /// `i2c` (`ref`, required)
         pub i2c: Ref<'a>,
-        /// `address` (`hex`, required)
-        pub address: Spanned<u8>,
+        /// `address` (`hex`, optional)
+        pub address: Option<Spanned<u8>>,
     }
 
     impl<'a> Attrs<'a> {
@@ -476,7 +476,7 @@ pub mod i2c_component {
             Ok(Self {
                 id: ident(node, "id")?,
                 i2c: reference(node, "i2c")?,
-                address: hex(node, "address")?,
+                address: opt_hex(node, "address")?,
             })
         }
     }
