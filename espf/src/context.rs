@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Handle(pub u16);
@@ -83,6 +83,174 @@ pub enum ActivePeripheral {
 pub struct ActiveComponent {
     pub parent_peripheral: Handle,
     pub address: u8,
+}
+
+/// What kind of hardware a `$` reference names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeripheralKind {
+    Gpio,
+    I2c,
+    Spi,
+    Uart,
+}
+
+/// The `$` graph without handles, tables or lifetimes.
+///
+/// Phase 2 replaces [`RuntimeContext`] with this: lowering needs to answer
+/// "does this id exist, and what kind of peripheral is it?", not to look up a
+/// 128-slot integer table. The ids are owned, so the result can live next to
+/// the parsed file it describes.
+#[derive(Debug, Clone, Default)]
+pub struct Refs {
+    ids: HashSet<String>,
+    peripherals: HashMap<String, PeripheralKind>,
+}
+
+impl Refs {
+    /// Resolve every `$` reference and report the same graph problems the old
+    /// `RuntimeContext` did, in the same order.
+    pub fn resolve(
+        sections: &HashMap<String, Vec<ParsedNode>>,
+    ) -> Result<Self, Vec<crate::diag::EspfError>> {
+        let mut refs = Self::default();
+        let mut errors = Vec::new();
+
+        for peri in sections
+            .get("peripherals")
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+        {
+            if peri.id.is_empty() {
+                errors.push(crate::diag::EspfError::at_node(
+                    peri,
+                    "peripheral is missing an id",
+                    format!(
+                        "<{}> needs an id=\"...\" attribute so `$` references can bind to it",
+                        peri.tag_name
+                    ),
+                ));
+                continue;
+            }
+            refs.ids.insert(peri.id.to_string());
+            let kind = match peri.tag_name {
+                "i2c" => PeripheralKind::I2c,
+                "spi" => PeripheralKind::Spi,
+                "uart" => PeripheralKind::Uart,
+                _ => PeripheralKind::Gpio,
+            };
+            if kind == PeripheralKind::I2c {
+                for key in ["sda", "scl"] {
+                    let val = peri.get_attr(key).unwrap_or("0");
+                    if val.parse::<u8>().is_err() {
+                        let span = peri
+                            .get_attr_spanned(key)
+                            .map(|attr| {
+                                crate::diag::EspfError::at_attr(
+                                    attr,
+                                    "invalid pin number",
+                                    format!("`{key}=\"{val}\"` must be a number in 0..=255"),
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                crate::diag::EspfError::at_node(
+                                    peri,
+                                    "invalid pin number",
+                                    format!("`{key}=\"{val}\"` must be a number in 0..=255"),
+                                )
+                            });
+                        errors.push(span);
+                    }
+                }
+            }
+            refs.peripherals.insert(peri.id.to_string(), kind);
+        }
+
+        for comp in sections.get("components").map(Vec::as_slice).unwrap_or(&[]) {
+            if comp.id.is_empty() {
+                errors.push(crate::diag::EspfError::at_node(
+                    comp,
+                    "component is missing an id",
+                    "<i2c-...> elements need an id=\"...\" attribute",
+                ));
+                continue;
+            }
+            refs.ids.insert(comp.id.to_string());
+
+            let Some(link) = comp
+                .attributes
+                .iter()
+                .find(|a| a.key == "i2c" || a.key == "spi" || a.key == "gpio" || a.key == "uart")
+            else {
+                errors.push(crate::diag::EspfError::at_node(
+                    comp,
+                    "component is missing its controller link",
+                    format!(
+                        "<{} id=\"{}\"> needs an i2c=\"/spi=\"/gpio=\"/uart=\" attribute pointing at a peripheral id",
+                        comp.tag_name, comp.id
+                    ),
+                ));
+                continue;
+            };
+
+            let parent = link.val.trim_start_matches('$');
+            if !refs.ids.contains(parent) {
+                errors.push(crate::diag::EspfError::at_attr(
+                    link,
+                    "unknown peripheral",
+                    format!("there is no `{parent}` in `# peripherals`; the `$` reference must match an id defined there"),
+                ));
+            }
+        }
+
+        for dev in sections.get("devices").map(Vec::as_slice).unwrap_or(&[]) {
+            if dev.id.is_empty() {
+                errors.push(crate::diag::EspfError::at_node(
+                    dev,
+                    "device is missing an id",
+                    format!("<{}> needs an id=\"...\" attribute", dev.tag_name),
+                ));
+                continue;
+            }
+            refs.ids.insert(dev.id.to_string());
+
+            let Some(mapping) = dev.attributes.iter().find(|a| a.key.contains("component")) else {
+                errors.push(crate::diag::EspfError::at_node(
+                    dev,
+                    "device is missing its component mapping",
+                    format!(
+                        "<{} id=\"{}\"> needs a `component` attribute pointing at an id in `# components`",
+                        dev.tag_name, dev.id
+                    ),
+                ));
+                continue;
+            };
+
+            let component = mapping.val.trim_start_matches('$');
+            if !refs.ids.contains(component) {
+                errors.push(crate::diag::EspfError::at_attr(
+                    mapping,
+                    "unknown component",
+                    format!("there is no `{component}` in `# components`; the `$` reference must match an id defined there"),
+                ));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(refs)
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// The peripheral kind `name` names, if it is a peripheral.
+    pub fn kind(&self, name: &str) -> Option<PeripheralKind> {
+        self.peripherals.get(name).copied()
+    }
+
+    /// Whether any element declared `name` (a peripheral, component or device).
+    pub fn knows(&self, name: &str) -> bool {
+        self.ids.contains(name)
+    }
 }
 
 pub struct RuntimeContext<'a> {
