@@ -1,11 +1,11 @@
 # Phase 1: one schema (extreme.md §3.2 / §7)
 
-**Status:** increments 1, 1.1, 2, 3 and 4 landed. `espf.schema.kdl` is the single source
-of truth for the element vocabulary, the attribute rules, the attribute coercion and the
-build options. Nothing in `espforge-bindings` or `espforge-hardware` parses a schema
-attribute by hand any more (`grep -r 'get_attr(' espforge-hardware/src` is empty), and
-`options.kdl` no longer exists. Still to do in Phase 1: generating the option types
-(instead of parsing the option half at runtime) and catalog data at build time.
+**Status:** increments 1, 1.1, 2, 3, 4 and 5 landed. `espf.schema.kdl` is the single
+source of truth for the element vocabulary, the attribute rules, the attribute coercion
+and the build options, and both halves are generated: nothing parses a schema attribute
+by hand (`grep -r 'get_attr(' espforge-hardware/src` is empty), `options.kdl` no longer
+exists, and the option table is no longer parsed at runtime. Still to do in Phase 1:
+catalog data at build time.
 
 ---
 
@@ -34,6 +34,14 @@ rust-analyzer and the debugger see ordinary code.
 
 `src/components/generated_vocab.rs` — the `components` elements marked
 `bus_component=#true`, in schema order, as `TAGS`.
+
+`espforge-options/src/generated_options.rs` — the option half of the same file as a
+`Schema` value: `required` and one `OptionDef` per `option`, spans included.
+`schema::embedded_schema()` returns it, and `the_generated_table_matches_the_loader`
+asserts it equals `schema::load(SCHEMA_KDL)` — so the loader stays the oracle for what the
+schema means, and a transcriber mistake is a test failure rather than a silent divergence.
+A bool option with no explicit `default` is transcribed as `Some(Bool(false))`, which is
+the loader's rule, not a special case in the generator's head.
 
 `src/components/generated_elements.rs` — one `pub mod <tag>` per element in the schema
 (all twenty, not only the components), each with:
@@ -119,15 +127,20 @@ the other's nodes and still rejects anything unknown.**
   `embedded_schema()` names `espf.schema.kdl` when it renders a panic.
 - The template crate's `build.rs` no longer watches a second file.
 
-That is the whole of extreme.md §3.2's "start with the two KDL files merged" step. What is
-not done yet is the other half of it: the option types are still parsed at runtime by
-`schema::load` (once, behind a `LazyLock`), not generated. Doing that is the next
-increment, and it is the same shape as the element work: generate the `OptionDef` table,
-keep the loader for the tests that exercise its diagnostics.
+That is the whole of extreme.md §3.2's "start with the two KDL files merged" step. The
+other half — one schema compiled to code — followed in increment 5: `schema::load` is now
+the build-time authority and the tests' oracle, not the runtime path. `embedded_schema()`
+returns the generated table from a `LazyLock` (built once, on first use) and
+`espforge-options/build.rs` is a transcriber only: it has no rules of its own, so the
+schema's meaning still lives in one place.
+
+Two generated files in this crate's world, one gate for both: CI's `git diff
+--exit-code` list now names `generated_options.rs` next to the three files
+`espforge-bindings` writes.
 
 ## 6. Gate evidence
 
-- `cargo test --workspace`: green, **287 passed, 1 ignored**.
+- `cargo test --workspace`: green, **288 passed, 1 ignored**.
 - The compile gate (`cargo test -p espforge --test golden_projects -- --ignored`): green.
 - `espf` CLI transcripts, the diagnostics corpus and the golden projects: unchanged.
   Nothing user-visible moved.
@@ -142,12 +155,11 @@ keep the loader for the tests that exercise its diagnostics.
 
 ## 7. Next increments, in order
 
-1. **Generate the option types** from the merged schema (the table `embedded_schema()`
-   returns today), which retires the runtime parse of the option half. The loader stays
-   for its diagnostics tests; build-time validation should reuse it.
-2. **Catalog data at build time** instead of parsing the element half at runtime, once the
-   schema is stable enough that regenerating on every build is cheap.
-3. Then Phase 2 (typed IR), which deletes the wrapper structs, the `*Draft`s and the
+1. **Catalog data at build time** instead of parsing the element half at runtime, once the
+   schema is stable enough that regenerating on every build is cheap. The option half's
+   pattern carries over: `catalog::load` stays the oracle, `embedded_catalog()` returns
+   the generated table, and a test asserts the two agree.
+2. Then Phase 2 (typed IR), which deletes the wrapper structs, the `*Draft`s and the
    parallel `Vec`s in `Hardware`.
 
 Open drift the earlier increments made visible, for a decision before Phase 2:

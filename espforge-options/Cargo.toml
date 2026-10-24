@@ -3,6 +3,10 @@ name = "espforge-options"
 version = "0.1.0"
 edition = "2024"
 
+[build-dependencies]
+# Reads `espf.schema.kdl` to transcribe the option half into Rust.
+kdl = "6"
+
 [dependencies]
 espf = { path = "../espf" }
 espforge-model = { path = "../espforge-model" }

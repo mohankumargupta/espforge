@@ -9,6 +9,7 @@
 //! * [`section`] - 2.5: `core_from_section`, replacing `parse_meta`
 
 pub mod catalog;
+mod generated_options;
 pub mod chips;
 pub mod resolve;
 pub mod schema;

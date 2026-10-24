@@ -25,6 +25,7 @@ jobs:
           espforge-bindings/src/components/generated_vocab.rs
           espforge-bindings/src/components/generated_elements.rs
           espforge-bindings/src/drivers/generated_registry.rs
+          espforge-options/src/generated_options.rs
 
   generated-projects:
     name: Generated projects compile
