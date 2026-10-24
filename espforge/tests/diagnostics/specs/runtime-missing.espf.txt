@@ -1,0 +1,11 @@
+# espforge
+  <project name="bad" />
+  <chip type="esp32c3" />
+
+# peripherals
+
+# components
+
+# devices
+
+# services

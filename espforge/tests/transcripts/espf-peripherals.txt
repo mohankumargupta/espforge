@@ -1,0 +1,8 @@
+$ espforge espf peripherals
+exit: 0
+--- stdout ---
+espforge espf peripherals gpio	A single GPIO pin
+espforge espf peripherals i2c	I2C bus controller
+espforge espf peripherals spi	SPI bus controller
+espforge espf peripherals uart	UART port
+--- stderr ---

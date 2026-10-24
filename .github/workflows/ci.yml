@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Tests (no hardware, no network)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imc-unknown-none-elf,riscv32imac-unknown-none-elf,riscv32imafc-unknown-none-elf
+      - uses: Swatinem/rust-cache@v2
+      # Includes the CLI transcripts, the diagnostics corpus and the golden
+      # generated projects (byte comparison only, no cargo on them).
+      - run: cargo test --workspace
+
+  generated-projects:
+    name: Generated projects compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imc-unknown-none-elf
+      # The compile test points CARGO_TARGET_DIR at `target/golden-check`, so
+      # the default cache path covers it.
+      - uses: Swatinem/rust-cache@v2
+      # The invariant this repo lacked: a change to the emitter is compiled
+      # here, not discovered by a user running `espforge build`.
+      - run: cargo test -p espforge --test golden_projects -- --ignored

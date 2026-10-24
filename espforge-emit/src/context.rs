@@ -358,8 +358,14 @@ mod tests {
         assert_eq!(get(&c, "red_led.name").as_str(), Some("red_led"));
         let env = minijinja::Environment::new();
         assert_eq!(env.render_str("{{ red_led.pin }}", &c).unwrap(), "18");
+        // Templates never print a bool directly; they branch on it (see
+        // `generated.rs`), so pin the branch rather than minijinja's spelling.
         assert_eq!(
-            env.render_str("{{ red_led.active_low }}", &c).unwrap(),
+            env.render_str(
+                "{% if red_led.active_low %}true{% else %}false{% endif %}",
+                &c
+            )
+            .unwrap(),
             "false"
         );
     }
@@ -424,7 +430,9 @@ mod tests {
     fn hyphenated_options_are_reachable_by_index() {
         let c = ctx(Runtime::Blocking, RuntimeSource::Published);
         let env = minijinja::Environment::new();
-        let out = env.render_str("{{ opt['probe-rs'] }}", &c).unwrap();
+        let out = env
+            .render_str("{% if opt['probe-rs'] %}true{% else %}false{% endif %}", &c)
+            .unwrap();
         assert_eq!(out, "false");
     }
 

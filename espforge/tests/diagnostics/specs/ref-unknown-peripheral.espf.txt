@@ -1,0 +1,13 @@
+# espforge
+  <project name="bad" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+
+# components
+  <led id="red_led" gpio="$nope" />
+
+# devices
+
+# services

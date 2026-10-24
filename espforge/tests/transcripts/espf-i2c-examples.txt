@@ -1,0 +1,12 @@
+$ espforge espf peripherals i2c examples
+exit: 0
+--- stdout ---
+<i2c id="i2c0" sda="6" scl="7" />                     // minimal
+
+<i2c id="i2c0" sda="6" scl="7" frequency="400kHz" />  // with a bus speed
+
+# peripherals
+  <i2c id="i2c0" sda="6" scl="7" />                   // with a component
+# components
+  <i2c_component id="temp_bus" i2c="$i2c0" address="0x48" />
+--- stderr ---

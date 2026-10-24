@@ -1,0 +1,12 @@
+$ espforge check conflict-i2c-vs-gpio.espf.txt
+exit: 0
+--- stdout ---
+✓ conflict-i2c-vs-gpio.espf.txt is valid
+--- stderr ---
+error: pin conflict
+ --> conflict-i2c-vs-gpio.espf.txt:7:3
+  |
+7 |   <gpio id="g" pin="4" />
+  |   ^^^^^ <gpio id="g"> and <i2c id="i2c0"> both use GPIO4
+
+❌ Found 1 problem(s) in 'conflict-i2c-vs-gpio.espf.txt'; fix them and re-run.

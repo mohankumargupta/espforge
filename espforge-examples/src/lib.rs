@@ -241,9 +241,15 @@ mod tests {
         assert!(!categories.is_empty());
         let basics = &categories[0];
         assert_eq!(basics.name, "01.Basics");
-        assert_eq!(basics.examples[0].name, "helloworld");
-        assert_eq!(basics.examples[0].title.as_deref(), Some("HELLO WORLD EXAMPLE"));
-        assert!(basics.examples[0].content.contains("# espforge"));
+        // Examples are documented as sorted by name, so `blink` comes first.
+        assert!(basics.examples.windows(2).all(|w| w[0].name <= w[1].name));
+        let helloworld = basics
+            .examples
+            .iter()
+            .find(|e| e.name == "helloworld")
+            .expect("01.Basics/helloworld must be embedded");
+        assert_eq!(helloworld.title.as_deref(), Some("HELLO WORLD EXAMPLE"));
+        assert!(helloworld.content.contains("# espforge"));
     }
 
     #[test]

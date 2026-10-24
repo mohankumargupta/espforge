@@ -1,0 +1,12 @@
+$ espforge check conflict-uart-vs-i2c.espf.txt
+exit: 0
+--- stdout ---
+✓ conflict-uart-vs-i2c.espf.txt is valid
+--- stderr ---
+error: pin conflict
+ --> conflict-uart-vs-i2c.espf.txt:8:3
+  |
+8 |   <i2c id="i2c0" sda="20" scl="5" />
+  |   ^^^^ <i2c id="i2c0"> and <uart id="uart1"> both use GPIO20
+
+❌ Found 1 problem(s) in 'conflict-uart-vs-i2c.espf.txt'; fix them and re-run.

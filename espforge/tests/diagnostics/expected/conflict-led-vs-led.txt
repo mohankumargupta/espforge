@@ -1,0 +1,12 @@
+$ espforge check conflict-led-vs-led.espf.txt
+exit: 0
+--- stdout ---
+✓ conflict-led-vs-led.espf.txt is valid
+--- stderr ---
+error: pin already used
+  --> conflict-led-vs-led.espf.txt:11:3
+   |
+11 |   <led id="other" gpio="$g" />
+   |   ^^^^ <led id="red_led"> and <led id="other"> both use GPIO18
+
+❌ Found 1 problem(s) in 'conflict-led-vs-led.espf.txt'; fix them and re-run.

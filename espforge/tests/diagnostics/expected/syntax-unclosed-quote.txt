@@ -1,0 +1,11 @@
+$ espforge check syntax-unclosed-quote.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: malformed node line
+ --> syntax-unclosed-quote.espf.txt:5:3
+  |
+5 |   <gpio id="gpio4" pin="4 />
+  |   ^ expected a self-closing tag like <tag attr="v" /> that fills a whole line (trailing `// comment` is allowed)
+
+❌ Found 1 problem(s) in 'syntax-unclosed-quote.espf.txt'; fix them and re-run.

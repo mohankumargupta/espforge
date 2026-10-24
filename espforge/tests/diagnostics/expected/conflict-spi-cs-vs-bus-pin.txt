@@ -1,0 +1,12 @@
+$ espforge check conflict-spi-cs-vs-bus-pin.espf.txt
+exit: 0
+--- stdout ---
+✓ conflict-spi-cs-vs-bus-pin.espf.txt is valid
+--- stderr ---
+error: pin conflict
+  --> conflict-spi-cs-vs-bus-pin.espf.txt:10:3
+   |
+10 |   <spi_component id="dev" spi="$spi2" mode="0" cs="6" />
+   |   ^^^^^^^^^^^^^^ <spi_component id="dev">'s cs and <spi id="spi2"> both use GPIO6
+
+❌ Found 1 problem(s) in 'conflict-spi-cs-vs-bus-pin.espf.txt'; fix them and re-run.

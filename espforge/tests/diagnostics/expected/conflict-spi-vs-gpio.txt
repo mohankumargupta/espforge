@@ -1,0 +1,12 @@
+$ espforge check conflict-spi-vs-gpio.espf.txt
+exit: 0
+--- stdout ---
+✓ conflict-spi-vs-gpio.espf.txt is valid
+--- stderr ---
+error: pin conflict
+ --> conflict-spi-vs-gpio.espf.txt:7:3
+  |
+7 |   <gpio id="g" pin="2" />
+  |   ^^^^^ <gpio id="g"> and <spi id="spi2"> both use GPIO2
+
+❌ Found 1 problem(s) in 'conflict-spi-vs-gpio.espf.txt'; fix them and re-run.

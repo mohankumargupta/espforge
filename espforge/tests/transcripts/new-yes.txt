@@ -1,0 +1,9 @@
+$ espforge new --yes --chip esp32c3 --runtime blocking myproj
+exit: 0
+--- stdout ---
+build: wrote 'myproj' to myproj/build
+  next: cd myproj/build && cargo build
+new: created myproj/myproj.espf
+  equivalent: espforge build myproj/myproj.espf --out myproj/build
+  next: edit src/app.rs, then cd myproj/build && cargo build
+--- stderr ---

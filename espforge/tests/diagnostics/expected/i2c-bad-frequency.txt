@@ -1,0 +1,12 @@
+$ espforge check i2c-bad-frequency.espf.txt
+exit: 0
+--- stdout ---
+✓ i2c-bad-frequency.espf.txt is valid
+--- stderr ---
+error: invalid i2c frequency
+ --> i2c-bad-frequency.espf.txt:7:3
+  |
+7 |   <i2c id="i2c0" sda="4" scl="5" frequency="fast" />
+  |   ^^^^ <i2c id="i2c0"> frequency="fast" is not a frequency: use e.g. `100kHz`
+
+❌ Found 1 problem(s) in 'i2c-bad-frequency.espf.txt'; fix them and re-run.

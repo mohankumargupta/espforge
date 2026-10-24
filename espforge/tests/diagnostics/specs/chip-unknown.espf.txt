@@ -1,0 +1,12 @@
+# espforge
+  <project name="bad" />
+  <chip type="esp99" />
+  <runtime type="blocking" />
+
+# peripherals
+
+# components
+
+# devices
+
+# services

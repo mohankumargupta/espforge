@@ -1,0 +1,9 @@
+$ espforge nosuchcmd
+exit: 2
+--- stdout ---
+--- stderr ---
+error: unrecognized subcommand 'nosuchcmd'
+
+Usage: espforge [OPTIONS] [COMMAND]
+
+For more information, try '--help'.

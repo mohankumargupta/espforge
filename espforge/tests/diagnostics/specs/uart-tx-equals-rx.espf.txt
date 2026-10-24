@@ -1,0 +1,13 @@
+# espforge
+  <project name="bad" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <uart id="uart1" tx="20" rx="20" />
+
+# components
+
+# devices
+
+# services

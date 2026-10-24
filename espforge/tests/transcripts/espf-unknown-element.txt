@@ -1,0 +1,14 @@
+$ espforge espf nosuch
+exit: 1
+--- stdout ---
+--- stderr ---
+❌ no element or section named `nosuch`
+
+sections:
+    espforge
+    peripherals
+    components
+    devices
+    services
+    overview
+

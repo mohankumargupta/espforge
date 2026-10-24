@@ -1,0 +1,5 @@
+$ espforge examples get 99.Nope/nope --out hw
+exit: 1
+--- stdout ---
+--- stderr ---
+❌ no example at '99.Nope/nope'; run `espforge examples list` to see what is available

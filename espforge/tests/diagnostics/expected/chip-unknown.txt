@@ -1,0 +1,11 @@
+$ espforge check chip-unknown.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: unknown chip
+ --> chip-unknown.espf.txt:3:15
+  |
+3 |   <chip type="esp99" />
+  |               ^^^^^ "esp99" is not a supported chip (expected one of: esp32, esp32c2, esp32c3, esp32c5, esp32c6, esp32c61, esp32h2, esp32p4, esp32s2, esp32s3, esp32s31)
+
+❌ Found 1 problem(s) in 'chip-unknown.espf.txt'; fix them and re-run.
