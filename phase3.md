@@ -1,10 +1,11 @@
 # Phase 3: AST codegen (extreme.md §3.5, §7)
 
-**Status:** planned, not started (2026-10-24). Phase 2 is complete (`phase2.md`):
-`check` and `build` lower into a `Board`, diagnostics carry stable codes, and
-`check --format json` returns the board. The emitter still renders minijinja
-templates from the `Hardware` projection; this phase replaces that with typed
-backends and deletes the template tree.
+**Status:** in progress. Increment 0 landed on 2026-10-24; increments 1–5 are
+not started. Phase 2 is complete (`phase2.md`): `check` and `build` lower into
+a `Board`, diagnostics carry stable codes, and `check --format json` returns
+the board. The emitter still renders minijinja templates from the `Hardware`
+projection; this phase replaces that with typed backends and deletes the
+template tree.
 
 This file is the plan and, once work starts, the progress log. §2 settles the
 decisions that are expensive to change later (Appendix E Q1 is the first one),
@@ -25,6 +26,10 @@ passed, 1 ignored).
 | `metadata.toml` | 12 conditional files, 7 ownership globs | 1 file |
 | Golden projects | 16 cells, 13–15 files each (chip assets vary) | 216 files, 6,108 lines |
 | Compile gate | RISC-V blocking examples + one embassy fixture | 6 cells |
+
+Increment 0 moved these numbers: 24 golden cells (336 files, 9,902 lines) and
+12 compile cells. The table above stays the Phase 2 close baseline that this
+phase is measured against.
 | `Board` | the typed IR; `Board::hardware()` projects to the emitter | `espforge-model` |
 | Overlays | example `diagram.json` rendered through the same minijinja context | 12 examples |
 
@@ -58,7 +63,8 @@ parseable by construction, not that it preserves the template's hand-tuned
 whitespace. Consequences, all deliberate:
 
 - The four Rust files (`src/generated.rs`, `src/lib.rs`, `src/bin/main.rs`,
-  `build.rs`) change shape once, when their backend flips.
+  `build.rs`) change shape once, when their backend flips; the embassy-only
+  `signal!` macro and its `embassy-sync` dependency move into the emitter.
 - Golden projects are regenerated as reviewed formatting-only diffs, with the
   semantic comparator in D6 proving no token changed.
 - Users' generated projects are unaffected at runtime; only their on-disk
@@ -137,13 +143,17 @@ at each flip; the comparator is what makes that diff reviewable.
 `04.Communication/i2c_scanner`, `i2c_example`, `spi_example_async`,
 `uart_example_async` and `examples/example.espf.txt` still fail validation, so
 "every example" cannot yet be true. Increment 0 resolves that corpus debt as a
-separate reviewed change (make the specs complete, or make `address` optional
-for a bus-only component — the spec owners decide which). The compile matrix
-then grows to every generating example on `esp32c3` blocking, plus the embassy
-fixture; Xtensa cells require espup in CI and stay explicitly listed rather
-than silently skipped. Async examples can only compile with an async `app.rs`;
-their existing app files are blocking, so the matrix records that pairing
-instead of forcing an invalid runtime.
+separate reviewed change: `address` is optional on `<i2c_component>` (a
+bus-only scanner has no one address), and the missing `# services` sections
+are filled in. The Phase 2 list was incomplete — `02.Digital/button_async`,
+`04.Communication/i2c_example_async`, `06.Displays/ili9341_example` and
+`06.Displays/ssd1306_example` had the same section gap. The display examples
+are still blocked on device lowering (not a spec problem); everything else
+validates. The compile matrix then grows to every generating example on
+`esp32c3` at the runtime its `app.rs` targets, plus the embassy fixture; Xtensa
+cells require espup in CI and stay explicitly listed rather than silently
+skipped. Async examples need the generated `signal!` macro and `embassy-sync`,
+which increment 0 adds.
 
 **D8 — Dependencies.**
 Add to `espforge-emit`: `syn` (parsing + printing), `quote`, `prettyplease`,
@@ -176,7 +186,7 @@ they are formatting-only.
 
 | # | Increment | Status |
 |---|---|---|
-| 0 | Resolve the Phase 2 D7 examples, add them to goldens/compile matrix | not started |
+| 0 | Resolve the Phase 2 D7 examples, add them to goldens/compile matrix | **landed 2026-10-24** |
 | 1 | Seams: `FilePlan`, codegen dispatch, semantic comparator, dual-run | not started |
 | 2 | Rust backend: `generated.rs`, `lib.rs`, `main.rs`, `build.rs` | not started |
 | 3 | Data backends: Cargo/TOML/JSON/optional files | not started |
@@ -185,17 +195,41 @@ they are formatting-only.
 
 ### Increment 0 — the corpus prerequisite
 
-Fix the four failing specs and the root example, or record a reviewed decision
-that an example is retired. Add every embedded example that now validates to
-`MATRIX` (byte goldens) and to the compile matrix where its `app.rs` matches
-the runtime. Gate: every embedded example passes `check`, every new golden is
-reviewed, and `cargo test --workspace` is green. No codegen code yet.
+**Landed 2026-10-24.** The corpus debt was both deeper and shallower than the
+Phase 2 list: two examples needed the schema fix, seven needed a `# services`
+section (three of them already on the D7 list), and the async apps needed a
+macro the template never defines.
+
+- `<i2c_component address>` is now optional in `espf.schema.kdl` (the TODO at
+  the entry said the examples omit it). The generated `Attrs` field is
+  `Option<Spanned<u8>>`, `I2cComponent::address` is `Option<u8>`, and a missing
+  address is a valid bus-level component. A bad address still keeps its exact
+  wording.
+- Added the missing `# services` sections to `i2c_example`, `spi_example_async`,
+  `uart_example_async`, `button_async`, `i2c_example_async`, `ili9341_example`
+  and `ssd1306_example`. The display examples now reach their real blockers
+  instead of a missing section: `ili9341` is refused because `# devices` is not
+  lowered yet, and `ssd1306` has no registered driver engine.
+- Added the `signal!` macro to the generated `src/lib.rs` (embassy only) and
+  `embassy-sync = "0.8.0"` to the generated `Cargo.toml`; the async button and
+  UART apps already used `crate::signal!`, but no build had ever expanded it.
+- Added eight golden cells (the four fixed examples × `esp32c3`/`esp32s3` at
+  their native runtime): 24 cells, 336 files. Added six compile cells: the two
+  I2C examples blocking and all four async examples on embassy, all on
+  `esp32c3`.
+
+Gate: 12 of 14 embedded examples pass `check`; the two display examples are
+blocked on device support, not on their specs. `generated_projects_compile` passes all
+12 cells (34.7 s). Workspace **308 passed, 1 ignored, 0 failed**; one new
+hardware test covers the address-less component. The root
+`examples/example.espf.txt` remains documentation, not a project, and is not in
+the embedded catalog.
 
 ### Increment 1 — seams and the oracle
 
 Add `codegen/plan.rs` (`FilePlan` built from resolved options and ownership),
 `codegen/mod.rs` with a `Backend` dispatch, and `codegen/equiv.rs`
-(`same_rust`, `same_toml`, `same_json`). Wire a dual-run test that, for all 16
+(`same_rust`, `same_toml`, `same_json`). Wire a dual-run test that, for all 24
 golden cells, renders the template tree and the codegen tree and compares them
 semantically. No production flip.
 
@@ -206,15 +240,15 @@ shows it rejects a changed token (so it is not vacuously true).
 
 Emit the four Rust files from `Board` with `quote!`, print with
 `prettyplease`, and include the runtime-specific main (blocking vs embassy),
-the wifi heap allocator, the SPI bus hoisting, the `SAFETY` comments and the
-Xtensa `build.rs` branch. Flip `generate_with_hardware` to the new backend for
-those four paths. Regenerate the affected goldens as formatting-only diffs
-proven by `same_rust`.
+the wifi heap allocator, the SPI bus hoisting, the embassy-only `signal!`
+macro, the `SAFETY` comments and the Xtensa `build.rs` branch. Flip
+`generate_with_hardware` to the new backend for those four paths. Regenerate
+the affected goldens as formatting-only diffs proven by `same_rust`.
 
 Rust comments are handled per D9: insert the header and safety anchors, then
 re-parse the printed file before returning it.
 
-Gate: `same_rust` passes for all 16 cells (comments are compared as a separate
+Gate: `same_rust` passes for all 24 cells (comments are compared as a separate
 normalized stream, since `syn` drops them); every anchor is found exactly once;
 workspace green; compile gate green for the 6 existing cells.
 
@@ -254,7 +288,7 @@ review it against the dual-run proof, and keep `same_rust` (or a saved
 normalized copy) as the review artifact. Expand the compile matrix per D7.
 Re-measure §5, fill §7, and walk §6.
 
-Gate: the final goldens compile (6+ cells), generated Rust parses for every
+Gate: the final goldens compile (12+ cells), generated Rust parses for every
 cell, drift tests pass, and the close metrics are recorded.
 
 ## 4. What survives
@@ -272,8 +306,8 @@ cell, drift tests pass, and the close metrics are recorded.
 |---|---|---|
 | `cargo test --workspace` | 307 passed, 1 ignored | green throughout; +dual-run/unit tests |
 | `espforge-emit` + template lines | 3,037 (2,374 + 663) | roughly flat; the win is invariants, not LOC |
-| Golden cells | 16 | all generating examples × pinned chips/runtimes |
-| Compile cells | 6 | every generating blocking example on esp32c3 + embassy fixture; Xtensa in CI |
+| Golden cells | 16 (24 after increment 0) | every non-device example × pinned chips/runtimes |
+| Compile cells | 6 (12 after increment 0) | every non-device example on esp32c3 at its native runtime + embassy fixture; Xtensa in CI |
 | Template engine | minijinja | none (or overlays only, if D3's fallback is chosen) |
 | `metadata.toml` | 12 conditions | Rust `FilePlan` |
 | Output correctness | substring and no-`\n\n\n` assertions | parse by construction; semantic dual-run |
@@ -290,10 +324,10 @@ Restated from extreme.md §7 with the decisions above:
 1. **Golden projects identical modulo formatting.** Every cell's Rust parses
    and unparses to the same program; TOML/JSON parse to the same values; plain
    files are byte-identical. The canonical bytes are pinned at close.
-2. **`cargo check` green for the supported compile matrix.** Every generating
-   blocking example on `esp32c3`, plus the embassy fixture; Xtensa cells run in
-   a CI job with espup or are listed as an explicit, reviewed exclusion. No
-   silent skips.
+2. **`cargo check` green for the supported compile matrix.** Every non-device
+   example on `esp32c3` at the runtime its `app.rs` targets, plus the embassy
+   fixture; Xtensa cells run in a CI job with espup or are listed as an
+   explicit, reviewed exclusion. No silent skips.
 3. **The template stack is gone.** No minijinja/`include_dir`/`TEMPLATE_DIR`/
    `metadata.toml`/`.template/`; no `Hardware` projection; `FilePlan` is Rust.
 4. **Drift behaves.** An unedited project is regenerated across the formatting
@@ -315,6 +349,7 @@ cargo test -p espforge --test golden_projects -- --ignored
 | Date | Increment | Evidence |
 |---|---|---|
 | 2026-10-24 | — | Phase 3 planned; Phase 2 closed. No production code yet. Baseline above. D2 checked with a throwaway `changed_output_overwrites_an_unedited_file` test (passed, file removed); the permanent regression test lands in increment 1. |
+| 2026-10-24 | 0 | Made `<i2c_component address>` optional (schema, generated attrs, `I2cComponent::address: Option<u8>`), filled in seven missing `# services` sections, and added the embassy-only `signal!` macro + `embassy-sync`. Goldens now 24 cells / 336 files / 9,902 lines; compile matrix 12 cells, all green (34.7 s). 12 of 14 examples validate; both display examples remain blocked on unsupported `# devices` (one also lacks an `ssd1306` driver registration). Workspace **308 passed, 1 ignored, 0 failed**. |
 
 ## 8. Open questions carried in
 

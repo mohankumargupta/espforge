@@ -20,3 +20,5 @@ toggles an LED each time the button is pressed.
   <button id="button" gpio="$gpio9" pull_up="true" />
 
 # devices
+
+# services

@@ -510,5 +510,8 @@ cargo test -p espforge --test golden_projects -- --ignored   # compile gate
   `examples/example.espf.txt` still fail validation, so "every example" in §6.2 means
   every example that validates. Fixing the specs or making `address` optional for a
   bus-only component is a separate reviewed corpus change, not a Phase 2 patch.
+  Phase 3's increment 0 has since landed that change (`phase3.md`): `address` is
+  optional, the missing sections are filled in, and the display examples remain
+  blocked on device lowering.
 - **Phase 1 leftovers:** `kind="freq"` parsing moves in increment 3; `range=` is consumed
   by codegen but not rendered in docs, which remains a docs-surface question.

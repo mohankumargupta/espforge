@@ -15,3 +15,5 @@ SSD1306 OLED EXAMPLE
 
 # devices
   <ssd1306 id="oled" component="$i2c_master" address="0x3C" width="128" height="64" />
+
+# services

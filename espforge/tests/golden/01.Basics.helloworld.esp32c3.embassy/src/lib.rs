@@ -31,6 +31,17 @@ macro_rules! service {
     };
 }
 
+/// Define a cross-task signal. Usage: `crate::signal!(BUTTON_PRESSED)`
+#[macro_export]
+macro_rules! signal {
+    ($name:ident) => {
+        static $name: embassy_sync::signal::Signal<
+            embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+            (),
+        > = embassy_sync::signal::Signal::new();
+    };
+}
+
 pub mod app;
 
 pub use generated::{Components, Devices, PeripheralRegistry, Services};

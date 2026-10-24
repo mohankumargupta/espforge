@@ -19,3 +19,5 @@ ILI9341 TFT EXAMPLE
 # devices
   <ili9341 id="display" spi_component="$main_spi"
            dc="$pin_dc" rst="$pin_rst" cs="$pin_cs" />
+
+# services

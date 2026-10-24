@@ -30,6 +30,19 @@ macro_rules! service {
         &$ctx.services.$name
     };
 }
+{% if embassy %}
+
+/// Define a cross-task signal. Usage: `crate::signal!(BUTTON_PRESSED)`
+#[macro_export]
+macro_rules! signal {
+    ($name:ident) => {
+        static $name: embassy_sync::signal::Signal<
+            embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+            (),
+        > = embassy_sync::signal::Signal::new();
+    };
+}
+{% endif %}
 
 pub mod app;
 

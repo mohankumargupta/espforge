@@ -44,35 +44,47 @@ const MATRIX: &[Cell] = &[
     Cell::new("02.Digital/button", "esp32c3", "embassy"),
     Cell::new("02.Digital/button", "esp32s3", "blocking"),
     Cell::new("02.Digital/button", "esp32s3", "embassy"),
-    // Bus coverage is blocking-only because the rest of the bus corpus does
-    // not generate today: `i2c_scanner` has no `address`, and `i2c_example`,
-    // `spi_example_async` and `uart_example_async` have no `# services`
-    // section. Those are pre-existing corpus defects, recorded in
-    // `phase0-baseline.md`; fixing the corpus is a separate decision.
+    // Bus coverage. The async examples pin the embassy runtime; the
+    // blocking ones pin `blocking`, so the goldens exercise both mains.
     Cell::new("04.Communication/spi_example", "esp32c3", "blocking"),
     Cell::new("04.Communication/spi_example", "esp32s3", "blocking"),
     Cell::new("04.Communication/uart_example", "esp32c3", "blocking"),
     Cell::new("04.Communication/uart_example", "esp32s3", "blocking"),
+    Cell::new("04.Communication/i2c_example", "esp32c3", "blocking"),
+    Cell::new("04.Communication/i2c_example", "esp32s3", "blocking"),
+    Cell::new("04.Communication/i2c_scanner", "esp32c3", "blocking"),
+    Cell::new("04.Communication/i2c_scanner", "esp32s3", "blocking"),
+    Cell::new("04.Communication/spi_example_async", "esp32c3", "embassy"),
+    Cell::new("04.Communication/spi_example_async", "esp32s3", "embassy"),
+    Cell::new("04.Communication/uart_example_async", "esp32c3", "embassy"),
+    Cell::new("04.Communication/uart_example_async", "esp32s3", "embassy"),
 ];
 
-/// Cells compiled by `generated_projects_compile`: every example, both
-/// runtimes, on a RISC-V chip.
+/// Cells compiled by `generated_projects_compile`: every example whose
+/// `app.rs` matches its runtime, on a RISC-V chip.
 ///
 /// The esp32s3 cells are deliberately not here: they need the `esp` Xtensa
 /// toolchain from espup, which a plain rustup install does not provide. They
 /// stay covered by the byte-exact goldens above; add them to this list once
 /// the CI job installs espup.
 ///
-/// Every corpus example's `app.rs` is written against the blocking runtime, so
-/// none of them compiles when `--runtime embassy` is forced on it (its async
-/// counterparts do not generate yet — see `MATRIX`). Embassy compilation is
-/// covered by a local fixture instead, which has an async `app.rs`.
+/// A blocking example cannot be forced onto embassy (its `app.rs` is
+/// blocking), and an async example cannot be forced onto blocking. The matrix
+/// pairs each example with the runtime its app is written for; the embassy
+/// fixture additionally covers the async path for a project with no example
+/// app.
 const COMPILE_MATRIX: &[Cell] = &[
     Cell::new("01.Basics/helloworld", "esp32c3", "blocking"),
     Cell::new("01.Basics/blink", "esp32c3", "blocking"),
     Cell::new("02.Digital/button", "esp32c3", "blocking"),
     Cell::new("04.Communication/spi_example", "esp32c3", "blocking"),
     Cell::new("04.Communication/uart_example", "esp32c3", "blocking"),
+    Cell::new("04.Communication/i2c_example", "esp32c3", "blocking"),
+    Cell::new("04.Communication/i2c_scanner", "esp32c3", "blocking"),
+    Cell::new("02.Digital/button_async", "esp32c3", "embassy"),
+    Cell::new("04.Communication/i2c_example_async", "esp32c3", "embassy"),
+    Cell::new("04.Communication/spi_example_async", "esp32c3", "embassy"),
+    Cell::new("04.Communication/uart_example_async", "esp32c3", "embassy"),
     Cell::fixture("embassy_app", "esp32c3", "embassy"),
 ];
 

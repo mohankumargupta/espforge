@@ -1180,6 +1180,16 @@ mod tests {
     }
 
     #[test]
+    fn an_i2c_component_may_omit_its_address() {
+        let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <i2c id=\"i2c0\" sda=\"4\" scl=\"5\" />\n# components\n  <i2c_component id=\"scanner\" i2c=\"$i2c0\" />\n# devices\n# services\n";
+        let board = build_src(src).unwrap();
+        let Component::I2c(component) = &board.components[0] else {
+            panic!("expected an i2c component");
+        };
+        assert_eq!(component.address, None);
+    }
+
+    #[test]
     fn a_spi_cs_naming_an_undefined_gpio_is_refused() {
         let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" />\n# components\n  <spi_component id=\"d\" spi=\"$spi2\" cs=\"$gpioX\" />\n# devices\n# services\n";
         let err = build_src(src).unwrap_err();
