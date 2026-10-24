@@ -1,9 +1,11 @@
-//! `annotate-snippets`-backed diagnostics for ESPF files.
+//! Span-aware ESPF errors, and the migration adapter for rendering them.
 //!
 //! Every checkable stage of the pipeline (parser, meta validation, `$`
 //! dependency resolution) reports problems as one [`EspfError`] carrying a
-//! byte-offset span into the original source plus a title and label. This
-//! module renders each error as its own rustc-style snippet group:
+//! byte-offset span into the original source plus a title and label. Rendering
+//! moved to `espforge_diagnostics::to_human` in Phase 2 increment 1; this
+//! module keeps the constructors, the line helpers and [`render_errors`] as a
+//! thin adapter, so existing call sites migrate in increment 5:
 //!
 //! ```text
 //! error: unknown runtime "fome"
@@ -14,9 +16,10 @@
 //! ```
 //!
 //! Colors are only emitted when stderr is a terminal; piped or captured
-//! output stays plain so it can be grepped or redirected safely.
+//! output stays plain so it can be grepped or redirected safely. That decision
+//! now lives in the renderer.
 
-use annotate_snippets::{AnnotationKind, Group, Level, Renderer, Snippet};
+use espforge_diagnostics::Diagnostic;
 use std::ops::Range;
 
 /// The underlying cause of a parser-junk line.
@@ -101,6 +104,13 @@ impl EspfError {
             span: start..start + attr.key.len(),
         }
     }
+
+    /// This error in the one diagnostic model, for rendering. The code stays
+    /// unassigned until Phase 2 increment 5 moves each message to a
+    /// `Diagnostic` constructor.
+    pub fn to_diagnostic(&self) -> Diagnostic {
+        Diagnostic::error(self.span.clone(), self.title.clone(), self.label.clone())
+    }
 }
 
 /// Byte span of the offending line's node, for errors that have no better
@@ -118,16 +128,6 @@ fn line_start_offsets(src: &str) -> Vec<usize> {
                 .filter_map(|(i, c)| (c == '\n').then_some(i + 1)),
         )
         .collect()
-}
-
-/// Byte offsets of the line that contains `offset`, plus its 1-based number.
-fn line_bounds(src: &str, line_starts: &[usize], offset: usize) -> (usize, usize, usize) {
-    let idx = line_starts.partition_point(|&start| start <= offset) - 1;
-    let line_start = line_starts[idx];
-    let line_end = src[line_start..]
-        .find('\n')
-        .map_or(src.len(), |i| line_start + i);
-    (line_start, line_end, idx + 1)
 }
 
 /// Line number (1-based) of a byte offset in `src`.
@@ -162,55 +162,12 @@ pub fn junk_errors(junk: &[JunkSpan]) -> Vec<EspfError> {
         .collect()
 }
 
-/// Output renderer; styled (colored) only when stderr is a real terminal.
-fn renderer() -> Renderer {
-    use std::io::IsTerminal;
-    let base = if std::io::stderr().is_terminal() {
-        Renderer::styled()
-    } else {
-        Renderer::plain()
-    };
-    base.term_width(100)
-}
-
-/// Render each error as its own snippet group (no shared highlighting between
-/// unrelated errors, matching the rustc one-error-one-block idiom).
+/// Render each error as its own snippet group through the one diagnostics
+/// renderer. `EspfError` is the migration shape: Phase 2 increment 5 replaces
+/// it with `Diagnostic` constructors at each call site.
 pub fn render_errors(file_path: &str, src: &str, errors: &[EspfError]) -> String {
-    let mut out = String::new();
-    let starts = line_start_offsets(src);
-
-    for e in errors {
-        let (line_start_idx, line_end, line_number) = line_bounds(src, &starts, e.span.start);
-        // Show the offending line, folding everything else away.
-        let view = src[line_start_idx..line_end].trim_end();
-        let col_start = e.span.start.saturating_sub(line_start_idx).min(view.len());
-        let col_end = e
-            .span
-            .end
-            .saturating_sub(line_start_idx)
-            .max(col_start + 1)
-            .min(view.len());
-
-        let title = Level::ERROR.primary_title(e.title.clone());
-        let group = Group::with_title(title).element(
-            Snippet::source(view)
-                .line_start(line_number)
-                .path(file_path)
-                .fold(true)
-                .annotation(
-                    AnnotationKind::Primary
-                        .span(col_start..col_end)
-                        .label(e.label.clone())
-                        .highlight_source(true),
-                ),
-        );
-        let rendered = renderer().render(&[group]);
-        out.push_str(&rendered);
-        if !out.ends_with('\n') {
-            out.push('\n');
-        }
-    }
-    out
+    let diagnostics: Vec<Diagnostic> = errors.iter().map(EspfError::to_diagnostic).collect();
+    espforge_diagnostics::to_human(file_path, src, &diagnostics)
 }
 
 #[cfg(test)]

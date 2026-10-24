@@ -1098,7 +1098,7 @@ dependencies = [
 name = "espf"
 version = "0.1.0"
 dependencies = [
- "annotate-snippets",
+ "espforge-diagnostics",
  "winnow 0.7.15",
 ]
 
@@ -1130,6 +1130,14 @@ version = "0.1.0"
 dependencies = [
  "espf",
  "kdl",
+]
+
+[[package]]
+name = "espforge-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "annotate-snippets",
+ "serde_json",
 ]
 
 [[package]]

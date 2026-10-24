@@ -1,8 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["espf", "espforge", "espforge-bindings", "espforge-emit", "espforge-examples", "espforge-hardware", "espforge-model", "espforge-options", "espforge-runtime", "espforge-espgenerate-template"]
+members = ["espf", "espforge", "espforge-bindings", "espforge-diagnostics", "espforge-emit", "espforge-examples", "espforge-hardware", "espforge-model", "espforge-options", "espforge-runtime", "espforge-espgenerate-template"]
 
 [workspace.dependencies]
 # Use the same versions your current prototype already builds with.
 winnow = { version = "0.7", features = ["simd"] }
 annotate-snippets = "0.12"
+serde_json = "1"

@@ -9,4 +9,6 @@ path = "src/lib.rs"
 [dependencies]
 # Use the same versions your current prototype already builds with.
 winnow = { workspace = true }
-annotate-snippets = { workspace = true }
+# The one diagnostic model; `diag` is a thin adapter over it while the
+# pipeline moves to `Diagnostic` in Phase 2.
+espforge-diagnostics = { path = "../espforge-diagnostics" }
