@@ -8,10 +8,6 @@
 
 use espf::context::{ActivePeripheral, Handle, RuntimeContext};
 
-/// The attributes `resolve` requires besides `id`. Drift-checked against
-/// the `espforge espf` catalog.
-pub const REQUIRED_ATTRS: &[&str] = &["gpio"];
-
 /// A fully validated `<button>` node.
 #[derive(Debug, Clone)]
 pub struct ButtonComponent<'a> {

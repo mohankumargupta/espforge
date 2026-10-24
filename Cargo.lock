@@ -1129,6 +1129,7 @@ name = "espforge-bindings"
 version = "0.1.0"
 dependencies = [
  "espf",
+ "kdl",
 ]
 
 [[package]]

@@ -12,9 +12,11 @@ pub static TEMPLATE_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/src/template");
 /// Loaded by `espforge-options`.
 pub const OPTIONS_KDL: &str = include_str!("options.kdl");
 
-/// The element catalog (KDL v2) behind `espforge espf`, embedded at compile
-/// time. Loaded by `espforge-options::catalog`.
-pub const ELEMENTS_KDL: &str = include_str!("elements.kdl");
+/// The element schema (KDL v2): the single source of truth for the elements
+/// ESPF accepts. Embedded at compile time; loaded by `espforge-options::catalog`
+/// for `espforge espf`, and read at build time by `espforge-bindings` to
+/// generate its component vocabulary.
+pub const SCHEMA_KDL: &str = include_str!("espf.schema.kdl");
 
 /// The prose of `espforge espf overview`, embedded at compile time.
 pub const OVERVIEW_TXT: &str = include_str!("overview.txt");

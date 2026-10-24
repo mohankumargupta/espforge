@@ -8,10 +8,6 @@
 
 use espf::context::{ActivePeripheral, Handle, RuntimeContext};
 
-/// The attributes `resolve` requires besides `id`. Kept in one place so the
-/// `espforge espf` catalog can be drift-checked against the wrapper.
-pub const REQUIRED_ATTRS: &[&str] = &["gpio", "direction"];
-
 /// Valid values for the `direction` attribute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GpioDirection {

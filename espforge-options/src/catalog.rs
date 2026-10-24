@@ -1,6 +1,6 @@
 //! The element catalog behind `espforge espf` (KDL v2).
 //!
-//! Loaded from `espforge-espgenerate-template/src/elements.kdl`, embedded at
+//! Loaded from `espforge-espgenerate-template/src/espf.schema.kdl`, embedded at
 //! compile time. Types, the loader, path resolution and the lookups shared by
 //! every view live here; nothing prints — `espforge/src/render.rs` renders,
 //! `espforge/src/commands/espf.rs` does I/O.
@@ -19,7 +19,7 @@
 //! ```
 
 use espf::diag::{EspfError, render_errors};
-use espforge_espgenerate_template::{ELEMENTS_KDL, OVERVIEW_TXT};
+use espforge_espgenerate_template::{SCHEMA_KDL, OVERVIEW_TXT};
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 use std::ops::Range;
 use std::sync::LazyLock;
@@ -58,7 +58,7 @@ pub struct ElementDef {
     /// Targets of `see_also`, as `section/tag`.
     pub see_also: Vec<String>,
     pub compat: Compat,
-    /// Span of the `element` node in elements.kdl, for loader diagnostics.
+    /// Span of the `element` node in espf.schema.kdl, for loader diagnostics.
     pub span: Range<usize>,
 }
 
@@ -85,7 +85,7 @@ pub struct AttrDef {
     pub required: bool,
     pub default: Option<String>,
     pub help: Option<String>,
-    /// Span of the `attr` node in elements.kdl.
+    /// Span of the `attr` node in espf.schema.kdl.
     pub span: Range<usize>,
 }
 
@@ -269,15 +269,15 @@ pub enum ResolutionError {
 
 // -------------------------------------------------------------------- loader
 
-/// The catalog embedded from `espforge-espgenerate-template/src/elements.kdl`.
+/// The catalog embedded from `espforge-espgenerate-template/src/espf.schema.kdl`.
 /// Panics (with a rendered diagnostic) if the embedded file is invalid; the
 /// unit tests make sure it is not.
 pub fn embedded() -> &'static Catalog {
     static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
-        load(ELEMENTS_KDL).unwrap_or_else(|errs| {
+        load(SCHEMA_KDL).unwrap_or_else(|errs| {
             panic!(
-                "embedded elements.kdl is invalid:\n{}",
-                render_errors("elements.kdl", ELEMENTS_KDL, &errs)
+                "embedded espf.schema.kdl is invalid:\n{}",
+                render_errors("espf.schema.kdl", SCHEMA_KDL, &errs)
             )
         })
     });
@@ -345,7 +345,7 @@ fn prop<'a>(
     props(node, key, errors).into_iter().next()
 }
 
-/// Parse `elements.kdl` text. All problems are reported, each with the byte
+/// Parse `espf.schema.kdl` text. All problems are reported, each with the byte
 /// span of the offending KDL node or argument. Checks include reserved names,
 /// tag uniqueness across sections, and every `to=` and `see_also` target.
 pub fn load(src: &str) -> Result<Catalog, Vec<EspfError>> {
@@ -1096,7 +1096,7 @@ element "wifi" section="espforge" {
 
     #[test]
     fn the_embedded_catalog_loads_cleanly() {
-        let c = load(ELEMENTS_KDL).unwrap();
+        let c = load(SCHEMA_KDL).unwrap();
         for name in ["espforge", "peripherals", "components", "devices", "services"] {
             assert!(c.section_named(name).is_some(), "missing section {name}");
         }
@@ -1111,7 +1111,7 @@ element "wifi" section="espforge" {
     fn embedded_catalog_has_no_hardcoded_chip_list() {
         // Decision 10 of plan 8: chips, runtimes and consoles come from the
         // existing functions; the catalog only describes the element's shape.
-        let c = load(ELEMENTS_KDL).unwrap();
+        let c = load(SCHEMA_KDL).unwrap();
         let chip = c.leafs_by_tag("chip").remove(0);
         let mut is_choice = false;
         for attr in &chip.attrs {
@@ -1311,7 +1311,7 @@ element "i2c" section="peripherals" {
 
     #[test]
     fn overview_text_is_carried() {
-        let c = load(ELEMENTS_KDL).unwrap();
+        let c = load(SCHEMA_KDL).unwrap();
         assert!(c.overview.contains("ESPF"), "overview must be the real page");
     }
 
@@ -1335,7 +1335,7 @@ element "i2c" section="peripherals" {
     /// Missing `# section` headers in a fragment are fine; junk is not.
     #[test]
     fn every_example_fragment_parses_without_junk() {
-        let c = load(ELEMENTS_KDL).unwrap();
+        let c = load(SCHEMA_KDL).unwrap();
         let mut checked = 0;
         for s in &c.sections {
             for e in &s.leafs {
@@ -1363,7 +1363,7 @@ element "i2c" section="peripherals" {
     /// ones.
     #[test]
     fn every_fragment_element_matches_the_catalog() {
-        let c = load(ELEMENTS_KDL).unwrap();
+        let c = load(SCHEMA_KDL).unwrap();
         for s in &c.sections {
             for e in &s.leafs {
                 for ex in &e.examples {

@@ -1,7 +1,7 @@
 //! Option schema (`options.kdl`), option resolution, and the `# espforge`
 //! section reader.
 //!
-//! * [`catalog`] - the element catalog (elements.kdl) behind `espforge espf`:
+//! * [`catalog`] - the element catalog (espf.schema.kdl) behind `espforge espf`:
 //!   types, loader and path resolution
 //! * [`schema`]  - 2.1: schema types and the KDL v2 loader
 //! * [`resolve`] - 2.2-2.4: defaults, derived flags, requires, chip

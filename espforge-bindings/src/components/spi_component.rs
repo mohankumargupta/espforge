@@ -8,13 +8,9 @@
 //! the `spi_example`s, or a gpio id like `cs="gpio5"` as in
 //! `examples/example.espf.txt`). `mode` (0..=3) and `frequency` are optional
 //! on the component — the `spi_example`s keep both on `<spi>` — and default
-//! to `0` / unset when omitted (see `elements.kdl` TODO 11.11).
+//! to `0` / unset when omitted (see `espf.schema.kdl` TODO 11.11).
 
 use espf::context::{ActivePeripheral, Handle, RuntimeContext};
-
-/// The attributes `resolve` requires besides `id`. Drift-checked against
-/// the `espforge espf` catalog.
-pub const REQUIRED_ATTRS: &[&str] = &["spi", "cs"];
 
 /// A fully validated `<spi_component>` node.
 #[derive(Debug, Clone)]

@@ -231,32 +231,8 @@ mod tests {
         }
     }
 
-    /// Drift test 9 of the plan: every component wrapper has a `components`
-    /// entry whose required attributes match the wrapper's. `id` is required
-    /// by the parser for every element, so it is excluded on both sides.
-    #[test]
-    fn component_wrappers_agree_with_the_catalog() {
-        use espforge_bindings::components;
-
-        let c = catalog::embedded();
-        for tag in components::TAGS {
-            let wrapper = components::resolve_tag_required_attrs(tag)
-                .unwrap_or_else(|| panic!("no wrapper module for `{tag}`"));
-            let def = c
-                .leafs_by_tag(tag)
-                .into_iter()
-                .find(|e| e.section == "components")
-                .unwrap_or_else(|| panic!("wrapper `{tag}` has no `components` entry"));
-            let mut wrapper: Vec<&str> = wrapper;
-            wrapper.sort();
-            let mut catalog_required: Vec<&str> = def
-                .attrs
-                .iter()
-                .filter(|a| a.required && a.name != "id")
-                .map(|a| a.name.as_str())
-                .collect();
-            catalog_required.sort();
-            assert_eq!(catalog_required, wrapper, "required attributes of `{tag}`");
-        }
-    }
+    // Drift test 9 of the plan (component wrappers vs the catalog's required
+    // attributes) is gone: `espforge-bindings` now generates its component
+    // vocabulary from `espf.schema.kdl`, the same file the catalog loads, so
+    // there is nothing left to compare.
 }

@@ -8,10 +8,6 @@
 
 use espf::context::{ActivePeripheral, Handle, RuntimeContext};
 
-/// The attributes `resolve` requires besides `id`. Drift-checked against
-/// the `espforge espf` catalog.
-pub const REQUIRED_ATTRS: &[&str] = &["i2c", "address"];
-
 /// A fully validated `<i2c_component>` node.
 #[derive(Debug, Clone)]
 pub struct I2cComponent<'a> {

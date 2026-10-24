@@ -326,7 +326,7 @@ pub fn render_examples(e: &ElementDef) -> String {
 }
 
 /// Remove the common leading indentation of a fragment (KDL write style
-/// indents every fragment line inside elements.kdl).
+/// indents every fragment line inside espf.schema.kdl).
 fn dedent(fragment: &str) -> String {
     let lines: Vec<&str> = fragment.lines().collect();
     let indent = lines

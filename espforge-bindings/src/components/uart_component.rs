@@ -51,10 +51,6 @@ impl StopBits {
     }
 }
 
-/// The attributes `resolve` requires besides `id`. Drift-checked against
-/// the `espforge espf` catalog.
-pub const REQUIRED_ATTRS: &[&str] = &["uart", "baud_rate"];
-
 /// A fully validated `<uart_component>` node.
 #[derive(Debug, Clone)]
 pub struct UartComponent<'a> {

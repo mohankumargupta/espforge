@@ -1,8 +1,9 @@
 name: CI
 
+# Manual only: run it from the Actions tab (`Run workflow`) when you want the
+# gates; nothing is checked on push or pull request.
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -17,6 +18,12 @@ jobs:
       # Includes the CLI transcripts, the diagnostics corpus and the golden
       # generated projects (byte comparison only, no cargo on them).
       - run: cargo test --workspace
+      # Generated code is checked in. If build.rs had to rewrite it, the
+      # checked-in copy was stale: commit the regenerated file.
+      - run: >
+          git diff --exit-code --
+          espforge-bindings/src/components/generated_vocab.rs
+          espforge-bindings/src/drivers/generated_registry.rs
 
   generated-projects:
     name: Generated projects compile

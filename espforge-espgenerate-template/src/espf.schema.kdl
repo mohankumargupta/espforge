@@ -1,4 +1,12 @@
-// The element catalog behind `espforge espf` (KDL v2).
+// The element schema (KDL v2): the single source of truth for what an ESPF
+// file may contain.
+//
+// Consumers:
+//   * `espforge-options::catalog` loads it for `espforge espf` (man pages,
+//     examples, completions data).
+//   * `espforge-bindings` reads it at build time and generates its component
+//     vocabulary (`src/components/generated_vocab.rs`): tags and their
+//     required attributes. Nothing else may declare those by hand.
 //
 //   section "name" { summary ...; description ... }
 //   element "tag" section="name" [status="planned"] {
