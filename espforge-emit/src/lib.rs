@@ -4,6 +4,7 @@
 //! * [`template_env`] - minijinja environment setup
 //! * [`metadata`]     - `metadata.toml` parsing
 //! * [`project`]      - project planning + overlay layering
+//! * [`codegen`]      - the typed backends replacing the template (Phase 3)
 //! * [`manifest`]     - ownership manifest for drift detection
 //!
 //! IO boundary: [`generate`] / [`generate_with_hardware`] /
@@ -15,6 +16,7 @@
 //!
 //! Host-only: never depend on `espforge-runtime` from this crate.
 
+pub mod codegen;
 pub mod context;
 pub mod manifest;
 pub mod metadata;

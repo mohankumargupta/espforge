@@ -16,6 +16,11 @@ minijinja = { version = "2", features = ["loader", "json"] }
 anyhow = "1"
 serde_json = "1"
 toml_edit = "0.22"
+# Semantic comparison for the dual-run gate (increment 1); codegen uses these
+# directly once the Rust backend lands.
+syn = { version = "3", features = ["full"] }
+prettyplease = "0.3"
+toml = "1"
 
 [dev-dependencies]
 tempfile = "3"

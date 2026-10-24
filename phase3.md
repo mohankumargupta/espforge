@@ -1,7 +1,7 @@
 # Phase 3: AST codegen (extreme.md §3.5, §7)
 
-**Status:** in progress. Increment 0 landed on 2026-10-24; increments 1–5 are
-not started. Phase 2 is complete (`phase2.md`): `check` and `build` lower into
+**Status:** in progress. Increments 0–1 landed on 2026-10-24; increments 2–5
+are not started. Phase 2 is complete (`phase2.md`): `check` and `build` lower into
 a `Board`, diagnostics carry stable codes, and `check --format json` returns
 the board. The emitter still renders minijinja templates from the `Hardware`
 projection; this phase replaces that with typed backends and deletes the
@@ -28,8 +28,9 @@ passed, 1 ignored).
 | Compile gate | RISC-V blocking examples + one embassy fixture | 6 cells |
 
 Increment 0 moved these numbers: 24 golden cells (336 files, 9,902 lines) and
-12 compile cells. The table above stays the Phase 2 close baseline that this
-phase is measured against.
+12 compile cells. Increment 1 added the semantic oracle and the typed file
+plan; the workspace is now 319 passed, 1 ignored. The table above stays the
+Phase 2 close baseline that this phase is measured against.
 | `Board` | the typed IR; `Board::hardware()` projects to the emitter | `espforge-model` |
 | Overlays | example `diagram.json` rendered through the same minijinja context | 12 examples |
 
@@ -187,7 +188,7 @@ they are formatting-only.
 | # | Increment | Status |
 |---|---|---|
 | 0 | Resolve the Phase 2 D7 examples, add them to goldens/compile matrix | **landed 2026-10-24** |
-| 1 | Seams: `FilePlan`, codegen dispatch, semantic comparator, dual-run | not started |
+| 1 | Seams: `FilePlan`, semantic comparator, golden parse sweep | **landed 2026-10-24** |
 | 2 | Rust backend: `generated.rs`, `lib.rs`, `main.rs`, `build.rs` | not started |
 | 3 | Data backends: Cargo/TOML/JSON/optional files | not started |
 | 4 | Overlay tokens, delete templates and the `Hardware` projection | not started |
@@ -227,14 +228,25 @@ the embedded catalog.
 
 ### Increment 1 — seams and the oracle
 
-Add `codegen/plan.rs` (`FilePlan` built from resolved options and ownership),
-`codegen/mod.rs` with a `Backend` dispatch, and `codegen/equiv.rs`
-(`same_rust`, `same_toml`, `same_json`). Wire a dual-run test that, for all 24
-golden cells, renders the template tree and the codegen tree and compares them
-semantically. No production flip.
+**Landed 2026-10-24.** `codegen/equiv.rs` provides `same_rust` (parse with
+`syn`, print with `prettyplease`, compare), `same_toml` (parse to
+`toml::Value`) and `same_json` (`serde_json::Value`). `codegen/plan.rs` provides
+`FilePlan::for_project(&ResolvedOptions)`: the ten live outputs, their ownership
+(seed-once `.cargo/**` and `rust-toolchain.toml`, owned everything else) and the
+one live condition (`wokwi`). Unit tests prove it agrees with the
+metadata-driven plan for every golden option set and that the comparator
+rejects changed tokens/values rather than returning a vacuous pass.
 
-Gate: output bytes unchanged; the comparator passes on all cells; a unit test
-shows it rejects a changed token (so it is not vacuously true).
+`espforge/tests/codegen_equiv.rs` walks all 24 golden cells and parses every
+text file through its backend: 5 Rust files, 4 TOML files and 2 JSON files per
+cell (binary `chip.wasm` and `README.txt` are skipped). This is the parse
+sweep, not the full dual-run: the old and new producers are compared cell by
+cell when the Rust backend lands in increment 2, because until then there is
+only one producer to compare.
+
+Gate: output bytes unchanged (goldens pass); all 24 cells parse; workspace
+**319 passed, 1 ignored, 0 failed**; the negative comparator tests cover Rust,
+TOML and JSON.
 
 ### Increment 2 — the Rust backend
 
@@ -350,6 +362,7 @@ cargo test -p espforge --test golden_projects -- --ignored
 |---|---|---|
 | 2026-10-24 | — | Phase 3 planned; Phase 2 closed. No production code yet. Baseline above. D2 checked with a throwaway `changed_output_overwrites_an_unedited_file` test (passed, file removed); the permanent regression test lands in increment 1. |
 | 2026-10-24 | 0 | Made `<i2c_component address>` optional (schema, generated attrs, `I2cComponent::address: Option<u8>`), filled in seven missing `# services` sections, and added the embassy-only `signal!` macro + `embassy-sync`. Goldens now 24 cells / 336 files / 9,902 lines; compile matrix 12 cells, all green (34.7 s). 12 of 14 examples validate; both display examples remain blocked on unsupported `# devices` (one also lacks an `ssd1306` driver registration). Workspace **308 passed, 1 ignored, 0 failed**. |
+| 2026-10-24 | 1 | Added `codegen/equiv.rs` (`same_rust`/`same_toml`/`same_json`) and `codegen/plan.rs` (`FilePlan::for_project`, ten live outputs, `wokwi` condition). The typed plan matches the metadata plan on all golden option sets. `tests/codegen_equiv.rs` parses every Rust/TOML/JSON file in all 24 golden cells (binary assets skipped); negative tests reject changed tokens and values. Output bytes unchanged. Workspace **319 passed, 1 ignored, 0 failed**. |
 
 ## 8. Open questions carried in
 
