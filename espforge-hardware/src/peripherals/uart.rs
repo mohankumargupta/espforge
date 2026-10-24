@@ -7,6 +7,8 @@
 use crate::UartSpec;
 use espf::context::ParsedNode;
 use espf::diag::EspfError;
+use espforge_bindings::components::attrs::Issue;
+use espforge_bindings::components::generated_elements::uart as schema;
 
 /// The `<uart_component>` riding on a `<uart>`: its fields are what the
 /// generated code ends up with (framing lives on the component).
@@ -67,29 +69,31 @@ pub fn uart_attr_peripheral(n: &ParsedNode, raw: &str) -> Result<String, EspfErr
 
 /// The `<uart>` branch of the `# peripherals` loop.
 pub fn lower_uart(n: &ParsedNode) -> Result<UartDraft, EspfError> {
-    let peripheral = match n.get_attr("uart") {
+    let attrs = schema::Attrs::from_node(n)
+        .map_err(|issue| EspfError::at_node(n, "invalid uart pin", message(n.id, issue)))?;
+    let peripheral = match attrs.uart {
         // Explicit physical peripheral (`uart="UART1"`); the id is
         // then just a reference name.
-        Some(raw) => uart_attr_peripheral(n, raw)?,
+        Some(raw) => uart_attr_peripheral(n, raw.value)?,
         // Backwards compatible: the id itself names the peripheral.
         None => uart_peripheral_name(n)?,
-    };
-    let pin_attr = |what: &str| -> Result<u8, EspfError> {
-        n.get_attr(what).and_then(|p| p.parse::<u8>().ok()).ok_or_else(|| {
-            EspfError::at_node(
-                n,
-                "invalid uart pin",
-                format!("<uart id=\"{}\"> needs a numeric {what}=\"...\"", n.id),
-            )
-        })
     };
     Ok(UartDraft {
         id: n.id.to_string(),
         peripheral,
-        tx: pin_attr("tx")?,
-        rx: pin_attr("rx")?,
+        tx: attrs.tx.value,
+        rx: attrs.rx.value,
         component: None,
     })
+}
+
+/// This element's wording for a schema-level problem.
+fn message(id: &str, issue: Issue<'_>) -> String {
+    match issue {
+        Issue::Missing { attr } | Issue::Invalid { attr, .. } => {
+            format!("<uart id=\"{id}\"> needs a numeric {attr}=\"...\"")
+        }
+    }
 }
 
 /// A bare `<uart>` with no component generates nothing: the app can only

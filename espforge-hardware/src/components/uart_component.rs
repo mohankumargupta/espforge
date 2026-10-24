@@ -7,7 +7,7 @@ use crate::is_rust_ident;
 use crate::peripherals::uart::{UartCompDraft, UartDraft};
 use espf::context::{ParsedNode, RuntimeContext};
 use espf::diag::EspfError;
-use espforge_bindings::components::UartComponent;
+use espforge_bindings::components::{Parity, StopBits, UartComponent};
 
 /// The `<uart_component>` branch of the `# components` loop.
 ///
@@ -20,8 +20,8 @@ pub fn attach_uart_component(
     ctx: &RuntimeContext,
 ) -> Result<(), EspfError> {
     // Single dispatch path for the `$` ref; wrapper owns `trim_start_matches`.
-    let comp =
-        UartComponent::resolve(n, ctx).map_err(|m| EspfError::at_node(n, "invalid uart_component", m))?;
+    let comp = UartComponent::resolve(n, ctx)
+        .map_err(|m| EspfError::at_node(n, "invalid uart_component", m))?;
     // Locate the draft via the resolved handle, not a string `find`.
     let idx = uarts
         .iter()
@@ -50,62 +50,22 @@ pub fn attach_uart_component(
             ),
         ));
     }
-    let baud_raw = n.get_attr("baud_rate").ok_or_else(|| {
-        EspfError::at_node(
-            n,
-            "missing baud_rate",
-            format!("<uart_component id=\"{}\"> needs baud_rate=\"...\"", n.id),
-        )
-    })?;
-    let baud: u32 = baud_raw.parse().map_err(|_| {
-        EspfError::at_node(
-            n,
-            "invalid baud_rate",
-            format!(
-                "<uart_component id=\"{}\"> baud_rate=\"{baud_raw}\" is not a number",
-                n.id
-            ),
-        )
-    })?;
+    // Baud and framing come from the wrapper, which coerced them from the
+    // schema and already rejected a malformed value; zero is the only rule
+    // hardware adds on top.
+    let baud = comp.baud_rate;
     if baud == 0 {
         return Err(EspfError::at_node(
             n,
             "invalid baud_rate",
             format!(
-                "<uart_component id=\"{}\"> baud_rate=\"{baud_raw}\" must be greater than 0",
+                "<uart_component id=\"{}\"> baud_rate=\"0\" must be greater than 0",
                 n.id
             ),
         ));
     }
-    let parity = match n.get_attr("parity") {
-        None | Some("none") => "None".to_string(),
-        Some("even") => "Even".to_string(),
-        Some("odd") => "Odd".to_string(),
-        Some(other) => {
-            return Err(EspfError::at_node(
-                n,
-                "invalid parity",
-                format!(
-                    "<uart_component id=\"{}\"> parity=\"{other}\" must be \"none\", \"even\" or \"odd\"",
-                    n.id
-                ),
-            ));
-        }
-    };
-    let stop_bits = match n.get_attr("stop_bits") {
-        None | Some("1") => "_1".to_string(),
-        Some("2") => "_2".to_string(),
-        Some(other) => {
-            return Err(EspfError::at_node(
-                n,
-                "invalid stop_bits",
-                format!(
-                    "<uart_component id=\"{}\"> stop_bits=\"{other}\" must be \"1\" or \"2\"",
-                    n.id
-                ),
-            ));
-        }
-    };
+    let parity = parity_variant(comp.parity).to_string();
+    let stop_bits = stop_bits_variant(comp.stop_bits).to_string();
     let name = n.id.replace('-', "_");
     if !is_rust_ident(&name) {
         return Err(EspfError::at_node(
@@ -126,10 +86,30 @@ pub fn attach_uart_component(
     Ok(())
 }
 
+/// The `esp_hal::uart::Parity` variant a schema `parity` choice names.
+///
+/// Exhaustive on purpose: a new spelling in `espf.schema.kdl` must be decided
+/// here rather than silently defaulting.
+fn parity_variant(parity: Parity) -> &'static str {
+    match parity {
+        Parity::None => "None",
+        Parity::Even => "Even",
+        Parity::Odd => "Odd",
+    }
+}
+
+/// The `esp_hal::uart::StopBits` variant a schema `stop_bits` choice names.
+fn stop_bits_variant(stop_bits: StopBits) -> &'static str {
+    match stop_bits {
+        StopBits::N1 => "_1",
+        StopBits::N2 => "_2",
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::lower_sections;
     use crate::UartSpec;
+    use crate::lower_sections;
 
     const WITH_UART: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <uart id=\"uart1\" tx=\"6\" rx=\"5\" />\n# components\n  <uart_component id=\"serial\" uart=\"$uart1\" baud_rate=\"9600\" />\n# devices\n# services\n";
 
@@ -169,6 +149,15 @@ mod tests {
     }
 
     #[test]
+    fn a_zero_baud_rate_is_refused() {
+        // The wrapper coerces `baud_rate` from the schema; zero is the one
+        // rule hardware adds, so it stays here.
+        let src = WITH_UART.replace("baud_rate=\"9600\"", "baud_rate=\"0\"");
+        let err = lower_src(&src).unwrap_err();
+        assert!(err.contains("must be greater than 0"), "{err}");
+    }
+
+    #[test]
     fn a_bare_uart_generates_nothing() {
         let src = WITH_UART.replace(
             "# components\n  <uart_component id=\"serial\" uart=\"$uart1\" baud_rate=\"9600\" />\n",
@@ -180,8 +169,8 @@ mod tests {
     #[test]
     fn uart_wiring_conflicts_are_refused() {
         // tx and rx on the same pin.
-        let err = lower_src(&WITH_UART.replace("tx=\"6\" rx=\"5\"", "tx=\"5\" rx=\"5\""))
-            .unwrap_err();
+        let err =
+            lower_src(&WITH_UART.replace("tx=\"6\" rx=\"5\"", "tx=\"5\" rx=\"5\"")).unwrap_err();
         assert!(err.contains("tx and rx"), "{err}");
 
         // A second uart sharing the rx pin.
@@ -231,7 +220,10 @@ mod tests {
         // A nonsensical peripheral name is refused.
         let bad = WITH_UART.replace("tx=\"6\" rx=\"5\"", "uart=\"UART9\" tx=\"6\" rx=\"5\"");
         let err = lower_src(&bad).unwrap_err();
-        assert!(err.contains("must be UART0, UART1, UART2 or UART3"), "{err}");
+        assert!(
+            err.contains("must be UART0, UART1, UART2 or UART3"),
+            "{err}"
+        );
 
         // Without the attribute the old rule still applies: the id must be
         // `uart0`..`uart3`.
@@ -239,7 +231,10 @@ mod tests {
             .replace("<uart id=\"uart1\"", "<uart id=\"gps\"")
             .replace("uart=\"$uart1\"", "uart=\"$gps\"");
         let err = lower_src(&src).unwrap_err();
-        assert!(err.contains("the id must be uart0, uart1, uart2 or uart3"), "{err}");
+        assert!(
+            err.contains("the id must be uart0, uart1, uart2 or uart3"),
+            "{err}"
+        );
     }
 
     #[test]

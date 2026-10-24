@@ -4,10 +4,12 @@
 //! [`crate::components::i2c_component`]; the bus draft below is shared
 //! between the two.
 
-use crate::util::parse_khz;
 use crate::I2cSpec;
+use crate::util::parse_khz;
 use espf::context::ParsedNode;
 use espf::diag::EspfError;
+use espforge_bindings::components::attrs::Issue;
+use espforge_bindings::components::generated_elements::i2c as schema;
 
 /// One `<i2c>` peripheral plus the component riding on it (if any).
 #[derive(Debug, Clone)]
@@ -37,30 +39,28 @@ fn i2c_peripheral_name(n: &ParsedNode) -> Result<String, EspfError> {
 
 /// The `<i2c>` branch of the `# peripherals` loop.
 pub fn lower_i2c(n: &ParsedNode) -> Result<I2cBusDraft, EspfError> {
-    let pin_attr = |what: &str| -> Result<u8, EspfError> {
-        n.get_attr(what)
-            .and_then(|p| p.parse::<u8>().ok())
-            .ok_or_else(|| {
-                EspfError::at_node(
-                    n,
-                    "invalid i2c pin",
-                    format!("<i2c id=\"{}\"> needs a numeric {what}=\"...\"", n.id),
-                )
-            })
-    };
-    let khz = match n.get_attr("frequency") {
-        None => 100, // esp-hal's default
-        Some(f) => parse_khz(f, "i2c", n.id)
-            .map_err(|m| EspfError::at_node(n, "invalid i2c frequency", m))?,
-    };
+    let attrs = schema::Attrs::from_node(n)
+        .map_err(|issue| EspfError::at_node(n, "invalid i2c pin", message(n.id, issue)))?;
+    // The schema's default is `100kHz`, which is esp-hal's default as well.
+    let khz = parse_khz(attrs.frequency.value, "i2c", n.id)
+        .map_err(|m| EspfError::at_node(n, "invalid i2c frequency", m))?;
     Ok(I2cBusDraft {
         id: n.id.to_string(),
         peripheral: i2c_peripheral_name(n)?,
-        sda: pin_attr("sda")?,
-        scl: pin_attr("scl")?,
+        sda: attrs.sda.value,
+        scl: attrs.scl.value,
         khz,
         used: None,
     })
+}
+
+/// This element's wording for a schema-level problem.
+fn message(id: &str, issue: Issue<'_>) -> String {
+    match issue {
+        Issue::Missing { attr } | Issue::Invalid { attr, .. } => {
+            format!("<i2c id=\"{id}\"> needs a numeric {attr}=\"...\"")
+        }
+    }
 }
 
 /// A bare `<i2c>` with no component generates nothing: the app can only

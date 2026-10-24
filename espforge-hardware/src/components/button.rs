@@ -6,7 +6,7 @@
 //! Pin/direction/duplicate checks stay here so messages stay byte-identical.
 //! The `<gpio>` table itself lives in [`crate::peripherals::gpio`].
 
-use crate::peripherals::gpio::{gpio_for_handle, GpioEntry};
+use crate::peripherals::gpio::{GpioEntry, gpio_for_handle};
 use crate::{ButtonSpec, LedSpec, is_rust_ident};
 use espf::context::{ParsedNode, RuntimeContext};
 use espf::diag::EspfError;
@@ -39,20 +39,9 @@ pub fn attach_button(
             ),
         ));
     }
-    let pull_up = match n.get_attr("pull_up") {
-        None | Some("false") => false,
-        Some("true") => true,
-        Some(other) => {
-            return Err(EspfError::at_node(
-                n,
-                "invalid pull_up",
-                format!(
-                    "<button id=\"{}\"> pull_up=\"{other}\" must be \"true\" or \"false\"",
-                    n.id
-                ),
-            ));
-        }
-    };
+    // The wrapper coerced `pull_up` from the schema and already rejected a
+    // non-boolean value; hardware only needs the value.
+    let pull_up = comp.pull_up;
     let name = n.id.replace('-', "_");
     if !is_rust_ident(&name) {
         return Err(EspfError::at_node(
@@ -84,18 +73,14 @@ pub fn attach_button(
             ),
         ));
     }
-    buttons.push(ButtonSpec {
-        name,
-        pin,
-        pull_up,
-    });
+    buttons.push(ButtonSpec { name, pin, pull_up });
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::lower_sections;
     use super::*;
+    use crate::lower_sections;
 
     const WITH_BUTTON: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio9\" pin=\"9\" direction=\"input\" />\n# components\n  <button id=\"button\" gpio=\"$gpio9\" pull_up=\"true\" />\n# devices\n# services\n";
 

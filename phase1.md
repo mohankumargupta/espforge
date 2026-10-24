@@ -1,10 +1,10 @@
 # Phase 1: one schema (extreme.md §3.2 / §7)
 
-**Status:** increments 1, 1.1 and 2 landed. `espf.schema.kdl` is the source of truth
-for the element vocabulary, the attribute rules and the attribute coercion, and the six
-component wrappers parse no attribute by hand. Still to do in Phase 1: the merged
-options schema, catalog data at build time, and letting `espforge-hardware` consume the
-wrappers instead of re-reading the same attributes (2b, below).
+**Status:** increments 1, 1.1, 2 and 3 landed. `espf.schema.kdl` is the source of truth
+for the element vocabulary, the attribute rules and the attribute coercion. Nothing in
+`espforge-bindings` or `espforge-hardware` parses a schema attribute by hand any more:
+`grep -r 'get_attr(' espforge-hardware/src` is empty. Still to do in Phase 1: the merged
+options schema and catalog data at build time.
 
 ---
 
@@ -66,7 +66,7 @@ Two deliberate boundaries:
   is what kept every transcript and the diagnostics corpus byte-identical, and it leaves
   one place per element to change when diagnostics become codes (§3.4).
 
-## 3. What was deleted
+## 3. What was deleted (and the one thing that was not)
 
 - `components::TAGS` and `resolve_tag_required_attrs` (hand-written), plus the six
   per-wrapper `REQUIRED_ATTRS` consts and drift test 9 (two hand-written copies of one
@@ -77,8 +77,19 @@ Two deliberate boundaries:
   now keep only the `$`-reference lookup, the slug check and their wording.
 - The hand-written enums themselves: `GpioDirection`, `Parity` and `StopBits` are now
   re-exports of the generated enums, so adding a choice to the schema adds a variant.
+- **In `espforge-hardware`:** every `get_attr` + `parse` for `pin`, `sda`/`scl`, `sclk`/
+  `mosi`/`miso`, `tx`/`rx`, `tx`-style pins and `mode` on the peripherals, and `active_low`,
+  `pull_up`, `baud_rate`, `parity`, `stop_bits` on the components. `<led>`, `<button>` and
+  `<uart_component>` now read the wrapper's coerced fields; `<gpio>`, `<i2c>`, `<spi>` and
+  `<uart>` read `Attrs` directly. `frequency` is still text (see §2) and still parsed by
+  `util::parse_khz`, which is where its two messages live.
 
-## 4. Schema changes this increment needed
+What hardware kept is what is genuinely its own: pin collisions and input/output clashes,
+`baud_rate > 0`, the i2c/spi/uart peripheral-name rules, bus occupancy, and mapping a
+schema `parity`/`stop_bits` choice onto the `esp_hal` variant spelling (an exhaustive
+`match`, so a new schema choice cannot be silently defaulted).
+
+## 4. Schema changes these increments needed
 
 - `spi.mode` and `spi_component.mode` gained `default="0" range="0..=3"`: the wrapper's
   silent default and its refusal above 3 were rules living only in Rust. They are now
@@ -88,9 +99,14 @@ Two deliberate boundaries:
 - The header of `espf.schema.kdl` now documents the `attr` properties and both generated
   files.
 
+One behaviour change falls out of this, and it is the schema finally being enforced:
+`<gpio direction="...">` is a `choice`, so a value other than `output`/`input` is now an
+error (`invalid gpio direction`) instead of being accepted and ignored. Nothing in the
+examples, the golden projects or the diagnostics corpus used another value.
+
 ## 5. Gate evidence
 
-- `cargo test --workspace`: green, **286 passed, 1 ignored**.
+- `cargo test --workspace`: green, **287 passed, 1 ignored**.
 - The compile gate (`cargo test -p espforge --test golden_projects -- --ignored`): green.
 - `espf` CLI transcripts, the diagnostics corpus and the golden projects: unchanged.
   Nothing user-visible moved.
@@ -100,21 +116,27 @@ Two deliberate boundaries:
   `schema_level_problems_keep_their_wording`, which pins the ten messages the generated
   layer sits behind — missing `gpio`/`address`/`cs`/`baud_rate`, a bad hex address, `mode`
   out of range, a bad `parity`, a bad `active_low`, and led/button's
-  `needs gpio="$<gpio id>"`.
+  `needs gpio="$<gpio id>"`. Plus `a_zero_baud_rate_is_refused`, the one rule hardware
+  still adds to a coerced value.
 
 ## 6. Next increments, in order
 
-1. **2b: hardware consumes the wrapper.** `espforge-hardware/src/components/{led,button}.rs`
-   and `{uart,spi}_component.rs` still re-read `active_low`, `baud_rate`, `parity`,
-   `stop_bits`, `mode` and `cs` from the node and format their own messages — the second
-   vocabulary `improve.md` names. Deleting it changes which sentence a user sees, so it
-   needs the message-ownership decision first (Phase 3's codes, or a one-off convergence).
-2. **Merge `options.kdl` into `espf.schema.kdl`** so there is one file, then generate the
-   option types.
-3. **Catalog data at build time** instead of parsing KDL at runtime, once the schema is
+1. **Merge `options.kdl` into `espf.schema.kdl`** so there is one file, then generate the
+   option types. The catalog loader has to skip `option` nodes; the options loader has to
+   skip `section`/`element` nodes; `OPTIONS_KDL` and `SCHEMA_KDL` become one constant.
+2. **Catalog data at build time** instead of parsing KDL at runtime, once the schema is
    stable enough that regenerating on every build is cheap.
-4. Then Phase 2 (typed IR), which deletes the wrapper structs, the `*Draft`s and the
+3. Then Phase 2 (typed IR), which deletes the wrapper structs, the `*Draft`s and the
    parallel `Vec`s in `Hardware`.
+
+Open drift this increment made visible, for a decision before Phase 2:
+
+- **`<spi>` without `miso`.** The schema marks `miso` optional ("displays generally omit
+  it"), but `lower_spi` still requires it (`needs a numeric miso="..."`). The generated
+  layer follows the schema and yields `Option`, so hardware adds the requirement back
+  locally; either the schema is wrong or the lowering is.
+- **`<spi_component cs>`** is `kind="str"` in the schema but is a pin in hardware
+  (`cs="9"` or `cs="gpio5"`). It wants a `pin`-or-`ref` kind before Phase 2 relies on it.
 
 Still open from Appendix E: **Q1 the formatting/drift contract** (needed before Phase 3,
 not before these increments), **Q3 where docs prose lives** (today it is inline in
