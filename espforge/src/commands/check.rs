@@ -3,6 +3,7 @@
 //! Exit codes: 0 valid, 1 problems found (diagnostics already printed).
 
 use clap::Args;
+use espf::context::RuntimeContext;
 use espforge_bindings::drivers::generated_registry::route_driver;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -45,9 +46,20 @@ fn execute(args: &CheckArgs) -> Result<(), u8> {
         eprintln!("{note}");
     }
 
-    // Driver routing: every device tag must have a compile-time driver.
-    for device in &checked.ctx.resolved_devices {
-        if let Err(msg) = route_driver(device.tag_name, device, &checked.ctx) {
+    // Driver routing: every device tag must have a compile-time driver. The
+    // graph is already validated; this context exists only because the driver
+    // signature still takes one (the lowering path no longer does).
+    let mut ctx = RuntimeContext::new();
+    if let Err(errs) = ctx.resolve_and_bind(
+        &checked.fe.parsed.sections["peripherals"],
+        &checked.fe.parsed.sections["components"],
+        &checked.fe.parsed.sections["devices"],
+    ) {
+        super::frontend::report(&source.name, &source.text, &errs);
+        return Err(1);
+    }
+    for device in &ctx.resolved_devices {
+        if let Err(msg) = route_driver(device.tag_name, device, &ctx) {
             eprintln!("{msg}");
             return Err(1);
         }

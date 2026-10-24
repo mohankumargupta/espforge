@@ -210,7 +210,7 @@ mod tests {
         let checked = pipeline::validate(&sample, &AnswerArgs::default())
             .map_err(|invalid| invalid.report("overview-sample", &sample))
             .expect("the overview sample must be valid ESPF");
-        assert_eq!(checked.ctx.resolved_devices.len(), 0);
+        assert_eq!(checked.fe.parsed.sections["devices"].len(), 0);
     }
 
     /// Drift test 8 of the plan: every driver in the bindings registry has a

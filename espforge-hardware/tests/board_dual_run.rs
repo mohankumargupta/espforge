@@ -7,7 +7,6 @@
 //! migration's proof that the IR can represent everything the emitter needs
 //! before increment 4 deletes the drafts.
 
-use espf::context::RuntimeContext;
 use espf::diag::EspfError;
 use espf::parser::{Parsed, parse_espf};
 use espforge_hardware::board::build;
@@ -25,13 +24,7 @@ fn meta() -> Meta {
 }
 
 fn build_from(parsed: &Parsed<'_>) -> Result<Board, Vec<EspfError>> {
-    let mut ctx = RuntimeContext::new();
-    ctx.resolve_and_bind(
-        &parsed.sections["peripherals"],
-        &parsed.sections["components"],
-        &parsed.sections["devices"],
-    )?;
-    build(&parsed.sections, &ctx, &meta())
+    build(&parsed.sections, &meta())
 }
 
 fn is_structurally_valid(parsed: &Parsed<'_>) -> bool {

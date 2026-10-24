@@ -7,7 +7,7 @@
 //! (`Checked`/`validate`) plus a thin `hardware` wrapper (and `buildable`
 //! as `hardware().map(|_| ())`) so `check.rs`/`build.rs` share one path.
 
-use espf::context::RuntimeContext;
+use espf::context::Refs;
 use espf::diag::EspfError;
 use espforge_hardware::Hardware;
 use espforge_model::Meta;
@@ -49,7 +49,7 @@ impl Invalid {
 }
 
 /// A fully validated spec: final settings (file + flag overrides), resolved
-/// options and the bound `$` graph.
+/// options and a checked `$` graph.
 pub struct Checked<'a> {
     pub fe: Frontend<'a>,
     /// Core settings after flag overrides.
@@ -57,7 +57,6 @@ pub struct Checked<'a> {
     /// Option answers after flag overrides.
     pub answers: Answers,
     pub resolved: ResolvedOptions,
-    pub ctx: RuntimeContext<'a>,
     /// `note: ...` lines for flags that changed something.
     pub notes: Vec<String>,
 }
@@ -79,19 +78,13 @@ pub fn validate<'a>(src: &'a str, flags: &AnswerArgs) -> Result<Checked<'a>, Inv
     let resolved = espforge_options::resolve(&meta, &answers, &fe.derived)?;
 
     // `$` dependency graph (all five sections exist after `load`).
-    let mut ctx = RuntimeContext::new();
-    ctx.resolve_and_bind(
-        &fe.parsed.sections["peripherals"],
-        &fe.parsed.sections["components"],
-        &fe.parsed.sections["devices"],
-    )?;
+    Refs::resolve(&fe.parsed.sections)?;
 
     Ok(Checked {
         fe,
         meta,
         answers,
         resolved,
-        ctx,
         notes,
     })
 }
@@ -100,11 +93,11 @@ pub fn validate<'a>(src: &'a str, flags: &AnswerArgs) -> Result<Checked<'a>, Inv
 ///
 /// Phase 2 increment 4: this is the IR path. `board::build` constructs the
 /// typed `Board` (claiming pins as it goes); the emitter still reads the
-/// `Hardware` projection until Phase 3 replaces the templates. `ctx` is the
-/// bound `$` graph from `validate`. Wiring errors are `Invalid::Spans` so
-/// `check`/`build` render them as snippets via `Invalid::report`.
+/// `Hardware` projection until Phase 3 replaces the templates. Wiring errors
+/// are `Invalid::Spans` so `check`/`build` render them as snippets via
+/// `Invalid::report`.
 pub fn hardware(c: &Checked) -> Result<Hardware, Invalid> {
-    espforge_hardware::board::build(&c.fe.parsed.sections, &c.ctx, &c.meta)
+    espforge_hardware::board::build(&c.fe.parsed.sections, &c.meta)
         .map(|board| board.hardware())
         .map_err(Invalid::Spans)
 }
@@ -184,10 +177,9 @@ mod tests {
         // itself reports the unbuildable `<pwm>` as a snippet.
         let err = buildable(&c).unwrap_err();
         match err {
-            Invalid::Spans(errs) => assert!(
-                errs.iter().any(|e| e.label.contains("<pwm>")),
-                "{errs:?}"
-            ),
+            Invalid::Spans(errs) => {
+                assert!(errs.iter().any(|e| e.label.contains("<pwm>")), "{errs:?}")
+            }
             Invalid::Message(m) => panic!("expected spans, got message: {m}"),
         }
     }

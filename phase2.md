@@ -2,11 +2,13 @@
 
 **Status:** in progress. Increments 1–3 landed on 2026-10-24, and increment 4's production
 flip is in place: `check` and `build` now lower into a `Board` and emit its `Hardware`
-projection. Increment 4's deletion half is not started, nor are increments 5–6. Phase 1 is
-complete (`phase1.md`): the schema is the single source of truth and both halves are
-generated. The old `lower`, drafts, wrappers, `conflicts.rs` and `RuntimeContext` remain in
-the tree — no longer on the production path, but still used by tests and by driver routing
-(see §7).
+projection. Increment 4's deletion half has started: the `$` graph is resolved by
+`espf::context::Refs` (owned ids/kinds, no handles or 128-slot tables), and board lowering
+parses the generated `Attrs` directly instead of calling the typed wrappers. The old
+`lower`, drafts, wrappers, `conflicts.rs` and `RuntimeContext` remain in the tree — no
+longer on the production lowering path, but still used by the dual-run tests and by
+driver routing in `check` (see §7). Increments 5–6 are not started. Phase 1 is complete
+(`phase1.md`): the schema is the single source of truth and both halves are generated.
 
 This file is the phase's plan and progress log. §2 lists what must be decided before the
 first increment, §3 the increments and their gates, §5 the baseline this phase is measured
@@ -235,12 +237,22 @@ increment 4 pins it against the corpus.
 
 ### Increment 4 — flip production, then delete the old middle
 
-**In progress: production flipped.** `pipeline::hardware` now calls
-`espforge_hardware::board::build(..).map(|board| board.hardware())`, so `check` and `build`
-construct a `Board` and claim every pin on the way; the emitter still reads the projection.
-The old `lower`, the drafts, the six wrappers, `conflicts.rs` and `RuntimeContext` are no
-longer on the production path. The dual-run test now has a real reference: it still runs
-the old `lower` next to the new path, which is what keeps the deletion honest.
+**In progress: production flipped and the graph moved off `RuntimeContext`.**
+`pipeline::hardware` calls `espforge_hardware::board::build(..).map(|board| board.hardware())`,
+so `check` and `build` construct a `Board` and claim every pin on the way; the emitter still
+reads the projection. `board::build` now also resolves the `$` graph itself through the new
+`espf::context::Refs`, and parses the generated `Attrs` directly for led, button,
+i2c_component, spi_component and uart_component. The old `lower`, the drafts, the six
+wrappers, `conflicts.rs` and `RuntimeContext` are no longer on the production lowering
+path. The dual-run test still runs the old `lower` next to the new path, which is what
+keeps the deletion honest.
+
+**Graph errors keep their wording and order.** `Refs::resolve` reproduces the old
+`resolve_and_bind` checks — peripheral/component/device missing ids, component controller
+links, unknown peripheral/component references and i2c pin parsing — so the 24-case
+diagnostics corpus is unchanged by this move. `pipeline::validate` calls `Refs::resolve`
+for the front half, and `board::build` calls it again before lowering; a valid spec cannot
+disagree between the two.
 
 **Twenty-three of the twenty-four diagnostics cases are byte-identical.** The one
 deliberate change is `conflict-led-vs-button`: the old label repeated the incoming id
@@ -252,12 +264,12 @@ after a hardware error, still behaves as before — it is increment 5's change.
 
 Still to delete, in order:
 
-1. `route_driver` still reads `RuntimeContext` handles. It needs the resolved `Board`
-   (devices are rejected today, so this is mostly deleting a dead loop and its handles).
-2. The graph errors (`missing id`, `unknown peripheral`, `unknown component`, the
-   `ActivePeripheral` tables) still come from `RuntimeContext::resolve_and_bind`, before
-   lowering. They must move into `Board` lowering with identical titles, labels and spans.
-   The diagnostics corpus is the checklist.
+1. `route_driver` still reads `RuntimeContext` handles. `check` builds a context solely
+   for that loop; devices are rejected by `build`, so this is mostly deleting a dead loop
+   and its handles.
+2. ~~Move the graph errors off `RuntimeContext`~~ — done: `Refs::resolve` owns them, and
+   `board::build` calls it. The old `RuntimeContext` copy remains only for the old lowering
+   and the driver loop.
 3. Then delete `RuntimeContext`, `Handle`, `IdInterner`, the 128-slot tables, the wrappers
    and `resolve_component`, every `*Draft` and `attach_*`/`lower_*` step, and
    `conflicts.rs`. `espf::context::{ParsedNode, TagAttribute}` stays: it is parsed syntax,
@@ -370,6 +382,7 @@ cargo test -p espforge --test golden_projects -- --ignored   # compile gate
 | 2026-10-24 | 2 | `espforge-model/src/board.rs`: `Board`, `ResourceGraph`, opaque `ClaimedPin`, `Conflict` data, `Bus`/`Component`/`Service`, 9 new tests including the six corpus conflicts. `espforge-model` stays dependency-free; wording for a conflict stays with lowering. Workspace **316 passed, 1 ignored, 0 failed**; no production path uses the IR yet, so the corpus, transcripts and goldens are untouched. |
 | 2026-10-24 | 3 | `espforge-hardware/src/board.rs` lowers all five families into `Board` with claims; `Board::hardware()` projection; `tests/board_dual_run.rs` compares against the old path over every structurally valid embedded example (equal projections, or both fail). 10 board unit tests (including the legacy titles/spans for led/led, uart tx/rx, i2c bus reuse and peripheral clash), 2 dual-run tests, 1 projection test. Workspace **329 passed, 1 ignored, 0 failed**. CLI still on the old path, so corpus/transcripts/goldens unchanged. Two new wiring rejections found (`sda == scl`, `sclk == mosi`) recorded for increment 4. |
 | 2026-10-24 | 4 (flip) | `pipeline::hardware` switched to `board::build(..).map(|b| b.hardware())`; `check`/`build` now construct a `Board`. Workspace **329 passed, 1 ignored, 0 failed**; compile gate green; goldens and transcripts unchanged; one reviewed corpus diff — `conflict-led-vs-button` now names `<led id="red_led">` instead of repeating the button's id. Deletion of the old middle (route_driver handles, graph errors, `RuntimeContext`, wrappers, drafts, `conflicts.rs`) remains. |
+| 2026-10-24 | 4 (graph + wrappers) | `espf::context::Refs` replaces `RuntimeContext::resolve_and_bind` for the production `$` graph: owned ids/peripheral kinds, same titles/labels/spans, same order. `board::build` calls it, and parses the generated `Attrs` directly for all five component families (the wrappers' wording is copied, not imported). `pipeline::validate` uses `Refs`; `Checked` no longer carries a context. Workspace **329 passed, 1 ignored, 0 failed**; compile gate green (19.4 s); diagnostics corpus (24 cases), transcripts (31) and goldens unchanged. `check` still builds a `RuntimeContext` only for `route_driver`, which is the remaining deletion blocker. |
 
 ## 8. Open questions carried in
 

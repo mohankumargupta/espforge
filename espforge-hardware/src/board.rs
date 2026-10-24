@@ -1,14 +1,12 @@
 //! Lowering into the typed IR (`Board`).
 //!
-//! Phase 2 increment 3: this path builds a [`Board`] from the parsed sections,
-//! claiming every pin through [`ResourceGraph::claim`] instead of checking
-//! ownership in a later pass. Validation of attributes and `$` references
-//! still goes through the Phase 1 generated `Attrs` and the typed wrappers;
-//! increment 4 moves those last checks here and deletes the old lowering.
-//!
-//! The old path stays authoritative until the dual-run tests and the
-//! projection agree for every valid spec. Until then this module is exercised
-//! by `tests/board_dual_run.rs`, not by `check`/`build`.
+//! Phase 2 increment 4: `check` and `build` come through here. The `$` graph is
+//! resolved by [`espf::context::Refs`] (the same problems and wording the old
+//! `RuntimeContext` reported), attributes are the Phase 1 generated `Attrs`,
+//! and every pin is claimed through [`ResourceGraph::claim`] as the element is
+//! built instead of being checked in a later pass. The typed wrappers are no
+//! longer on this path; the old lowering remains only as the dual-run
+//! reference in `tests/board_dual_run.rs`.
 //!
 //! "Only a valid board can exist" is enforced as far as the crate split
 //! allows today: fields are public so the emitter's projection can live in
@@ -18,14 +16,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use espf::context::{ParsedNode, RuntimeContext};
+use espf::context::{ParsedNode, PeripheralKind, Refs};
 use espf::diag::{EspfError, node_span};
-use espforge_bindings::components::attrs::PinOrRef;
-use espforge_bindings::components::{
-    ButtonComponent as ButtonNode, I2cComponent as I2cNode, LedComponent as LedNode,
-    Parity as SchemaParity, SpiComponent as SpiNode, StopBits as SchemaStopBits,
-    UartComponent as UartNode,
+use espforge_bindings::components::attrs::{Issue, PinOrRef};
+use espforge_bindings::components::generated_elements::{
+    button as button_schema, i2c_component as i2c_schema, led as led_schema,
+    spi_component as spi_schema, uart_component as uart_schema,
 };
+use espforge_bindings::components::{Parity as SchemaParity, StopBits as SchemaStopBits};
 use espforge_model::Meta;
 use espforge_model::board::{
     Board, Bus, BusId, Button, ClaimedPin, Component, Conflict, ConflictKind, Framing,
@@ -34,22 +32,22 @@ use espforge_model::board::{
 };
 
 use crate::devices;
-use crate::peripherals::gpio::{GpioEntry, gpio_for_handle};
+use crate::is_rust_ident;
+use crate::peripherals::gpio::GpioEntry;
 use crate::peripherals::{gpio, i2c, spi, uart};
 use crate::services::wifi;
 
 /// Build a `Board` from the parsed sections.
 ///
-/// The sections must already have gone through
-/// [`RuntimeContext::resolve_and_bind`], the same contract the old `lower`
-/// has. Peripherals are built first (in source order), then components, then
-/// services; pins are claimed as each element is built, so a conflict is an
-/// error at the element that would have owned it.
+/// The `$` graph is resolved here, with the same problems and wording the old
+/// `RuntimeContext` reported. Peripherals come first (in source order), then
+/// components, then services; pins are claimed as each element is built, so a
+/// conflict is an error at the element that would have owned it.
 pub fn build(
     sections: &HashMap<String, Vec<ParsedNode>>,
-    ctx: &RuntimeContext,
     meta: &Meta,
 ) -> Result<Board, Vec<EspfError>> {
+    let refs = Refs::resolve(sections)?;
     devices::reject_if_present(sections)?;
 
     let mut graph = ResourceGraph::new();
@@ -169,10 +167,8 @@ pub fn build(
     for n in sections.get("components").map(Vec::as_slice).unwrap_or(&[]) {
         match n.tag_name {
             "led" => {
-                let node = LedNode::resolve(n, ctx)
-                    .map_err(|m| vec![EspfError::at_node(n, "invalid led", m)])?;
-                let gpio = gpio_for_handle(&gpios, ctx, node.peripheral_handle, n, node.gpio_ref)
-                    .map_err(|e| vec![e])?;
+                let (active_low, gpio_name) = led_node(n, &refs)?;
+                let gpio = find_gpio(&gpios, n, gpio_name)?;
                 if let Some(direction) = gpio.direction.as_deref() {
                     if direction != "output" {
                         return Err(vec![EspfError::at_node(
@@ -195,14 +191,12 @@ pub fn build(
                 components.push(Component::Led(Led {
                     id: ident(n),
                     pin,
-                    active_low: node.active_low,
+                    active_low,
                 }));
             }
             "button" => {
-                let node = ButtonNode::resolve(n, ctx)
-                    .map_err(|m| vec![EspfError::at_node(n, "invalid button", m)])?;
-                let gpio = gpio_for_handle(&gpios, ctx, node.peripheral_handle, n, node.gpio_ref)
-                    .map_err(|e| vec![e])?;
+                let (pull_up, gpio_name) = button_node(n, &refs)?;
+                let gpio = find_gpio(&gpios, n, gpio_name)?;
                 if let Some(direction) = gpio.direction.as_deref() {
                     if direction != "input" {
                         return Err(vec![EspfError::at_node(
@@ -225,13 +219,12 @@ pub fn build(
                 components.push(Component::Button(Button {
                     id: ident(n),
                     pin,
-                    pull_up: node.pull_up,
+                    pull_up,
                 }));
             }
             "i2c_component" => {
-                let node = I2cNode::resolve(n, ctx)
-                    .map_err(|m| vec![EspfError::at_node(n, "invalid i2c_component", m)])?;
-                let bus = bus_id_for(&bus_ids, node.i2c_ref, n, "i2c")?;
+                let (address, bus_name) = i2c_node(n, &refs)?;
+                let bus = bus_id_for(&bus_ids, bus_name, n, "i2c")?;
                 if let Some(other) = used_by(&graph, bus) {
                     return Err(vec![EspfError::at_node(
                         n,
@@ -248,15 +241,14 @@ pub fn build(
                 components.push(Component::I2c(I2cComponent {
                     id: ident(n),
                     bus,
-                    address: node.address,
+                    address,
                 }));
             }
             "spi_component" => {
-                let node = SpiNode::resolve(n, ctx)
-                    .map_err(|m| vec![EspfError::at_node(n, "invalid spi_component", m)])?;
-                let bus = bus_id_for(&bus_ids, node.spi_ref, n, "spi")?;
+                let (mode, cs, bus_name) = spi_node(n, &refs)?;
+                let bus = bus_id_for(&bus_ids, bus_name, n, "spi")?;
                 let (cs_pin, cs_gpio) =
-                    match node.cs {
+                    match cs {
                         PinOrRef::Pin(pin) => (pin.value, None),
                         PinOrRef::Ref(reference) => {
                             let gpio = gpios.iter().find(|g| g.id == reference.name).ok_or_else(
@@ -288,13 +280,12 @@ pub fn build(
                     id: ident(n),
                     bus,
                     cs,
-                    mode: node.mode as u8,
+                    mode: mode as u8,
                 }));
             }
             "uart_component" => {
-                let node = UartNode::resolve(n, ctx)
-                    .map_err(|m| vec![EspfError::at_node(n, "invalid uart_component", m)])?;
-                let bus = bus_id_for(&bus_ids, node.uart_ref, n, "uart")?;
+                let (baud_rate, parity, stop_bits, bus_name) = uart_node(n, &refs)?;
+                let bus = bus_id_for(&bus_ids, bus_name, n, "uart")?;
                 if let Some(other) = used_by(&graph, bus) {
                     return Err(vec![EspfError::at_node(
                         n,
@@ -307,7 +298,7 @@ pub fn build(
                         ),
                     )]);
                 }
-                if node.baud_rate == 0 {
+                if baud_rate == 0 {
                     return Err(vec![EspfError::at_node(
                         n,
                         "invalid baud_rate",
@@ -321,10 +312,10 @@ pub fn build(
                 components.push(Component::Uart(UartComponent {
                     id: ident(n),
                     port: bus,
-                    baud: node.baud_rate,
+                    baud: baud_rate,
                     framing: Framing {
-                        parity: ir_parity(node.parity),
-                        stop_bits: ir_stop_bits(node.stop_bits),
+                        parity: ir_parity(parity),
+                        stop_bits: ir_stop_bits(stop_bits),
                     },
                 }));
             }
@@ -695,6 +686,302 @@ fn display(owner: &Owner, slug: bool) -> String {
     format!("<{} id=\"{id}\">", owner.kind.tag())
 }
 
+// ------------------------------------------------- component attributes
+
+/// Resolve `<led>`: schema attributes, the `$gpio` kind and the slug rule.
+fn led_node<'a>(n: &'a ParsedNode<'a>, refs: &Refs) -> Result<(bool, &'a str), Vec<EspfError>> {
+    let attrs = led_schema::Attrs::from_node(n)
+        .map_err(|issue| vec![EspfError::at_node(n, "invalid led", led_issue(n.id, issue))])?;
+    let name = attrs.gpio.name;
+    if refs.kind(name) != Some(PeripheralKind::Gpio) {
+        return Err(vec![EspfError::at_node(
+            n,
+            "invalid led",
+            format!(
+                "<led id=\"{}\"> refers to `{name}`, which is not a <gpio> in `# peripherals`",
+                n.id
+            ),
+        )]);
+    }
+    require_slug(n, "invalid led", "led")?;
+    Ok((attrs.active_low.value, name))
+}
+
+/// Resolve `<button>`: schema attributes, the `$gpio` kind and the slug rule.
+fn button_node<'a>(n: &'a ParsedNode<'a>, refs: &Refs) -> Result<(bool, &'a str), Vec<EspfError>> {
+    let attrs = button_schema::Attrs::from_node(n).map_err(|issue| {
+        vec![EspfError::at_node(
+            n,
+            "invalid button",
+            button_issue(n.id, issue),
+        )]
+    })?;
+    let name = attrs.gpio.name;
+    if refs.kind(name) != Some(PeripheralKind::Gpio) {
+        return Err(vec![EspfError::at_node(
+            n,
+            "invalid button",
+            format!(
+                "<button id=\"{}\"> refers to `{name}`, which is not a <gpio> in `# peripherals`",
+                n.id
+            ),
+        )]);
+    }
+    require_slug(n, "invalid button", "button")?;
+    Ok((attrs.pull_up.value, name))
+}
+
+/// Resolve `<i2c_component>`: schema attributes, the `$i2c` kind and the slug.
+fn i2c_node<'a>(n: &'a ParsedNode<'a>, refs: &Refs) -> Result<(u8, &'a str), Vec<EspfError>> {
+    let attrs = i2c_schema::Attrs::from_node(n).map_err(|issue| {
+        vec![EspfError::at_node(
+            n,
+            "invalid i2c_component",
+            i2c_issue(n.id, issue),
+        )]
+    })?;
+    let name = attrs.i2c.name;
+    require_bus(
+        n,
+        refs,
+        name,
+        PeripheralKind::I2c,
+        "i2c_component",
+        "i2c",
+        "an i2c",
+        "non-I2C",
+    )?;
+    require_slug(n, "invalid i2c_component", "i2c_component")?;
+    Ok((attrs.address.value, name))
+}
+
+/// Resolve `<spi_component>`: schema attrs, the `cs` ref and the `$spi` kind.
+fn spi_node<'a>(
+    n: &'a ParsedNode<'a>,
+    refs: &Refs,
+) -> Result<(u32, PinOrRef<'a>, &'a str), Vec<EspfError>> {
+    let attrs = spi_schema::Attrs::from_node(n).map_err(|issue| {
+        vec![EspfError::at_node(
+            n,
+            "invalid spi_component",
+            spi_issue(n.id, issue),
+        )]
+    })?;
+    if let PinOrRef::Ref(reference) = attrs.cs {
+        if !refs.knows(reference.name) {
+            return Err(vec![EspfError::at_node(
+                n,
+                "invalid spi_component",
+                format!(
+                    "❌ [spi_component] '{}' cs references undefined gpio '{}'",
+                    n.id, reference.name
+                ),
+            )]);
+        }
+    }
+    let name = attrs.spi.name;
+    require_bus(
+        n,
+        refs,
+        name,
+        PeripheralKind::Spi,
+        "spi_component",
+        "spi",
+        "an spi",
+        "non-SPI",
+    )?;
+    require_slug(n, "invalid spi_component", "spi_component")?;
+    Ok((attrs.mode.value, attrs.cs, name))
+}
+
+/// Resolve `<uart_component>`: schema attrs, the `$uart` kind and the slug.
+fn uart_node<'a>(
+    n: &'a ParsedNode<'a>,
+    refs: &Refs,
+) -> Result<(u32, SchemaParity, SchemaStopBits, &'a str), Vec<EspfError>> {
+    let attrs = uart_schema::Attrs::from_node(n).map_err(|issue| {
+        vec![EspfError::at_node(
+            n,
+            "invalid uart_component",
+            uart_issue(n.id, issue),
+        )]
+    })?;
+    let name = attrs.uart.name;
+    require_bus(
+        n,
+        refs,
+        name,
+        PeripheralKind::Uart,
+        "uart_component",
+        "uart",
+        "a uart",
+        "non-UART",
+    )?;
+    require_slug(n, "invalid uart_component", "uart_component")?;
+    Ok((
+        attrs.baud_rate.value,
+        attrs.parity.value,
+        attrs.stop_bits.value,
+        name,
+    ))
+}
+
+/// The wrapper's reference wording, kept byte-identical.
+fn require_bus(
+    n: &ParsedNode,
+    refs: &Refs,
+    name: &str,
+    kind: PeripheralKind,
+    label: &str,
+    noun: &str,
+    article: &str,
+    non: &str,
+) -> Result<(), Vec<EspfError>> {
+    if !refs.knows(name) {
+        return Err(vec![EspfError::at_node(
+            n,
+            format!("invalid {label}"),
+            format!(
+                "❌ [{label}] '{}' references undefined {noun} peripheral '{name}'",
+                n.id
+            ),
+        )]);
+    }
+    match refs.kind(name) {
+        None => Err(vec![EspfError::at_node(
+            n,
+            format!("invalid {label}"),
+            format!(
+                "❌ [{label}] '{}' {noun} peripheral '{name}' is not active",
+                n.id
+            ),
+        )]),
+        Some(found) if found != kind => Err(vec![EspfError::at_node(
+            n,
+            format!("invalid {label}"),
+            format!(
+                "❌ [{label}] '{}' expects {article} peripheral, got a {non} parent bus",
+                n.id
+            ),
+        )]),
+        _ => Ok(()),
+    }
+}
+
+/// The Rust-identifier rule every component id must satisfy.
+fn require_slug(n: &ParsedNode, title: &str, tag: &str) -> Result<(), Vec<EspfError>> {
+    let slug = n.id.replace('-', "_");
+    if is_rust_ident(&slug) {
+        Ok(())
+    } else {
+        Err(vec![EspfError::at_node(
+            n,
+            title,
+            format!(
+                "<{tag} id=\"{}\">: the id must become a Rust identifier (letters, digits, `_`; not starting with a digit)",
+                n.id
+            ),
+        )])
+    }
+}
+
+/// Locate the `<gpio>` entry a led/button names.
+fn find_gpio<'a>(
+    gpios: &'a [GpioEntry],
+    n: &ParsedNode,
+    name: &str,
+) -> Result<&'a GpioEntry, Vec<EspfError>> {
+    gpios.iter().find(|gpio| gpio.id == name).ok_or_else(|| {
+        vec![EspfError::at_node(
+            n,
+            "unknown gpio",
+            format!(
+                "<{} id=\"{}\"> refers to `{name}`, which is not a <gpio> in `# peripherals`",
+                n.tag_name, n.id
+            ),
+        )]
+    })
+}
+
+fn led_issue(id: &str, issue: Issue<'_>) -> String {
+    match issue {
+        Issue::Missing { attr: "gpio" } => {
+            format!("<led id=\"{id}\"> needs gpio=\"$<gpio id>\"")
+        }
+        Issue::Missing { attr } => format!("Missing required attribute '{attr}'"),
+        Issue::Invalid { attr, value } => {
+            format!("<led id=\"{id}\"> {attr}=\"{value}\" must be \"true\" or \"false\"")
+        }
+    }
+}
+
+fn button_issue(id: &str, issue: Issue<'_>) -> String {
+    match issue {
+        Issue::Missing { attr: "gpio" } => {
+            format!("<button id=\"{id}\"> needs gpio=\"$<gpio id>\"")
+        }
+        Issue::Missing { attr } => format!("Missing required attribute '{attr}'"),
+        Issue::Invalid { attr, value } => {
+            format!("<button id=\"{id}\"> {attr}=\"{value}\" must be \"true\" or \"false\"")
+        }
+    }
+}
+
+fn i2c_issue(id: &str, issue: Issue<'_>) -> String {
+    match issue {
+        Issue::Missing { attr } if id.is_empty() => {
+            format!("❌ [i2c_component] Missing required attribute '{attr}'")
+        }
+        Issue::Missing { attr } => {
+            format!("❌ [i2c_component] '{id}' missing required attribute '{attr}'")
+        }
+        Issue::Invalid { value, .. } if value.starts_with("0x") || value.starts_with("0X") => {
+            format!("❌ [i2c_component] '{id}' invalid hex address '{value}'")
+        }
+        Issue::Invalid { value, .. } => {
+            format!("❌ [i2c_component] '{id}' invalid decimal address '{value}'")
+        }
+    }
+}
+
+fn spi_issue(id: &str, issue: Issue<'_>) -> String {
+    match issue {
+        Issue::Missing { attr } if id.is_empty() => {
+            format!("❌ [spi_component] Missing required attribute '{attr}'")
+        }
+        Issue::Missing { attr } => {
+            format!("❌ [spi_component] '{id}' missing required attribute '{attr}'")
+        }
+        Issue::Invalid { attr, value } => {
+            format!("❌ [spi_component] '{id}' invalid {attr} '{value}': expected 0..=3")
+        }
+    }
+}
+
+fn uart_issue(id: &str, issue: Issue<'_>) -> String {
+    match issue {
+        Issue::Missing { attr } if id.is_empty() => {
+            format!("❌ [uart_component] Missing required attribute '{attr}'")
+        }
+        Issue::Missing { attr } => {
+            format!("❌ [uart_component] '{id}' missing required attribute '{attr}'")
+        }
+        Issue::Invalid {
+            attr: "baud_rate",
+            value,
+        } => format!("❌ [uart_component] '{id}' invalid baud_rate '{value}'"),
+        Issue::Invalid {
+            attr: "parity",
+            value,
+        } => format!(
+            "❌ [uart_component] Invalid parity '{value}': expected \"none\", \"even\" or \"odd\""
+        ),
+        Issue::Invalid { value, .. } => {
+            format!("❌ [uart_component] Invalid stop_bits '{value}': expected \"1\" or \"2\"")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -713,13 +1000,7 @@ mod tests {
 
     fn build_src(src: &str) -> Result<Board, Vec<EspfError>> {
         let parsed = parse_espf(src);
-        let mut ctx = RuntimeContext::new();
-        ctx.resolve_and_bind(
-            &parsed.sections["peripherals"],
-            &parsed.sections["components"],
-            &parsed.sections["devices"],
-        )?;
-        build(&parsed.sections, &ctx, &meta())
+        build(&parsed.sections, &meta())
     }
 
     const LED_BUTTON: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n  <gpio id=\"gpio9\" pin=\"9\" direction=\"input\" />\n# components\n  <led id=\"red-led\" gpio=\"$gpio18\" active_low=\"true\" />\n  <button id=\"btn\" gpio=\"$gpio9\" pull_up=\"true\" />\n# devices\n# services\n";
