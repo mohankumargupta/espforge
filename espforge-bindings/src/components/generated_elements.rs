@@ -3,7 +3,7 @@
 //! One `Attrs` struct per element in `espf.schema.kdl`: every attribute
 //! coerced to its declared `kind`, with the span it was written at.
 //!
-//! The wrappers in `super` consume these; the coercion itself is in
+//! Lowering consumes these; the coercion itself is in
 //! `super::attrs`.
 
 pub mod project {

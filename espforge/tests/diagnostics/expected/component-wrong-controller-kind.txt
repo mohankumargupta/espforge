@@ -1,7 +1,6 @@
 $ espforge check component-wrong-controller-kind.espf.txt
-exit: 0
+exit: 1
 --- stdout ---
-✓ component-wrong-controller-kind.espf.txt is valid
 --- stderr ---
 error: invalid led
   --> component-wrong-controller-kind.espf.txt:11:3

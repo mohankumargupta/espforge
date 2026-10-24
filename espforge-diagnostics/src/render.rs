@@ -143,7 +143,7 @@ fn line_bounds(src: &str, line_starts: &[usize], offset: usize) -> (usize, usize
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DiagCode, Edit, Fix};
+    use crate::{DiagCode, Edit, Fix, codes};
 
     const SRC: &str = "# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# components\n  <led id=\"red-led\" gpio=\"$gpio18\" />\n  <led id=\"other\" gpio=\"$gpio18\" />\n";
 
@@ -151,6 +151,7 @@ mod tests {
     fn one_label_renders_one_snippet_group() {
         let start = SRC.find("<led id=\"other\"").unwrap();
         let d = Diagnostic::error(
+            codes::CONFLICT_PIN,
             start..start + 4,
             "pin conflict",
             "GPIO18 is already claimed",
@@ -167,6 +168,7 @@ mod tests {
         let first = SRC.find("<gpio id=\"gpio18\"").unwrap();
         let second = SRC.find("<led id=\"other\"").unwrap();
         let d = Diagnostic::error(
+            codes::CONFLICT_PIN,
             first..first + 5,
             "pin conflict",
             "<gpio id=\"gpio18\"> declares GPIO18 here",
@@ -185,7 +187,7 @@ mod tests {
     #[test]
     fn several_labels_on_one_line_share_a_snippet() {
         let src = "a <led> and <button> collide\n";
-        let d = Diagnostic::error(2..7, "pin clash", "led uses GPIO9")
+        let d = Diagnostic::error(codes::CONFLICT_PIN, 2..7, "pin clash", "led uses GPIO9")
             .with_label(12..20, "button also uses GPIO9");
         let out = to_human("x.espf", src, &[d]);
 
@@ -196,7 +198,8 @@ mod tests {
 
     #[test]
     fn help_renders_after_the_snippet() {
-        let d = Diagnostic::error(0..1, "bad", "here").with_help("use another pin");
+        let d = Diagnostic::error(codes::UNCLASSIFIED, 0..1, "bad", "here")
+            .with_help("use another pin");
         let out = to_human("x.espf", "abc\n", &[d]);
         assert!(out.contains("help: use another pin"), "{out}");
     }
@@ -204,7 +207,7 @@ mod tests {
     #[test]
     fn a_primary_span_without_a_label_still_underlines_it() {
         let d = Diagnostic {
-            code: Some(DiagCode::new("E0701")),
+            code: DiagCode::new("E0701"),
             severity: Severity::Warning,
             message: "heads up".into(),
             primary: 2..5,
@@ -219,7 +222,7 @@ mod tests {
 
     #[test]
     fn fixes_do_not_change_human_output() {
-        let d = Diagnostic::error(0..3, "bad", "here").with_fix(Fix {
+        let d = Diagnostic::error(codes::UNCLASSIFIED, 0..3, "bad", "here").with_fix(Fix {
             title: "rename it".into(),
             edits: vec![Edit {
                 span: 0..3,

@@ -1,7 +1,6 @@
 $ espforge check structure-element-outside-its-section.espf.txt
-exit: 0
+exit: 1
 --- stdout ---
-✓ structure-element-outside-its-section.espf.txt is valid
 --- stderr ---
 error: unsupported peripheral
  --> structure-element-outside-its-section.espf.txt:8:3

@@ -9,21 +9,27 @@ use serde_json::{Value, json};
 use crate::Diagnostic;
 
 /// Serialize diagnostics for `file_path` as pretty JSON.
-///
-/// `code` is `null` while Phase 2 increment 1 is in progress; the field exists
-/// now so a consumer never has to guess whether codes will appear.
 pub fn to_json(file_path: &str, diagnostics: &[Diagnostic]) -> String {
-    let items: Vec<Value> = diagnostics
-        .iter()
-        .map(|d| diagnostic_value(file_path, d))
-        .collect();
-    serde_json::to_string_pretty(&json!({ "diagnostics": items }))
-        .expect("a serde_json::Value is always serializable")
+    serde_json::to_string_pretty(
+        &json!({ "diagnostics": diagnostics_value(file_path, diagnostics) }),
+    )
+    .expect("a serde_json::Value is always serializable")
+}
+
+/// The diagnostics array, for callers composing a larger document
+/// (`check --format json` adds the file name and the board).
+pub fn diagnostics_value(file_path: &str, diagnostics: &[Diagnostic]) -> Value {
+    Value::Array(
+        diagnostics
+            .iter()
+            .map(|d| diagnostic_value(file_path, d))
+            .collect(),
+    )
 }
 
 fn diagnostic_value(file_path: &str, d: &Diagnostic) -> Value {
     json!({
-        "code": d.code.map(|code| code.as_str()),
+        "code": d.code.as_str(),
         "severity": d.severity.as_str(),
         "message": d.message,
         "primary": {
@@ -64,9 +70,13 @@ mod tests {
 
     #[test]
     fn the_document_has_the_documented_shape() {
-        let d = Diagnostic::error(4..8, "pin conflict", "GPIO18 is taken")
-            .with_code(DiagCode::new("E0701"))
-            .with_help("pick another pin");
+        let d = Diagnostic::error(
+            DiagCode::new("E0701"),
+            4..8,
+            "pin conflict",
+            "GPIO18 is taken",
+        )
+        .with_help("pick another pin");
 
         let json = to_json("blink.espf", &[d]);
         let value: Value = serde_json::from_str(&json).unwrap();
@@ -83,17 +93,17 @@ mod tests {
     }
 
     #[test]
-    fn an_unassigned_code_is_null_not_invented() {
-        let d = Diagnostic::error(0..1, "m", "l");
+    fn every_diagnostic_carries_a_code() {
+        let d = Diagnostic::error(DiagCode::new("E0101"), 0..1, "m", "l");
         let json = to_json("x.espf", &[d]);
         let value: Value = serde_json::from_str(&json).unwrap();
-        assert!(value["diagnostics"][0]["code"].is_null());
+        assert_eq!(value["diagnostics"][0]["code"], "E0101");
     }
 
     #[test]
     fn fixes_and_context_labels_are_preserved() {
         let d = Diagnostic {
-            code: Some(DiagCode::new("E0701")),
+            code: DiagCode::new("E0701"),
             severity: Severity::Warning,
             message: "pin conflict".into(),
             primary: 4..8,
@@ -131,13 +141,13 @@ mod tests {
 
     #[test]
     fn the_pretty_shape_is_pinned() {
-        let d = Diagnostic::error(0..1, "boom", "here");
+        let d = Diagnostic::error(DiagCode::new("E0701"), 0..1, "boom", "here");
         assert_eq!(
             to_json("x.espf", &[d]),
             "{
   \"diagnostics\": [
     {
-      \"code\": null,
+      \"code\": \"E0701\",
       \"fixes\": [],
       \"help\": null,
       \"labels\": [

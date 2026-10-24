@@ -1,10 +1,9 @@
 //! `# devices` lowering.
 //!
 //! Nothing here is buildable yet: any `# devices` entry is refused with a
-//! clear "not supported yet". This module owns that guard so `lib.rs`
-//! stays a thin orchestrator; when the first device lands, its draft and
-//! `lower_*`/`attach_*` halves go here following the
-//! peripherals/components split.
+//! clear "not supported yet". This module owns that guard so `lib.rs` stays a
+//! thin orchestrator; when the first device lands, its lowering goes here and
+//! the graph gives it the component id it names.
 
 use std::collections::HashMap;
 
@@ -16,10 +15,7 @@ use espf::diag::EspfError;
 pub fn reject_if_present(
     sections: &HashMap<String, Vec<ParsedNode>>,
 ) -> Result<(), Vec<EspfError>> {
-    if sections
-        .get("devices")
-        .is_some_and(|v| !v.is_empty())
-    {
+    if sections.get("devices").is_some_and(|v| !v.is_empty()) {
         return Err(vec![EspfError::at_span(
             0..0,
             "unsupported devices",

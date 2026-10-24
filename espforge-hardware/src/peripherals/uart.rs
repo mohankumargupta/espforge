@@ -1,35 +1,21 @@
 //! `<uart>` peripheral lowering.
 //!
-//! The `<uart_component>` branch lives in
-//! [`crate::components::uart_component`]; the draft below is shared
-//! between the two.
+//! The `<uart_component>` branch lives in [`crate::board`]; this module only
+//! turns one `<uart>` node into its peripheral name and two pins.
 
-use crate::UartSpec;
 use espf::context::ParsedNode;
 use espf::diag::EspfError;
 use espforge_bindings::components::attrs::Issue;
 use espforge_bindings::components::generated_elements::uart as schema;
 
-/// The `<uart_component>` riding on a `<uart>`: its fields are what the
-/// generated code ends up with (framing lives on the component).
 #[derive(Debug, Clone)]
-pub struct UartCompDraft {
-    pub name: String,
-    pub baud: u32,
-    pub parity: String,
-    pub stop_bits: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct UartDraft {
+pub struct UartPeripheral {
     /// The `<uart>` id, which is also the peripheral id unless `uart="UARTn"`
     /// overrides it.
     pub id: String,
     pub peripheral: String,
     pub tx: u8,
     pub rx: u8,
-    /// The component riding on this uart, if any.
-    pub component: Option<UartCompDraft>,
 }
 
 /// The implicit way to name a `<uart>`'s physical peripheral: `uart0` ->
@@ -68,7 +54,7 @@ pub fn uart_attr_peripheral(n: &ParsedNode, raw: &str) -> Result<String, EspfErr
 }
 
 /// The `<uart>` branch of the `# peripherals` loop.
-pub fn lower_uart(n: &ParsedNode) -> Result<UartDraft, EspfError> {
+pub fn lower_uart(n: &ParsedNode) -> Result<UartPeripheral, EspfError> {
     let attrs = schema::Attrs::from_node(n)
         .map_err(|issue| EspfError::at_node(n, "invalid uart pin", message(n.id, issue)))?;
     let peripheral = match attrs.uart {
@@ -78,12 +64,11 @@ pub fn lower_uart(n: &ParsedNode) -> Result<UartDraft, EspfError> {
         // Backwards compatible: the id itself names the peripheral.
         None => uart_peripheral_name(n)?,
     };
-    Ok(UartDraft {
+    Ok(UartPeripheral {
         id: n.id.to_string(),
         peripheral,
         tx: attrs.tx.value,
         rx: attrs.rx.value,
-        component: None,
     })
 }
 
@@ -94,23 +79,4 @@ fn message(id: &str, issue: Issue<'_>) -> String {
             format!("<uart id=\"{id}\"> needs a numeric {attr}=\"...\"")
         }
     }
-}
-
-/// A bare `<uart>` with no component generates nothing: the app can only
-/// reach the uart through a component anyway.
-pub fn finish_uart(uarts: Vec<UartDraft>) -> Vec<UartSpec> {
-    uarts
-        .into_iter()
-        .filter_map(|u| {
-            u.component.map(|c| UartSpec {
-                name: c.name,
-                peripheral: u.peripheral,
-                tx: u.tx,
-                rx: u.rx,
-                baud: c.baud,
-                parity: c.parity,
-                stop_bits: c.stop_bits,
-            })
-        })
-        .collect()
 }

@@ -1,7 +1,6 @@
 $ espforge check gpio-non-numeric-pin.espf.txt
-exit: 0
+exit: 1
 --- stdout ---
-✓ gpio-non-numeric-pin.espf.txt is valid
 --- stderr ---
 error: invalid gpio pin
  --> gpio-non-numeric-pin.espf.txt:7:3

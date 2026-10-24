@@ -1,9 +1,9 @@
-use espf::context::{ResolvedDevice, RuntimeContext};
+use espf::context::ParsedNode;
 
-pub fn init(device: &ResolvedDevice, _ctx: &RuntimeContext) -> Result<(), String> {
+pub fn init(_device: &ParsedNode) -> Result<(), String> {
     // println!(
-    //     "📺 [Driver Initialised] Type: ILI9341 Display | ID: '{}' | Resolved Binding Internal Handle: {}",
-    //     device.raw_node.id, device.id_handle.0
+    //     "📺 [Driver Initialised] Type: ILI9341 Display | ID: '{}'",
+    //     device.id
     // );
     Ok(())
 }

@@ -15,10 +15,9 @@
 //! UPDATE_DIAGNOSTICS=1 cargo test -p espforge --test diagnostics
 //! ```
 //!
-//! Note what today's output shows and Phase 2 will deliberately change:
-//! validation-stage problems exit 1, but problems found by the hardware stage
-//! ("valid, but `build` cannot generate it yet") render as `error:` snippets
-//! *and* still print `✓ ... is valid` with exit 0.
+//! Every problem now exits 1 and suppresses `✓ ... is valid`, including the
+//! hardware stage: `check` builds the same `Board` as `build`, so there is no
+//! "valid but unbuildable" state left to snapshot.
 
 use std::fs;
 use std::path::{Path, PathBuf};

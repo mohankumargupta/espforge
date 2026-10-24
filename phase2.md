@@ -1,14 +1,14 @@
 # Phase 2: typed IR + diagnostics (extreme.md §3.3, §3.4, §7)
 
-**Status:** in progress. Increments 1–3 landed on 2026-10-24, and increment 4's production
-flip is in place: `check` and `build` now lower into a `Board` and emit its `Hardware`
-projection. Increment 4's deletion half has started: the `$` graph is resolved by
-`espf::context::Refs` (owned ids/kinds, no handles or 128-slot tables), and board lowering
-parses the generated `Attrs` directly instead of calling the typed wrappers. The old
-`lower`, drafts, wrappers, `conflicts.rs` and `RuntimeContext` remain in the tree — no
-longer on the production lowering path, but still used by the dual-run tests and by
-driver routing in `check` (see §7). Increments 5–6 are not started. Phase 1 is complete
-(`phase1.md`): the schema is the single source of truth and both halves are generated.
+**Status:** in progress. Increments 1–5 landed on 2026-10-24. `check` and `build` lower
+into a `Board` and emit its `Hardware` projection; the `$` graph is the owned
+`espf::context::Refs`; and the old middle — `RuntimeContext`, the typed wrappers, the
+drafts/`attach_*` steps, `conflicts.rs` and the dual-run test — is deleted. `check` is
+now the same single act as `build` (a hardware error exits 1 and never prints
+`✓ … is valid`), every diagnostic carries a stable code, and `check --format json`
+returns the diagnostics plus the board. Increment 6 remains: the panic audit, metrics
+and the final gate evidence. Phase 1 is complete (`phase1.md`): the schema is the single
+source of truth and both halves are generated.
 
 This file is the phase's plan and progress log. §2 lists what must be decided before the
 first increment, §3 the increments and their gates, §5 the baseline this phase is measured
@@ -49,10 +49,10 @@ Verified at the phase start (and re-checked before increment 1 landed):
   `espf-syntax` or `espforge-cli`.
 - `cargo test --workspace` was green at **294 passed, 1 ignored, 0 failed**; it is
   **329 passed, 1 ignored** after increment 4's production flip.
-- The `check` half-state is real: `espforge/src/commands/check.rs` reports
-  `pipeline::buildable` errors as snippets and then unconditionally prints
-  `✓ <file> is valid` and returns 0. That is the `buildable()` split extreme.md §3.3 says
-  collapses.
+- The `check` half-state was real at the phase start: `espforge/src/commands/check.rs`
+  reported `pipeline::buildable` errors as snippets and then printed
+  `✓ <file> is valid` and returned 0. That is the `buildable()` split extreme.md §3.3
+  said would collapse; increment 5 removed it.
 - Phase 1 made this phase cheaper in three specific places: attributes already arrive as
   typed values with spans (no parsing in the IR), `<spi_component cs>` is already a
   `pin_or_ref`, and a write-only SPI bus is already `Option<u8>`.
@@ -141,8 +141,8 @@ unless the increment explicitly says otherwise.
 | 1 | `espforge-diagnostics`: one diagnostic type, codes, human + JSON renderers | **landed 2026-10-24** |
 | 2 | `Board`, `ResourceGraph`, `ClaimedPin`: the data model and claim rules | **landed 2026-10-24** |
 | 3 | Lowering onto the IR, one element family at a time, with projection equality | **landed (dual-run) 2026-10-24** |
-| 4 | Delete `RuntimeContext`, wrappers, drafts, `conflicts.rs` | **in progress — production flipped 2026-10-24** |
-| 5 | One pipeline path: `check` builds a `Board`, `--format json`, baseline defects | not started |
+| 4 | Delete `RuntimeContext`, wrappers, drafts, `conflicts.rs` | **landed 2026-10-24** |
+| 5 | One pipeline path: `check` builds a `Board`, `--format json`, baseline defects | **landed 2026-10-24** |
 | 6 | Close: panic audit, metrics, gate evidence | not started |
 
 ### Increment 1 — the diagnostics crate
@@ -217,8 +217,8 @@ vectors, preserving today's order (components for leds/buttons/spis, buses for
 i2cs/spi_buses/uarts) and the `parity`/`stop_bits` template tokens. That projection is the
 comparison surface: Phase 3's AST backend replaces it.
 
-`tests/board_dual_run.rs` runs `lower_spans` and `board::build` over every structurally
-valid embedded example. Where the old path succeeds, the projections are exactly equal;
+`tests/board_dual_run.rs` (deleted in increment 4 along with the old path) ran
+`lower_spans` and `board::build` over every structurally valid embedded example. Where the old path succeeds, the projections are exactly equal;
 where it fails, both paths fail. That covers helloworld, blink, button, spi_example,
 uart_example and the wifi example — the same specs behind the 16 golden cells. Failing
 specs are only asserted to fail on both sides for now; increment 4 makes wording and
@@ -237,76 +237,106 @@ increment 4 pins it against the corpus.
 
 ### Increment 4 — flip production, then delete the old middle
 
-**In progress: production flipped and the graph moved off `RuntimeContext`.**
-`pipeline::hardware` calls `espforge_hardware::board::build(..).map(|board| board.hardware())`,
-so `check` and `build` construct a `Board` and claim every pin on the way; the emitter still
-reads the projection. `board::build` now also resolves the `$` graph itself through the new
-`espf::context::Refs`, and parses the generated `Attrs` directly for led, button,
-i2c_component, spi_component and uart_component. The old `lower`, the drafts, the six
-wrappers, `conflicts.rs` and `RuntimeContext` are no longer on the production lowering
-path. The dual-run test still runs the old `lower` next to the new path, which is what
-keeps the deletion honest.
+**Landed 2026-10-24.** `pipeline::hardware` calls
+`espforge_hardware::board::build(..).map(|board| board.hardware())`, so `check` and `build`
+construct a `Board` and claim every pin on the way. `board::build` resolves the `$` graph
+through `espf::context::Refs`, then parses the generated `Attrs` directly for led, button,
+i2c_component, spi_component and uart_component. The emitter still reads the projection.
 
-**Graph errors keep their wording and order.** `Refs::resolve` reproduces the old
-`resolve_and_bind` checks — peripheral/component/device missing ids, component controller
-links, unknown peripheral/component references and i2c pin parsing — so the 24-case
-diagnostics corpus is unchanged by this move. `pipeline::validate` calls `Refs::resolve`
-for the front half, and `board::build` calls it again before lowering; a valid spec cannot
-disagree between the two.
+**Deleted, not bypassed:**
 
-**Twenty-three of the twenty-four diagnostics cases are byte-identical.** The one
-deliberate change is `conflict-led-vs-button`: the old label repeated the incoming id
-(`<led id="btn">`); the claim records both owners, so it now reads
-`<led id="red_led">`. The expected transcript was regenerated and is part of this diff.
-That closes the "a conflict names the wrong owner" defect early; the §3 increment 5
-defect table is updated to match. The other known defect, `check` printing `✓ … is valid`
-after a hardware error, still behaves as before — it is increment 5's change.
+- `RuntimeContext`, `Handle`, `IdInterner`, `ActivePeripheral`, `ActiveComponent`,
+  `ResolvedDevice` and the 128-slot tables (`espf/src/context.rs` now holds only
+  `ParsedNode`, `TagAttribute`, `Refs` and `PeripheralKind`).
+- The six typed wrappers and `resolve_component` in `espforge-bindings`, plus their tests.
+- The hardware `components/` modules and every `attach_*` step; the `*Draft` types were
+  reduced to the `I2cPeripheral`/`SpiPeripheral`/`UartPeripheral` values `board::build`
+  needs, with `finish_*` deleted.
+- `conflicts.rs`, the old `lower`/`lower_sections`/`lower_spans` and the `buildable_*`
+  helpers; `espf/build.rs` and its unused generated registry were dead and are gone too.
+- `tests/board_dual_run.rs`: its reference (`lower_spans`) no longer exists. The 24-case
+  diagnostics corpus, 31 CLI transcripts, 16 golden cells and the compile gate now carry
+  the comparison.
 
-Still to delete, in order:
+**Driver routing without handles.** `route_driver` takes
+`(tag_name, &ParsedNode)` and the registry still dispatches to each driver's `init`; the
+drivers are tag placeholders (`status_led`, `ili9341`, `tmp102`) and return `Ok` now that
+binding validity comes from `Refs` and devices are rejected by `build`. The corpus case
+`device-unknown-driver` keeps its exact plain-text message and exit code.
 
-1. `route_driver` still reads `RuntimeContext` handles. `check` builds a context solely
-   for that loop; devices are rejected by `build`, so this is mostly deleting a dead loop
-   and its handles.
-2. ~~Move the graph errors off `RuntimeContext`~~ — done: `Refs::resolve` owns them, and
-   `board::build` calls it. The old `RuntimeContext` copy remains only for the old lowering
-   and the driver loop.
-3. Then delete `RuntimeContext`, `Handle`, `IdInterner`, the 128-slot tables, the wrappers
-   and `resolve_component`, every `*Draft` and `attach_*`/`lower_*` step, and
-   `conflicts.rs`. `espf::context::{ParsedNode, TagAttribute}` stays: it is parsed syntax,
-   not the graph. The Phase 1 coercions (`Attrs`, generated elements, `attrs.rs`) stay.
+**Graph errors keep their wording and order.** `Refs::resolve` reproduces the old checks —
+peripheral/component/device missing ids, component controller links, unknown
+peripheral/component references and i2c pin parsing — so 23 of the 24 diagnostics cases are
+byte-identical. The one deliberate change remains `conflict-led-vs-button`: the old label
+repeated the incoming id (`<led id="btn">`); the claim records both owners, so it reads
+`<led id="red_led">`. That closes the "a conflict names the wrong owner" defect early;
+`check` printing `✓ … is valid` after a hardware error is still increment 5's fix.
 
-Gate for the deletion: `grep -rn 'RuntimeContext\|*Draft\|attach_\|conflicts::check_all'`
-is empty outside docs and `extreme.md`; `cargo test --workspace` green; 23 unchanged
-corpus cases plus the one recorded owner fix; goldens, transcripts and the compile gate
-unchanged; the `espforge espf` CLI untouched.
-
-Production-flip gate (met): workspace **329 passed, 1 ignored, 0 failed**; compile gate
-green (21.8 s); goldens and transcripts unchanged; one reviewed corpus diff.
+Gate: no definitions or uses of `RuntimeContext`, `Handle`, `*Draft`, `attach_*`,
+`conflicts::check_all` or `resolve_component` remain (only historical prose in
+`phase2.md`/`extreme.md` and `espforge-model`'s design note); `cargo test --workspace`
+**291 passed, 1 ignored, 0 failed**; compile gate green (19.0 s); 23 unchanged corpus cases
+plus the one recorded owner fix; goldens and transcripts unchanged; the `espforge espf` CLI
+untouched.
 
 ### Increment 5 — one path, one renderer, machine output
 
-Collapse `validate`/`buildable` into one act. `Board::build` is the only constructor, so
-"valid but unbuildable" stops existing: `check` exits 1 and prints no `✓ ... is valid`
-after an error. Replace `Invalid::{Spans, Message}` and the remaining `String` errors with
-`Diagnostics`; the CLI prints through the one renderer. Add `check --format json`
-(diagnostics + board) with stable codes and spans.
+**Landed 2026-10-24.** `check` now runs `validate` then `pipeline::board`, the same
+`Board::build` `build` uses. There is no `buildable()` and no second act: a hardware
+error is a failure, so `check` exits 1 and never prints `✓ ... is valid` for a spec that
+cannot be generated. Driver routing still runs before lowering, so a device tag keeps its
+`No compile-time driver engine found` message instead of the temporary "devices are not
+buildable" refusal.
+
+**One diagnostic model at the CLI.** `Invalid::Spans` became
+`Invalid::Diagnostics(Diagnostics)`; `frontend::report` takes `Diagnostic`s and prints
+through `to_human`. `Invalid::Message` survives only as the CLI-level flag error D5
+explicitly allowed: it has no source location, keeps the historical one-line `❌ ...`,
+and is turned into a coded diagnostic for JSON. The source-level `EspfError` builders
+remain as producers, but every message resolves through one code table, so the CLI never
+sees a second diagnostic shape.
+
+**Stable codes.** `espforge-diagnostics/src/codes.rs` assigns one code per message:
+`E01xx` syntax, `E02xx` core, `E03xx` options/values/flags, `E04xx` `$` graph, `E05xx`
+peripherals, `E06xx` components, `E07xx` ownership/conflicts, `E08xx` services and driver
+routing. `Diagnostic::code` is now a `DiagCode`, not an `Option`; `E0999` is the
+"unclassified" sentinel and the JSON test fails if it ever reaches output. The human
+renderer still ignores codes, so no message text moved.
+
+**`check --format json`.** One document on stdout:
+
+```json
+{
+  "file": "embedded:01.Basics/blink",
+  "diagnostics": [ { "code": "E0702", "severity": "error", "message": "pin already used", "primary": { "file": "...", "span": [173, 177] }, "labels": [...], "help": null, "fixes": [] } ],
+  "board": null,
+  "notes": []
+}
+```
+
+A successful check puts the board in `board`; a failed one leaves it `null`. The board
+view is `espforge/src/commands/board_json.rs` (the CLI, so `espforge-model` stays
+dependency-free): metadata, pin/peripheral claims with owner spans, buses, components and
+services, all with source spans. `serde_json` is a CLI dependency; `espforge-model` did
+not gain one.
 
 Then, and only then, the baseline defects from `phase0-baseline.md` §5 that the new shape
 fixes for free:
 
 | Defect | Outcome in Phase 2 |
 |---|---|
-| `check` contradicts itself | fixed by `Board::build` as the single act |
-| a wrapper message leaks into a snippet label | fixed: attributes come from `Attrs`, earlier errors are `Diagnostic`s |
-| a conflict names the wrong owner | fixed in increment 4: the claim records both owners |
+| `check` contradicts itself | **fixed**: `Board::build` is the single act; 13 corpus snapshots moved from `exit 0` + `✓ ... is valid` to `exit 1`, message and span unchanged |
+| a wrapper message leaks into a snippet label | **fixed**: attributes come from `Attrs`; earlier errors are `Diagnostic`s |
+| a conflict names the wrong owner | **fixed in increment 4**: the claim records both owners |
 | silent duplicate id / unknown section | **decision** — schema/validation rule, not an IR bug |
 | out-of-range pins (`sda="99"`) | **decision** — needs the chip's pin table; may be its own increment |
 | examples that cannot generate | **D7**, separate reviewed change |
 | embassy corpus app is blocking | Phase 0 concern, unchanged here |
 
 Gate: diagnostics corpus and transcripts updated as explicit reviewed diffs (no message
-lost, primary spans preserved); `check --format json` snapshots for every corpus spec;
-`Board` JSON stable enough to snapshot for every validating example.
+lost, primary spans preserved); `check --format json` exercised for every corpus spec and
+every embedded example; `Board` JSON pinned for `01.Basics/blink` and required for every
+example that lowers. `conflict-led-vs-button` remains the one earlier wording fix.
 
 ### Increment 6 — close
 
@@ -354,15 +384,18 @@ extreme.md §7, restated as checks that can fail:
 1. **Every existing human diagnostic keeps its message and primary span.** The 24
    diagnostics corpus files and the 31 CLI transcripts are byte-identical, except where
    §3's increment 5 table says a defect is fixed — the wrong-owner label landed early, in
-   increment 4. Each such diff is reviewed and listed in §7.
-2. **`Board` JSON is stable and covers every example** (that validates — see D7). A
-   snapshot test enumerates the embedded examples and fails on a new field, not on
-   formatting noise.
+   increment 4, and 13 corpus cases now exit 1 with no `✓ ... is valid` after a hardware
+   error. Each such diff is reviewed and listed in §7.
+2. **`Board` JSON is stable and covers every example** (that validates — see D7).
+   `tests/check_json.rs` enumerates the corpus and every embedded example, requires a
+   board exactly when diagnostics are empty, checks every code/span, and pins the
+   `01.Basics/blink` shape.
 3. **The panic cases are gone.** The 129-peripheral spec, a malformed pin, a missing
    attribute, a zero-length span and a `<pwm>` all produce diagnostics or a clean refusal,
    never a panic.
 4. **The old middle is deleted, not bypassed.** No `RuntimeContext`, `*Draft`,
-   `attach_*`, `conflicts.rs`; no second validation pass in the CLI.
+   `attach_*`, `conflicts.rs`; no second validation pass in the CLI. (Landed in increment 4;
+   `grep` for the definitions is empty.)
 5. **Contracts unchanged.** `.espf` grammar, CLI words/exit codes, generated project
    layout and ownership semantics, runtime API, embedded examples.
 
@@ -383,6 +416,8 @@ cargo test -p espforge --test golden_projects -- --ignored   # compile gate
 | 2026-10-24 | 3 | `espforge-hardware/src/board.rs` lowers all five families into `Board` with claims; `Board::hardware()` projection; `tests/board_dual_run.rs` compares against the old path over every structurally valid embedded example (equal projections, or both fail). 10 board unit tests (including the legacy titles/spans for led/led, uart tx/rx, i2c bus reuse and peripheral clash), 2 dual-run tests, 1 projection test. Workspace **329 passed, 1 ignored, 0 failed**. CLI still on the old path, so corpus/transcripts/goldens unchanged. Two new wiring rejections found (`sda == scl`, `sclk == mosi`) recorded for increment 4. |
 | 2026-10-24 | 4 (flip) | `pipeline::hardware` switched to `board::build(..).map(|b| b.hardware())`; `check`/`build` now construct a `Board`. Workspace **329 passed, 1 ignored, 0 failed**; compile gate green; goldens and transcripts unchanged; one reviewed corpus diff — `conflict-led-vs-button` now names `<led id="red_led">` instead of repeating the button's id. Deletion of the old middle (route_driver handles, graph errors, `RuntimeContext`, wrappers, drafts, `conflicts.rs`) remains. |
 | 2026-10-24 | 4 (graph + wrappers) | `espf::context::Refs` replaces `RuntimeContext::resolve_and_bind` for the production `$` graph: owned ids/peripheral kinds, same titles/labels/spans, same order. `board::build` calls it, and parses the generated `Attrs` directly for all five component families (the wrappers' wording is copied, not imported). `pipeline::validate` uses `Refs`; `Checked` no longer carries a context. Workspace **329 passed, 1 ignored, 0 failed**; compile gate green (19.4 s); diagnostics corpus (24 cases), transcripts (31) and goldens unchanged. `check` still builds a `RuntimeContext` only for `route_driver`, which is the remaining deletion blocker. |
+| 2026-10-24 | 4 (delete) | Deleted `RuntimeContext`/`Handle`/`IdInterner`/`Active*`/`ResolvedDevice`, the six wrappers + `resolve_component`, the hardware `components/` + `attach_*`, the `*Draft` types and `finish_*`, `conflicts.rs`, the old `lower*`/`buildable*` helpers, the dual-run test and the dead `espf/build.rs`. `route_driver` now takes `(tag, &ParsedNode)`; the three driver `init`s are tag placeholders because devices are not lowered. Four board tests added for the deleted units' key wording (input/output direction, bad i2c address, undefined cs ref). Workspace **291 passed, 1 ignored, 0 failed**; compile gate green (19.0 s); 23 corpus cases unchanged plus the recorded owner fix; transcripts and goldens unchanged. |
+| 2026-10-24 | 5 | `check` runs `validate` then `pipeline::board`; a hardware error exits 1 and prints no `✓ ... is valid` (13 corpus snapshots moved, messages/spans unchanged). `Invalid::Spans` became `Diagnostics`; `Invalid::Message` stays the CLI-level flag error allowed by D5. `codes.rs` assigns one code per message (E0101–E0809, `E0999` sentinel) and `Diagnostic::code` is no longer optional. `check --format json` returns diagnostics + board; the serializer lives in `espforge/src/commands/board_json.rs`, so `espforge-model` is still dependency-free. `tests/check_json.rs` enumerates all 24 corpus specs and every embedded example, checks codes/spans/board-null rules, pins `blink`, and asserts a hardware error is never reported valid. Workspace **299 passed, 1 ignored, 0 failed**; compile gate green (18.6 s on the final run); transcripts and goldens unchanged. |
 
 ## 8. Open questions carried in
 
@@ -392,7 +427,8 @@ cargo test -p espforge --test golden_projects -- --ignored   # compile gate
   in `espf.schema.kdl`.
 - **Appendix E Q4** is D4 above.
 - **Appendix E Q5** (driver registry from the schema) stays open. Phase 2 changes
-  `route_driver`'s input from `RuntimeContext` handles to resolved devices; it does not
-  change how the registry is generated.
+  `route_driver`'s input from `RuntimeContext` handles to the validated `ParsedNode` and
+  leaves the generated registry itself unchanged; driver bodies are placeholders until
+  devices are lowered.
 - **Phase 1 leftovers:** `kind="freq"` parsing moves in increment 3; `range=` is consumed
   by codegen but not rendered in docs, which remains a docs-surface question.

@@ -131,20 +131,36 @@ pub fn lower_services(services: &[ParsedNode]) -> Result<Option<WifiSpec>, Vec<E
 
 #[cfg(test)]
 mod tests {
-    use crate::{buildable_sections, lower_sections};
     use super::*;
+    use crate::Hardware;
+    use crate::board::build;
+    use espforge_model::{Console, Meta, Runtime};
 
     const WITH_WIFI: &str = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"embassy\" />\n# peripherals\n# components\n# devices\n# services\n  <wifi id=\"wifi0\" network1.ssid=\"Wokwi-GUEST\" />\n";
+
+    fn meta() -> Meta {
+        Meta {
+            name: "wifi".into(),
+            description: None,
+            chip: "esp32c3".into(),
+            runtime: Runtime::Blocking,
+            console: Console::Uart,
+        }
+    }
 
     fn sections(src: &str) -> std::collections::HashMap<String, Vec<espf::context::ParsedNode>> {
         espf::parser::parse_espf(src).sections
     }
 
-    // Helper: validate via full parse would need options/frontend; for
-    // lowering tests the sections map is enough (validate only feeds
-    // sections into lowering).
-    fn lower_src(src: &str) -> Result<crate::Hardware, String> {
-        lower_sections(&sections(src))
+    fn lower_src(src: &str) -> Result<Hardware, String> {
+        build(&sections(src), &meta())
+            .map(|board| board.hardware())
+            .map_err(|errs| {
+                errs.into_iter()
+                    .map(|e| format!("{}: {}", e.title, e.label))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })
     }
 
     #[test]
@@ -158,7 +174,7 @@ mod tests {
             })
         );
         assert!(hw.leds.is_empty());
-        assert!(buildable_sections(&sections(WITH_WIFI)).is_ok());
+        assert!(build(&sections(WITH_WIFI), &meta()).is_ok());
     }
 
     #[test]

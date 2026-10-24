@@ -161,7 +161,8 @@ pub fn execute(args: &BuildArgs) -> Result<(), Failure> {
         let doc =
             spec::effective_document(&checked.fe.parsed.sections, &checked.meta, &checked.answers)
                 .map_err(|errors| {
-                    frontend::report(&source.name, &source.text, &errors);
+                    let diagnostics: Vec<_> = errors.iter().map(|e| e.to_diagnostic()).collect();
+                    frontend::report(&source.name, &source.text, &diagnostics);
                     Failure::User
                 })?;
         let text = spec::render(&doc).map_err(|e| Failure::Internal(anyhow!("{e}")))?;

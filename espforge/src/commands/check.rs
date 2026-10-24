@@ -1,15 +1,22 @@
 //! `espforge check`: everything `build` validates, without writing anything.
 //!
 //! Exit codes: 0 valid, 1 problems found (diagnostics already printed).
+//!
+//! There is one act: [`pipeline::validate`] then [`pipeline::board`]. A spec
+//! that lowers to a `Board` is buildable, so `check` never prints `✓ ... is
+//! valid` after an error. `--format json` writes one document with the
+//! diagnostics (stable codes and spans) and the board.
 
-use clap::Args;
-use espf::context::RuntimeContext;
+use clap::{Args, ValueEnum};
+use espf::diag::node_span;
 use espforge_bindings::drivers::generated_registry::route_driver;
+use espforge_diagnostics::{Diagnostic, codes, json::diagnostics_value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use super::answers::AnswerArgs;
-use super::pipeline;
+use super::{board_json, pipeline};
 use crate::source::resolve_source;
 
 #[derive(Args, Debug, Clone, Default)]
@@ -19,9 +26,21 @@ pub struct CheckArgs {
     /// Check an embedded example instead of a file, e.g. 01.Basics/helloworld
     #[arg(long, value_name = "CATEGORY/NAME", conflicts_with = "file")]
     pub example: Option<String>,
+    /// Output format
+    #[arg(long, value_enum, default_value_t = Format::Human)]
+    pub format: Format,
     /// Same overrides `build` accepts, so `check` answers "would build accept this?"
     #[command(flatten)]
     pub answers: AnswerArgs,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Format {
+    /// Snippets on stderr, `✓ ... is valid` on stdout.
+    #[default]
+    Human,
+    /// One JSON document on stdout: diagnostics and the board.
+    Json,
 }
 
 pub fn run(args: CheckArgs) -> ExitCode {
@@ -32,52 +51,116 @@ pub fn run(args: CheckArgs) -> ExitCode {
 }
 
 fn execute(args: &CheckArgs) -> Result<(), u8> {
-    let source =
-        resolve_source(args.file.as_deref(), args.example.as_deref()).map_err(|m| {
-            eprintln!("❌ {m}");
-            1u8
-        })?;
+    let source = match resolve_source(args.file.as_deref(), args.example.as_deref()) {
+        Ok(source) => source,
+        Err(message) => {
+            match args.format {
+                Format::Human => eprintln!("❌ {message}"),
+                Format::Json => {
+                    emit_json(&source_label(args), &[cli_diagnostic(message)], None, &[])
+                }
+            }
+            return Err(1);
+        }
+    };
 
-    let checked = pipeline::validate(&source.text, &args.answers).map_err(|invalid| {
-        invalid.report(&source.name, &source.text);
-        1u8
-    })?;
-    for note in &checked.notes {
-        eprintln!("{note}");
+    let checked = match pipeline::validate(&source.text, &args.answers) {
+        Ok(checked) => checked,
+        Err(invalid) => {
+            match args.format {
+                Format::Human => invalid.report(&source.name, &source.text),
+                Format::Json => emit_json(&source.name, &invalid.diagnostics(), None, &[]),
+            }
+            return Err(1);
+        }
+    };
+    if args.format == Format::Human {
+        for note in &checked.notes {
+            eprintln!("{note}");
+        }
     }
 
-    // Driver routing: every device tag must have a compile-time driver. The
-    // graph is already validated; this context exists only because the driver
-    // signature still takes one (the lowering path no longer does).
-    let mut ctx = RuntimeContext::new();
-    if let Err(errs) = ctx.resolve_and_bind(
-        &checked.fe.parsed.sections["peripherals"],
-        &checked.fe.parsed.sections["components"],
-        &checked.fe.parsed.sections["devices"],
-    ) {
-        super::frontend::report(&source.name, &source.text, &errs);
-        return Err(1);
-    }
-    for device in &ctx.resolved_devices {
-        if let Err(msg) = route_driver(device.tag_name, device, &ctx) {
-            eprintln!("{msg}");
+    // Driver routing: every device tag must have a compile-time driver. Run
+    // before lowering so the message is the driver one, not the (temporary)
+    // "devices are not buildable" refusal.
+    for device in checked
+        .fe
+        .parsed
+        .sections
+        .get("devices")
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+    {
+        if let Err(message) = route_driver(device.tag_name, device) {
+            match args.format {
+                Format::Human => eprintln!("❌ {message}"),
+                Format::Json => {
+                    let diagnostic = Diagnostic::error(
+                        codes::DRIVER_UNKNOWN,
+                        node_span(device),
+                        message,
+                        format!("no driver is compiled for <{}>", device.tag_name),
+                    );
+                    emit_json(&source.name, &[diagnostic], None, &checked.notes);
+                }
+            }
             return Err(1);
         }
     }
 
-    // Valid, but say so when `build` cannot generate it yet.
-    // Located wiring errors render as snippets; flag problems as a warning line.
-    if let Err(invalid) = pipeline::buildable(&checked) {
-        match invalid {
-            pipeline::Invalid::Spans(errs) => {
-                super::frontend::report(&source.name, &source.text, &errs)
+    // The one act. A hardware error is a failure, not a warning: `build`
+    // cannot generate this spec, so `check` must not call it valid.
+    let board = match pipeline::board(&checked) {
+        Ok(board) => board,
+        Err(invalid) => {
+            match args.format {
+                Format::Human => invalid.report(&source.name, &source.text),
+                Format::Json => {
+                    emit_json(&source.name, &invalid.diagnostics(), None, &checked.notes)
+                }
             }
-            pipeline::Invalid::Message(m) => eprintln!("warning: {m}"),
+            return Err(1);
         }
-    }
+    };
 
-    println!("✓ {} is valid", source.name);
+    match args.format {
+        Format::Human => println!("✓ {} is valid", source.name),
+        Format::Json => emit_json(
+            &source.name,
+            &[],
+            Some(board_json::value(&board)),
+            &checked.notes,
+        ),
+    }
     Ok(())
+}
+
+/// A command-line answer with no source location. The human output keeps the
+/// historical one-line `❌`; JSON gets a diagnostic entry.
+fn cli_diagnostic(message: String) -> Diagnostic {
+    let code = codes::for_cli_message(&message);
+    Diagnostic::error(code, 0..0, message, "")
+}
+
+fn source_label(args: &CheckArgs) -> String {
+    args.file
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .or_else(|| args.example.clone())
+        .unwrap_or_else(|| "<no source>".to_string())
+}
+
+fn emit_json(file: &str, diagnostics: &[Diagnostic], board: Option<Value>, notes: &[String]) {
+    let document = json!({
+        "file": file,
+        "diagnostics": diagnostics_value(file, diagnostics),
+        "board": board,
+        "notes": notes,
+    });
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&document).expect("a serde_json::Value is serializable")
+    );
 }
 
 #[cfg(test)]
@@ -97,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn unbuildable_but_valid_specs_still_pass_with_a_warning() {
+    fn the_button_example_is_buildable_now() {
         assert!(execute(&example("02.Digital/button")).is_ok());
     }
 
@@ -106,6 +189,38 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let f = dir.path().join("bad.espf");
         std::fs::write(&f, "# espforge\n  <gpio id=\"a\" pin=\"4 />\n").unwrap();
+        let args = CheckArgs {
+            file: Some(f),
+            ..Default::default()
+        };
+        assert_eq!(execute(&args), Err(1));
+    }
+
+    #[test]
+    fn hardware_errors_fail_instead_of_printing_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("pwm.espf");
+        std::fs::write(
+            &f,
+            "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <pwm id=\"pwm0\" />\n# components\n# devices\n# services\n",
+        )
+        .unwrap();
+        let args = CheckArgs {
+            file: Some(f),
+            ..Default::default()
+        };
+        assert_eq!(execute(&args), Err(1));
+    }
+
+    #[test]
+    fn a_pin_conflict_fails_instead_of_printing_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("clash.espf");
+        std::fs::write(
+            &f,
+            "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"g\" pin=\"18\" />\n# components\n  <led id=\"a\" gpio=\"$g\" />\n  <led id=\"b\" gpio=\"$g\" />\n# devices\n# services\n",
+        )
+        .unwrap();
         let args = CheckArgs {
             file: Some(f),
             ..Default::default()

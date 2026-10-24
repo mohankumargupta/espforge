@@ -304,6 +304,18 @@ impl ResourceGraph {
     pub fn claim_of(&self, pin: Pin) -> Option<&Claim> {
         self.pins.get(&pin)
     }
+
+    /// Every pin claim, in pin order (the map is a `BTreeMap`).
+    pub fn pin_claims(&self) -> impl Iterator<Item = (Pin, &Claim)> {
+        self.pins.iter().map(|(&pin, claim)| (pin, claim))
+    }
+
+    /// Every peripheral claim, in name order.
+    pub fn peripheral_claims(&self) -> impl Iterator<Item = (&str, &Claim)> {
+        self.peripherals
+            .iter()
+            .map(|(name, claim)| (name.as_str(), claim))
+    }
 }
 
 /// A bus and the pins it owns.

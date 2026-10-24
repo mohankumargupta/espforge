@@ -26,19 +26,23 @@
 //! | `E05xx` | peripherals (`<gpio>`, `<i2c>`, `<spi>`, `<uart>`) |
 //! | `E06xx` | components (`<led>`, `<button>`, `<*_component>`) |
 //! | `E07xx` | ownership and conflicts |
-//! | `E08xx` | driver routing |
+//! | `E08xx` | services and driver routing |
 //! | `W0xxx` | warnings |
 //!
-//! **Migration state:** Phase 2 increment 1 moves the container and the
-//! renderers; codes are assigned to each message in increment 5, so
-//! [`Diagnostic::code`] is `Option` for now. The human renderer ignores it and
-//! `to_json` emits `null`, which keeps the existing snapshots honest until the
-//! assignment is real. Increment 5 drops the `Option`.
+//! `E0999` is the sentinel for a message missing from the table; it is a bug
+//! if it reaches output, and the JSON contract test rejects it.
+//!
+//! Every diagnostic carries a code. The table lives in [`codes`], one entry
+//! per message, so a stage cannot invent a number another stage already uses.
+//! The human renderer ignores the code; [`to_json`] is where it is a contract.
 
 use std::ops::Range;
 
+pub mod codes;
 pub mod json;
 pub mod render;
+
+pub use codes::for_message;
 
 pub use json::to_json;
 pub use render::to_human;
@@ -117,8 +121,8 @@ pub struct Fix {
 /// primary span, with no text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
-    /// Assigned per message in Phase 2 increment 5; `None` until then.
-    pub code: Option<DiagCode>,
+    /// Stable code for this message (see [`codes`]).
+    pub code: DiagCode,
     pub severity: Severity,
     /// Short summary on the `error:` line (today's `EspfError::title`).
     pub message: String,
@@ -132,9 +136,14 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     /// An error with a primary span and one label.
-    pub fn error(primary: Span, message: impl Into<String>, label: impl Into<String>) -> Self {
+    pub fn error(
+        code: DiagCode,
+        primary: Span,
+        message: impl Into<String>,
+        label: impl Into<String>,
+    ) -> Self {
         Self {
-            code: None,
+            code,
             severity: Severity::Error,
             message: message.into(),
             labels: vec![Label {
@@ -148,17 +157,16 @@ impl Diagnostic {
     }
 
     /// A warning with a primary span and one label.
-    pub fn warning(primary: Span, message: impl Into<String>, label: impl Into<String>) -> Self {
+    pub fn warning(
+        code: DiagCode,
+        primary: Span,
+        message: impl Into<String>,
+        label: impl Into<String>,
+    ) -> Self {
         Self {
             severity: Severity::Warning,
-            ..Self::error(primary, message, label)
+            ..Self::error(code, primary, message, label)
         }
-    }
-
-    /// Attach the stable code.
-    pub fn with_code(mut self, code: DiagCode) -> Self {
-        self.code = Some(code);
-        self
     }
 
     /// Add a context underline.
@@ -195,7 +203,8 @@ mod tests {
 
     #[test]
     fn a_diagnostic_has_one_primary_label() {
-        let d = Diagnostic::error(4..8, "bad pin", "no GPIO99").with_label(20..24, "declared here");
+        let d = Diagnostic::error(codes::GPIO_INVALID_PIN, 4..8, "bad pin", "no GPIO99")
+            .with_label(20..24, "declared here");
         assert_eq!(d.severity, Severity::Error);
         assert_eq!(d.primary_label().unwrap().text, "no GPIO99");
         assert_eq!(d.labels.len(), 2);
@@ -203,8 +212,8 @@ mod tests {
 
     #[test]
     fn codes_are_data_not_prefixes() {
-        let d = Diagnostic::error(0..1, "boom", "here").with_code(DiagCode::new("E0701"));
-        assert_eq!(d.code.unwrap().as_str(), "E0701");
+        let d = Diagnostic::error(DiagCode::new("E0701"), 0..1, "boom", "here");
+        assert_eq!(d.code.as_str(), "E0701");
     }
 
     #[test]

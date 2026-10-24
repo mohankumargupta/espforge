@@ -1,7 +1,6 @@
 $ espforge check conflict-uart-vs-i2c.espf.txt
-exit: 0
+exit: 1
 --- stdout ---
-✓ conflict-uart-vs-i2c.espf.txt is valid
 --- stderr ---
 error: pin conflict
  --> conflict-uart-vs-i2c.espf.txt:8:3

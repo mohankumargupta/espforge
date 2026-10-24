@@ -1,7 +1,6 @@
 $ espforge check uart-tx-equals-rx.espf.txt
-exit: 0
+exit: 1
 --- stdout ---
-✓ uart-tx-equals-rx.espf.txt is valid
 --- stderr ---
 error: uart wiring
  --> uart-tx-equals-rx.espf.txt:7:3

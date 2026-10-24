@@ -11,6 +11,8 @@ espforge-espgenerate-template = { path = "../espforge-espgenerate-template" }
 anyhow = "1"
 espf = { path = "../espf" }
 espforge-bindings = { path = "../espforge-bindings" }
+espforge-diagnostics = { path = "../espforge-diagnostics" }
+serde_json = { workspace = true }
 espforge-model = { path = "../espforge-model" }
 espforge-hardware = { path = "../espforge-hardware" }
 clap = { version = "4", features = ["derive"] }

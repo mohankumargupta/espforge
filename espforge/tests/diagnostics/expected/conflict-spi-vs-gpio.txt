@@ -1,7 +1,6 @@
 $ espforge check conflict-spi-vs-gpio.espf.txt
-exit: 0
+exit: 1
 --- stdout ---
-✓ conflict-spi-vs-gpio.espf.txt is valid
 --- stderr ---
 error: pin conflict
  --> conflict-spi-vs-gpio.espf.txt:7:3

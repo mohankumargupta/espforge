@@ -105,11 +105,17 @@ impl EspfError {
         }
     }
 
-    /// This error in the one diagnostic model, for rendering. The code stays
-    /// unassigned until Phase 2 increment 5 moves each message to a
-    /// `Diagnostic` constructor.
+    /// This error in the one diagnostic model, for rendering and JSON.
+    ///
+    /// The stable code comes from the message table in
+    /// [`espforge_diagnostics::codes`]; the human renderer does not print it.
     pub fn to_diagnostic(&self) -> Diagnostic {
-        Diagnostic::error(self.span.clone(), self.title.clone(), self.label.clone())
+        Diagnostic::error(
+            espforge_diagnostics::for_message(&self.title),
+            self.span.clone(),
+            self.title.clone(),
+            self.label.clone(),
+        )
     }
 }
 

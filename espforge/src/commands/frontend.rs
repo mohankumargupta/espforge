@@ -1,8 +1,9 @@
 //! The front half of the pipeline, shared by `check` and `build`:
 //! parse -> syntax + structure errors -> `# espforge` core -> `<options>`.
 
-use espf::diag::{EspfError, render_errors};
+use espf::diag::EspfError;
 use espf::parser::Parsed;
+use espforge_diagnostics::{Diagnostic, to_human};
 use espforge_model::Meta;
 use espforge_options::{Answers, DerivedInputs, core_from_section, embedded_schema};
 
@@ -44,12 +45,12 @@ pub fn load(src: &str) -> Result<Frontend<'_>, Vec<EspfError>> {
     })
 }
 
-/// Print each error as a snippet block, then a one-line summary.
-pub fn report(name: &str, src: &str, errors: &[EspfError]) {
-    eprintln!("{}", render_errors(name, src, errors));
+/// Print each diagnostic as a snippet block, then a one-line summary.
+pub fn report(name: &str, src: &str, diagnostics: &[Diagnostic]) {
+    eprintln!("{}", to_human(name, src, diagnostics));
     eprintln!(
         "❌ Found {} problem(s) in '{}'; fix them and re-run.",
-        errors.len(),
+        diagnostics.len(),
         name
     );
 }

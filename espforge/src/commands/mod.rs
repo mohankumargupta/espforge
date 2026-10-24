@@ -1,4 +1,5 @@
 pub mod answers;
+pub mod board_json;
 pub mod build;
 pub mod check;
 pub mod doctor;

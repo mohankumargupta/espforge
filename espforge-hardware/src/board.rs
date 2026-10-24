@@ -1,12 +1,11 @@
 //! Lowering into the typed IR (`Board`).
 //!
 //! Phase 2 increment 4: `check` and `build` come through here. The `$` graph is
-//! resolved by [`espf::context::Refs`] (the same problems and wording the old
-//! `RuntimeContext` reported), attributes are the Phase 1 generated `Attrs`,
-//! and every pin is claimed through [`ResourceGraph::claim`] as the element is
-//! built instead of being checked in a later pass. The typed wrappers are no
-//! longer on this path; the old lowering remains only as the dual-run
-//! reference in `tests/board_dual_run.rs`.
+//! resolved by [`espf::context::Refs`], attributes are the Phase 1 generated
+//! `Attrs`, and every pin is claimed through [`ResourceGraph::claim`] as the
+//! element is built instead of being checked in a later pass. This is the only
+//! lowering path: the handle-based graph, the typed wrappers, the drafts and
+//! the post-hoc conflict pass are gone.
 //!
 //! "Only a valid board can exist" is enforced as far as the crate split
 //! allows today: fields are public so the emitter's projection can live in
@@ -19,11 +18,13 @@ use std::collections::{HashMap, HashSet};
 use espf::context::{ParsedNode, PeripheralKind, Refs};
 use espf::diag::{EspfError, node_span};
 use espforge_bindings::components::attrs::{Issue, PinOrRef};
+use espforge_bindings::components::generated_elements::uart_component::{
+    Parity as SchemaParity, StopBits as SchemaStopBits,
+};
 use espforge_bindings::components::generated_elements::{
     button as button_schema, i2c_component as i2c_schema, led as led_schema,
     spi_component as spi_schema, uart_component as uart_schema,
 };
-use espforge_bindings::components::{Parity as SchemaParity, StopBits as SchemaStopBits};
 use espforge_model::Meta;
 use espforge_model::board::{
     Board, Bus, BusId, Button, ClaimedPin, Component, Conflict, ConflictKind, Framing,
@@ -39,10 +40,9 @@ use crate::services::wifi;
 
 /// Build a `Board` from the parsed sections.
 ///
-/// The `$` graph is resolved here, with the same problems and wording the old
-/// `RuntimeContext` reported. Peripherals come first (in source order), then
-/// components, then services; pins are claimed as each element is built, so a
-/// conflict is an error at the element that would have owned it.
+/// The `$` graph is resolved here first, then peripherals come in source order,
+/// then components, then services. Pins are claimed as each element is built,
+/// so a conflict is an error at the element that would have owned it.
 pub fn build(
     sections: &HashMap<String, Vec<ParsedNode>>,
     meta: &Meta,
@@ -826,7 +826,7 @@ fn uart_node<'a>(
     ))
 }
 
-/// The wrapper's reference wording, kept byte-identical.
+/// The reference wording users already know, kept byte-identical.
 fn require_bus(
     n: &ParsedNode,
     refs: &Refs,
@@ -1139,6 +1139,52 @@ mod tests {
         let err = build_src(src).unwrap_err();
         assert_eq!(err[0].title, "peripheral clash");
         assert!(err[0].label.contains("both use UART1"), "{}", err[0].label);
+    }
+
+    #[test]
+    fn a_led_on_an_input_pin_is_refused() {
+        let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"g\" pin=\"4\" direction=\"input\" />\n# components\n  <led id=\"l\" gpio=\"$g\" />\n# devices\n# services\n";
+        let err = build_src(src).unwrap_err();
+        assert_eq!(err[0].title, "wrong gpio direction");
+        assert!(
+            err[0].label.contains("needs an output pin"),
+            "{}",
+            err[0].label
+        );
+    }
+
+    #[test]
+    fn a_button_on_an_output_pin_is_refused() {
+        let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"g\" pin=\"4\" direction=\"output\" />\n# components\n  <button id=\"b\" gpio=\"$g\" />\n# devices\n# services\n";
+        let err = build_src(src).unwrap_err();
+        assert_eq!(err[0].title, "wrong gpio direction");
+        assert!(
+            err[0].label.contains("needs an input pin"),
+            "{}",
+            err[0].label
+        );
+    }
+
+    #[test]
+    fn a_bad_i2c_address_keeps_the_wrapper_wording() {
+        let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <i2c id=\"i2c0\" sda=\"4\" scl=\"5\" />\n# components\n  <i2c_component id=\"c\" i2c=\"$i2c0\" address=\"0xZZ\" />\n# devices\n# services\n";
+        let err = build_src(src).unwrap_err();
+        assert_eq!(err[0].title, "invalid i2c_component");
+        assert_eq!(
+            err[0].label,
+            "❌ [i2c_component] 'c' invalid hex address '0xZZ'"
+        );
+    }
+
+    #[test]
+    fn a_spi_cs_naming_an_undefined_gpio_is_refused() {
+        let src = "# espforge\n  <project name=\"t\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" />\n# components\n  <spi_component id=\"d\" spi=\"$spi2\" cs=\"$gpioX\" />\n# devices\n# services\n";
+        let err = build_src(src).unwrap_err();
+        assert_eq!(err[0].title, "invalid spi_component");
+        assert_eq!(
+            err[0].label,
+            "❌ [spi_component] 'd' cs references undefined gpio 'gpioX'"
+        );
     }
 
     #[test]

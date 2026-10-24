@@ -1,7 +1,6 @@
 $ espforge check conflict-led-vs-led.espf.txt
-exit: 0
+exit: 1
 --- stdout ---
-✓ conflict-led-vs-led.espf.txt is valid
 --- stderr ---
 error: pin already used
   --> conflict-led-vs-led.espf.txt:11:3

@@ -10,12 +10,11 @@
 //!
 //! - **The schema owns presence and kind.** "Is `address` required", "is `mode`
 //!   0..=3", "is `parity` one of none/even/odd" are read from
-//!   `espf.schema.kdl`, never restated in a wrapper.
+//!   `espf.schema.kdl`, never restated in lowering.
 //! - **The message is not owned here.** A coercion returns an [`Issue`]; the
-//!   wrapper that owns the element's wording turns it into the text the user
-//!   sees. That keeps this step byte-identical for existing errors, and leaves
-//!   one place per element to change when diagnostics become codes
-//!   (extreme.md §3.4).
+//!   element's lowering turns it into the text the user sees. That keeps this
+//!   step byte-identical for existing errors, and leaves one place per element
+//!   to change when diagnostics become codes (extreme.md §3.4).
 
 use espf::context::{ParsedNode, TagAttribute};
 

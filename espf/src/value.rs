@@ -9,7 +9,7 @@
 //!
 //! Every error carries the byte span of the offending attribute key, so
 //! `diag::render_errors` can underline it. The raw `ParsedNode::attributes`
-//! list stays untouched for callers (e.g. `RuntimeContext`) that scan it.
+//! list stays untouched for callers that scan it.
 
 use crate::context::{AttrOp, ParsedNode, TagAttribute};
 use crate::diag::EspfError;

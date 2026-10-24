@@ -12,11 +12,11 @@ pub mod tmp102;
 /// so the `espforge espf` catalog can be drift-checked against it.
 pub const TAGS: &[&str] = &["status_led", "ili9341", "tmp102"];
 
-pub fn route_driver(tag_name: &str, device: &espf::context::ResolvedDevice, ctx: &espf::context::RuntimeContext) -> Result<(), String> {
+pub fn route_driver(tag_name: &str, device: &espf::context::ParsedNode) -> Result<(), String> {
 match tag_name {
-        "status_led" => status_led::init(device, ctx),
-        "ili9341" => ili9341::init(device, ctx),
-        "tmp102" => tmp102::init(device, ctx),
-_ => Err(format!("❌ No compile-time driver engine found for runtime tag <{}>", tag_name)),
+        "status_led" => status_led::init(device),
+        "ili9341" => ili9341::init(device),
+        "tmp102" => tmp102::init(device),
+_ => Err(format!("No compile-time driver engine found for runtime tag <{}>", tag_name)),
 }
 }
