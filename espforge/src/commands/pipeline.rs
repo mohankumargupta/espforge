@@ -96,12 +96,17 @@ pub fn validate<'a>(src: &'a str, flags: &AnswerArgs) -> Result<Checked<'a>, Inv
     })
 }
 
-/// The hardware and services `build` can generate code for today. See
-/// `espforge-hardware::lower` for the per-bus breakdown. `ctx` is the bound
-/// `$` graph from `validate`. Wiring errors are `Invalid::Spans` so
+/// The hardware and services `build` can generate code for today.
+///
+/// Phase 2 increment 4: this is the IR path. `board::build` constructs the
+/// typed `Board` (claiming pins as it goes); the emitter still reads the
+/// `Hardware` projection until Phase 3 replaces the templates. `ctx` is the
+/// bound `$` graph from `validate`. Wiring errors are `Invalid::Spans` so
 /// `check`/`build` render them as snippets via `Invalid::report`.
 pub fn hardware(c: &Checked) -> Result<Hardware, Invalid> {
-    espforge_hardware::lower(&c.fe.parsed.sections, &c.ctx).map_err(Invalid::Spans)
+    espforge_hardware::board::build(&c.fe.parsed.sections, &c.ctx, &c.meta)
+        .map(|board| board.hardware())
+        .map_err(Invalid::Spans)
 }
 
 /// Whether `build` can turn this spec into firmware. `build` fails on `Err`;

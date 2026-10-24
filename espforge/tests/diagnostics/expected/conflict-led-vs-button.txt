@@ -7,6 +7,6 @@ error: pin direction clash
   --> conflict-led-vs-button.espf.txt:11:3
    |
 11 |   <button id="btn" gpio="$g" />
-   |   ^^^^^^^ <led id="btn"> and <button id="btn">: one pin cannot be both input and output
+   |   ^^^^^^^ <led id="red_led"> and <button id="btn">: one pin cannot be both input and output
 
 ❌ Found 1 problem(s) in 'conflict-led-vs-button.espf.txt'; fix them and re-run.

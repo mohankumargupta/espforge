@@ -160,7 +160,11 @@ pub fn build(
                 )]);
             }
         }
-    }
+    } // A bus pin claimed by a `<gpio>` declaration is an error before any
+    // component is built, which is the order the old conflict pass used:
+    // the corpus pins `conflict-spi-vs-gpio` at the gpio, not at the led that
+    // happens to use the same pin.
+    check_bus_gpio_declarations(sections, &gpios, &graph)?;
 
     for n in sections.get("components").map(Vec::as_slice).unwrap_or(&[]) {
         match n.tag_name {
@@ -345,7 +349,7 @@ pub fn build(
             None => Vec::new(),
         };
 
-    check_gpio_declarations(sections, &gpios, &graph, &components, &cs_gpios)?;
+    check_spi_cs_gpio_declarations(sections, &gpios, &components, &cs_gpios)?;
 
     Ok(Board {
         meta: meta.clone(),
@@ -433,12 +437,14 @@ fn ir_stop_bits(stop_bits: SchemaStopBits) -> StopBits {
 /// `<gpio>` is a pin declaration, not an owner: a led or button that uses it
 /// claims the pin itself. A bus, or someone else's chip select, sharing the
 /// declared pin is still a wiring error, and this is where it is caught.
-fn check_gpio_declarations(
+/// `<gpio>` is a pin declaration, not an owner: a led or button that uses it
+/// claims the pin itself. A bus sharing the declared pin is still a wiring
+/// error, and this is where it is caught (before any component claim, so the
+/// error points at the gpio as the old pass did).
+fn check_bus_gpio_declarations(
     sections: &HashMap<String, Vec<ParsedNode>>,
     gpios: &[GpioEntry],
     graph: &ResourceGraph,
-    components: &[Component],
-    cs_gpios: &HashSet<String>,
 ) -> Result<(), Vec<EspfError>> {
     for bus in graph.buses() {
         match bus {
@@ -475,6 +481,18 @@ fn check_gpio_declarations(
         }
     }
 
+    Ok(())
+}
+
+/// A chip select written as a pin number that collides with a declared
+/// `<gpio>`: the gpio is a second user of the pin unless the chip select named
+/// that gpio itself.
+fn check_spi_cs_gpio_declarations(
+    sections: &HashMap<String, Vec<ParsedNode>>,
+    gpios: &[GpioEntry],
+    components: &[Component],
+    cs_gpios: &HashSet<String>,
+) -> Result<(), Vec<EspfError>> {
     for component in components {
         if let Component::Spi(spi) = component {
             for gpio in gpios {
