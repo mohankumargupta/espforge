@@ -11,3 +11,8 @@ espforge-model = { path = "../espforge-model" }
 espf = { path = "../espf" }
 espforge-options = { path = "../espforge-options" }
 espforge-bindings = { path = "../espforge-bindings" }
+
+[dev-dependencies]
+# The dual-run test compares the old lowering and the Board path over the
+# embedded corpus; the examples crate is a data source only.
+espforge_examples = { path = "../espforge-examples" }

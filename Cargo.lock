@@ -1172,6 +1172,7 @@ dependencies = [
  "espforge-bindings",
  "espforge-model",
  "espforge-options",
+ "espforge_examples",
 ]
 
 [[package]]

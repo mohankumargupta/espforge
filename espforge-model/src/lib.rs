@@ -1,5 +1,7 @@
+pub mod board;
 pub mod hardware;
 
+pub use board::*;
 pub use hardware::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -25,6 +25,7 @@
 //! Item 2e: `buildable` is `lower(...).map(|_| ())` — the single validation
 //! path is `lower`; there is no separate buildability check.
 
+pub mod board;
 pub mod components;
 pub mod conflicts;
 pub mod devices;

@@ -1,11 +1,11 @@
 # Phase 2: typed IR + diagnostics (extreme.md §3.3, §3.4, §7)
 
-**Status:** in progress. Increment 1 (the diagnostics crate) landed on 2026-10-24;
-increments 2–6 are not started. Phase 1 is complete (`phase1.md`): the schema is the single
-source of truth and both halves are generated. The middle has not moved yet — there is
-still no `Board`, no `ResourceGraph` and no `ClaimedPin`; `espforge-diagnostics` now exists
-with the diagnostic type and both renderers, but the pipeline still produces `EspfError`
-and `Invalid` (see §7).
+**Status:** in progress. Increments 1–3 landed on 2026-10-24; increments 4–6 are not
+started. Phase 1 is complete (`phase1.md`): the schema is the single source of truth and
+both halves are generated. The diagnostics crate, the IR data model and a lowering path
+that builds a `Board` all exist and are dual-run against the old path. The CLI still calls
+the old `lower`: drafts, `conflicts.rs`, the wrappers and `RuntimeContext` are the
+production path until increment 4 flips it (see §7).
 
 This file is the phase's plan and progress log. §2 lists what must be decided before the
 first increment, §3 the increments and their gates, §5 the baseline this phase is measured
@@ -45,7 +45,7 @@ Verified at the phase start (and re-checked before increment 1 landed):
 - `Cargo.toml` still lists the pre-refactor members; there is no `espforge-core`,
   `espf-syntax` or `espforge-cli`.
 - `cargo test --workspace` was green at **294 passed, 1 ignored, 0 failed**; it is
-  **307 passed, 1 ignored** after increment 1.
+  **329 passed, 1 ignored** after increments 1–3.
 - The `check` half-state is real: `espforge/src/commands/check.rs` reports
   `pipeline::buildable` errors as snippets and then unconditionally prints
   `✓ <file> is valid` and returns 0. That is the `buildable()` split extreme.md §3.3 says
@@ -61,11 +61,12 @@ increment lands, so settle it while the diff is small.
 
 **D1 — Where do the IR and diagnostics live?**
 extreme.md puts both in `espforge-core`, which is the Phase 4 crate split. Creating that
-crate now would force the syntax/options move early. Proposal: add a leaf
+crate now would force the syntax/options move early. Proposal, taken: add a leaf
 `espforge-diagnostics` crate now (it is below every other crate, so it cannot cycle), and
-put `Board`/`ResourceGraph` in `espforge-model`, which already owns the value types and has
-no dependencies but `Diagnostic`. Phase 4 then merges `model` + `hardware` into `core`
-without moving the code again.
+put `Board`/`ResourceGraph` in `espforge-model`, which stays dependency-free: a claim
+returns structured `Conflict` data, and the lowering
+that knows the element turns it into a `Diagnostic`. Phase 4 then merges `model` +
+`hardware` into `core` without moving the code again.
 
 **D2 — What is the diagnostic code scheme?**
 Stable codes are a public contract (extreme.md §8.7). Proposal: `E01xx` syntax,
@@ -105,6 +106,12 @@ claiming in today's order (peripherals in spec order, components in spec order, 
 selects after the buses) and treating any precedence change found by the corpus as a
 reviewed diff, not a silent reorder. Do not weaken the corpus to make this pass.
 
+A related discovery from increment 2: today's *wording* orders the two owners by which
+`conflicts.rs` loop catches them, not by ownership (`i2c-vs-gpio` blames the gpio,
+`uart-vs-i2c` blames the i2c, a chip select on its own bus blames the device). That order
+cannot be derived from the claims, so `Conflict` carries both sides and the lowering keeps
+the exact sentence and primary span. See increment 2 for what that changed in the gate.
+
 **D7 — The four examples that cannot generate.**
 `04.Communication/i2c_scanner` (a `<i2c_component>` with no `address`),
 `i2c_example`, `spi_example_async` and `uart_example_async` (no `# services` section),
@@ -129,8 +136,8 @@ unless the increment explicitly says otherwise.
 | # | Increment | Status |
 |---|---|---|
 | 1 | `espforge-diagnostics`: one diagnostic type, codes, human + JSON renderers | **landed 2026-10-24** |
-| 2 | `Board`, `ResourceGraph`, `ClaimedPin`: the data model and claim rules | not started |
-| 3 | Lowering onto the IR, one element family at a time, with projection equality | not started |
+| 2 | `Board`, `ResourceGraph`, `ClaimedPin`: the data model and claim rules | **landed 2026-10-24** |
+| 3 | Lowering onto the IR, one element family at a time, with projection equality | **landed (dual-run) 2026-10-24** |
 | 4 | Delete `RuntimeContext`, wrappers, drafts, `conflicts.rs` | not started |
 | 5 | One pipeline path: `check` builds a `Board`, `--format json`, baseline defects | not started |
 | 6 | Close: panic audit, metrics, gate evidence | not started |
@@ -165,38 +172,65 @@ a fix to both human and JSON. See §7 for the run.
 
 ### Increment 2 — the IR data model
 
-Add `Ident { raw, span }`, `Pin`, `BusId`, `ClaimedPin`, `Claim`, `Bus`, `Component` and
-`Board` (extreme.md Appendix C), plus `ResourceGraph::claim` returning
-`Result<ClaimedPin, Diagnostic>`. A claim records the owning element's id and span so a
-conflict can point at both sides, and records the direction the pin is asked to carry
-(input/output) so the led/button clash is a graph rule, not a second pass.
+**Landed.** `espforge-model/src/board.rs` now holds `Ident { raw, span }`, `Pin`, `BusId`,
+`PinUse`, `Owner`/`OwnerKind`, `Claim`, `ClaimedPin`, `Conflict`, `PeripheralClash`,
+`ResourceGraph`, the three `Bus` shapes, `Framing`, the five component structs, `Component`,
+`WifiService`/`Service` and `Board` (extreme.md Appendix C). A claim records the owning
+element's id and node span plus the pin use (input/output/bidirectional/unspecified), so
+the led/button clash is a graph rule rather than a second pass. `ClaimedPin` has private
+fields and no public constructor: `ResourceGraph::claim` is the only way to make one.
 
-No pipeline wiring yet. Port `conflicts.rs`'s five corpus cases as graph tests and require
-the same title, label and primary span — the first time the IR has to be as good as the
-code it replaces.
+`claim` returns `Result<ClaimedPin, Conflict>`, not `Diagnostic`. `Conflict` carries the
+kind (`Pin`, `Direction`, `SelfClash`), the pin and the `existing`/`incoming` claims with
+both spans; a refused claim leaves the graph untouched. A separate
+`claim_peripheral` covers the UART/I2C peripheral-name clash, and `add_bus`/`bus` give
+components `BusId` handles in creation order.
 
-Gate: new `espforge-model` unit tests are green; nothing user-visible changes; the corpus
-is untouched.
+**The wording gate changed, deliberately.** The plan said the graph tests would assert the
+same title, label and primary span as the corpus. They assert the pin, both owners and both
+spans instead, because today's blame order is loop-specific: `i2c-vs-gpio` blames the gpio,
+`uart-vs-i2c` blames the i2c, a chip select on its own bus blames the device, and a chip
+select on another bus blames the bus. No ownership rule derives that. Keeping the sentence
+in the lowering that knows the element is the same arrangement Phase 1 used for attribute
+wording, and it is what lets increment 3 delete `conflicts.rs` without touching a single
+expected diagnostic. The six corpus conflict cases are covered as claim sequences by
+`the_diagnostics_corpus_conflicts_are_expressed_as_claims`.
+
+Gate: `espforge-model` green (9 new tests, 11 in the crate); `cargo test --workspace`
+**316 passed, 1 ignored**; nothing user-visible changed; the corpus is untouched.
 
 ### Increment 3 — lowering writes the IR
 
-Rewrite `espforge-hardware` as lowering into a `Board`, family by family:
+**Landed (dual-run).** `espforge-hardware/src/board.rs` builds a `Board` from the parsed
+sections: peripherals in source order, then components, then services, claiming every pin
+through `ResourceGraph::claim` as it goes. Attribute and `$`-reference validation still
+comes from the Phase 1 `Attrs` and the typed wrappers; increment 4 inlines the remaining
+occupancy/slug checks and deletes the drafts. All five families are covered: gpio/led/
+button, i2c + i2c_component (frequency parse unchanged), spi + spi_component (write-only
+bus, `cs` pin-or-ref), uart + uart_component (peripheral names, framing), and wifi/devices.
 
-1. `<gpio>` + `<led>` + `<button>` (pin ownership and the input/output clash),
-2. `<i2c>` + `<i2c_component>` (including the frequency parse moved from
-   `util::parse_khz`, same wording),
-3. `<spi>` + `<spi_component>` (write-only bus, `cs` pin-or-ref, chip-select exemption),
-4. `<uart>` + `<uart_component>` (peripheral names, tx/rx, framing),
-5. `<wifi>` and devices (`route_driver` reads the resolved board instead of handles).
+`Board::hardware()` in `espforge-model` projects the IR back onto the emitter's seven
+vectors, preserving today's order (components for leds/buttons/spis, buses for
+i2cs/spi_buses/uarts) and the `parity`/`stop_bits` template tokens. That projection is the
+comparison surface: Phase 3's AST backend replaces it.
 
-After each family, dual-run old and new lowering over every embedded example, every
-diagnostics-corpus spec and the golden specs, and compare `Board::hardware()` with the
-old `Hardware`. Any difference is a bug in the new path, not a snapshot to refresh. The
-projection must preserve today's order (buses first, then components) and today's first
-error in file order (D6).
+`tests/board_dual_run.rs` runs `lower_spans` and `board::build` over every structurally
+valid embedded example. Where the old path succeeds, the projections are exactly equal;
+where it fails, both paths fail. That covers helloworld, blink, button, spi_example,
+uart_example and the wifi example — the same specs behind the 16 golden cells. Failing
+specs are only asserted to fail on both sides for now; increment 4 makes wording and
+primary spans identical.
 
-Gate: projection equality for the whole corpus, goldens byte-identical, compile gate
-green, diagnostics corpus unchanged.
+Two tightenings the claims found, both real wiring errors the old path accepted: `<i2c>`
+with `sda == scl`, and `<spi>` with `sclk == mosi`. They are reported as `i2c wiring` /
+`spi wiring` instead of emitting two roles on one pin. Neither appears in the embedded
+corpus; increment 4 should keep the rejection and record it as an explicit diff.
+
+Gate: 10 new `board` unit tests, 2 dual-run tests, 1 projection test; `cargo test
+--workspace` **329 passed, 1 ignored, 0 failed**. Production still calls the old `lower`,
+so the diagnostics corpus, transcripts, goldens and the compile gate are untouched. The
+new path's conflict wording is legacy-shaped but not yet byte-identical for every pair;
+increment 4 pins it against the corpus.
 
 ### Increment 4 — delete the old middle
 
@@ -307,6 +341,8 @@ cargo test -p espforge --test golden_projects -- --ignored   # compile gate
 |---|---|---|
 | 2026-10-24 | — | Phase 2 not started. Phase 1 closed; baseline measured above. |
 | 2026-10-24 | 1 | `espforge-diagnostics` added (new workspace member, `annotate-snippets` + `serde_json`); `espf::diag::render_errors` delegates to `to_human`; 13 new tests. Workspace **307 passed, 1 ignored, 0 failed**; diagnostics corpus (24 cases) and CLI transcripts (31 cases) byte-identical; compile gate green (`generated_projects_compile`, 23.1 s); touched files rustfmt-clean. Codes are `None` until increment 5. |
+| 2026-10-24 | 2 | `espforge-model/src/board.rs`: `Board`, `ResourceGraph`, opaque `ClaimedPin`, `Conflict` data, `Bus`/`Component`/`Service`, 9 new tests including the six corpus conflicts. `espforge-model` stays dependency-free; wording for a conflict stays with lowering. Workspace **316 passed, 1 ignored, 0 failed**; no production path uses the IR yet, so the corpus, transcripts and goldens are untouched. |
+| 2026-10-24 | 3 | `espforge-hardware/src/board.rs` lowers all five families into `Board` with claims; `Board::hardware()` projection; `tests/board_dual_run.rs` compares against the old path over every structurally valid embedded example (equal projections, or both fail). 10 board unit tests (including the legacy titles/spans for led/led, uart tx/rx, i2c bus reuse and peripheral clash), 2 dual-run tests, 1 projection test. Workspace **329 passed, 1 ignored, 0 failed**. CLI still on the old path, so corpus/transcripts/goldens unchanged. Two new wiring rejections found (`sda == scl`, `sclk == mosi`) recorded for increment 4. |
 
 ## 8. Open questions carried in
 
