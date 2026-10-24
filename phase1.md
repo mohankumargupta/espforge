@@ -1,11 +1,12 @@
 # Phase 1: one schema (extreme.md §3.2 / §7)
 
-**Status:** increments 1, 1.1, 2, 3, 4 and 5 landed. `espf.schema.kdl` is the single
-source of truth for the element vocabulary, the attribute rules, the attribute coercion
-and the build options, and both halves are generated: nothing parses a schema attribute
-by hand (`grep -r 'get_attr(' espforge-hardware/src` is empty), `options.kdl` no longer
-exists, and the option table is no longer parsed at runtime. Still to do in Phase 1:
-catalog data at build time.
+**Status:** increments 1, 1.1, 2, 3, 4, 5 and 6 landed; Phase 1 is complete.
+`espf.schema.kdl` is the single source of truth for the element vocabulary, the attribute
+rules, the attribute coercion and the build options, and both halves are generated:
+nothing parses a schema attribute by hand (`grep -r 'get_attr(' espforge-hardware/src`
+is empty), `options.kdl` no longer exists, and neither the option table nor the catalog
+is parsed at runtime. The loaders survive only as the oracle the generated tables are
+tested against.
 
 ---
 
@@ -29,8 +30,9 @@ or rust-analyzer suffer (§8.3).
 
 ## 2. What is generated
 
-Two files, from `espf.schema.kdl`, both plain structs and enums — no macros, so
-rust-analyzer and the debugger see ordinary code.
+Plain structs and enums — no macros, so rust-analyzer and the debugger see ordinary code.
+Four of the files come from `espf.schema.kdl`; the fifth,
+`src/drivers/generated_registry.rs`, comes from the driver modules.
 
 `src/components/generated_vocab.rs` — the `components` elements marked
 `bus_component=#true`, in schema order, as `TAGS`.
@@ -42,6 +44,12 @@ asserts it equals `schema::load(SCHEMA_KDL)` — so the loader stays the oracle 
 schema means, and a transcriber mistake is a test failure rather than a silent divergence.
 A bool option with no explicit `default` is transcribed as `Some(Bool(false))`, which is
 the loader's rule, not a special case in the generator's head.
+
+`espforge-options/src/generated_catalog.rs` — the element half behind `espforge espf`:
+the `SectionDef`s and `ElementDef`s with their attributes, examples, `see_also` targets,
+compatibility and byte spans. `catalog::embedded()` returns it, and
+`the_generated_catalog_matches_the_loader` asserts it equals `catalog::load(SCHEMA_KDL)`
+— the same transcriber-not-validator arrangement as the options half.
 
 `src/components/generated_elements.rs` — one `pub mod <tag>` per element in the schema
 (all twenty, not only the components), each with:
@@ -123,8 +131,7 @@ the other's nodes and still rejects anything unknown.**
 - `catalog::load` ignores `required` and `options`; its unknown-node message now lists all
   four (`section`, `element`, `required`, `options`), so a typo is still caught.
 - `schema::load` ignores `section` and `element`; same message.
-- `OPTIONS_KDL` is deleted, `SCHEMA_KDL` is the only embedded text, and
-  `embedded_schema()` names `espf.schema.kdl` when it renders a panic.
+- `OPTIONS_KDL` is deleted and `SCHEMA_KDL` is the only embedded text
 - The template crate's `build.rs` no longer watches a second file.
 
 That is the whole of extreme.md §3.2's "start with the two KDL files merged" step. The
@@ -134,19 +141,33 @@ returns the generated table from a `LazyLock` (built once, on first use) and
 `espforge-options/build.rs` is a transcriber only: it has no rules of its own, so the
 schema's meaning still lives in one place.
 
-Two generated files in this crate's world, one gate for both: CI's `git diff
---exit-code` list now names `generated_options.rs` next to the three files
+Increment 6 finished the job for the element half: `catalog::load` had been run inside a
+`LazyLock` that panicked on an invalid embedded file, so a schema mistake surfaced as a
+panic in whatever command touched `espf` first. Both halves now share one shape — build
+script writes the table, loader stays the oracle, equality test pins the two together —
+so a bad schema or a bad transcriber fails `cargo test` instead, and the runtime path has
+no parser and no panic left in it. The transcriber does have to restate the loader's
+smaller rules (a bool option's implicit `Some(Bool(false))`, a missing attribute's
+implicit `Status::Implemented`, first-vs-last duplicate handling); those are exactly what
+the equality test checks, so a wrong guess there is a red test rather than a divergence.
+
+Five generated files, one gate: CI's `git diff --exit-code` list names
+`generated_options.rs` and `generated_catalog.rs` next to the three files
 `espforge-bindings` writes.
 
 ## 6. Gate evidence
 
-- `cargo test --workspace`: green, **288 passed, 1 ignored**.
+- `cargo test --workspace`: green, **289 passed, 1 ignored**.
 - The compile gate (`cargo test -p espforge --test golden_projects -- --ignored`): green.
 - `espf` CLI transcripts, the diagnostics corpus and the golden projects: unchanged.
   Nothing user-visible moved.
-- Generated files are rustfmt-clean and stable: rebuilding produces no diff, and CI now
-  checks `generated_elements.rs` alongside the other two.
-- New tests: the coercion helpers (`attrs.rs`) and
+- Generated files are rustfmt-clean and stable: rebuilding produces no diff, and CI diffs
+  all five after `cargo test`. The equality tests bite: hand-editing one span or one
+  summary in `generated_catalog.rs` fails `the_generated_catalog_matches_the_loader` with
+  "is stale: rebuild espforge-options".
+- New tests: `the_generated_catalog_matches_the_loader` and
+  `the_generated_table_matches_the_loader` (the two halves' equality checks), the coercion
+  helpers (`attrs.rs`) and
   `schema_level_problems_keep_their_wording`, which pins the ten messages the generated
   layer sits behind — missing `gpio`/`address`/`cs`/`baud_rate`, a bad hex address, `mode`
   out of range, a bad `parity`, a bad `active_low`, and led/button's
@@ -155,12 +176,8 @@ Two generated files in this crate's world, one gate for both: CI's `git diff
 
 ## 7. Next increments, in order
 
-1. **Catalog data at build time** instead of parsing the element half at runtime, once the
-   schema is stable enough that regenerating on every build is cheap. The option half's
-   pattern carries over: `catalog::load` stays the oracle, `embedded_catalog()` returns
-   the generated table, and a test asserts the two agree.
-2. Then Phase 2 (typed IR), which deletes the wrapper structs, the `*Draft`s and the
-   parallel `Vec`s in `Hardware`.
+1. Phase 2 (typed IR), which deletes the wrapper structs, the `*Draft`s and the parallel
+   `Vec`s in `Hardware`.
 
 Open drift the earlier increments made visible, for a decision before Phase 2:
 

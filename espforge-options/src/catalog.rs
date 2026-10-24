@@ -1,8 +1,10 @@
 //! The element catalog behind `espforge espf` (KDL v2).
 //!
-//! Loaded from `espforge-espgenerate-template/src/espf.schema.kdl`, embedded at
-//! compile time. Types, the loader, path resolution and the lookups shared by
-//! every view live here; nothing prints — `espforge/src/render.rs` renders,
+//! The data is generated from `espforge-espgenerate-template/src/espf.schema.kdl`
+//! into `crate::generated_catalog` at build time; [`embedded`] hands it out, and
+//! nothing is parsed at runtime. Types, the loader (the oracle the generated
+//! table is tested against), path resolution and the lookups shared by every
+//! view live here; nothing prints — `espforge/src/render.rs` renders,
 //! `espforge/src/commands/espf.rs` does I/O.
 //!
 //! ```kdl
@@ -18,8 +20,8 @@
 //! }
 //! ```
 
-use espf::diag::{EspfError, render_errors};
-use espforge_espgenerate_template::{SCHEMA_KDL, OVERVIEW_TXT};
+use espf::diag::EspfError;
+use espforge_espgenerate_template::OVERVIEW_TXT;
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 use std::ops::Range;
 use std::sync::LazyLock;
@@ -269,18 +271,15 @@ pub enum ResolutionError {
 
 // -------------------------------------------------------------------- loader
 
-/// The catalog embedded from `espforge-espgenerate-template/src/espf.schema.kdl`.
-/// Panics (with a rendered diagnostic) if the embedded file is invalid; the
-/// unit tests make sure it is not.
+/// The catalog behind `espforge espf`, generated from
+/// `espforge-espgenerate-template/src/espf.schema.kdl` by this crate's `build.rs`.
+///
+/// Nothing is parsed at runtime. [`load`] stays the authority on what the schema
+/// means: `the_generated_catalog_matches_the_loader` asserts that the generated
+/// table equals `load(SCHEMA_KDL)`, so a transcriber mistake and a schema mistake
+/// both fail the build. The table is built once, on first use.
 pub fn embedded() -> &'static Catalog {
-    static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
-        load(SCHEMA_KDL).unwrap_or_else(|errs| {
-            panic!(
-                "embedded espf.schema.kdl is invalid:\n{}",
-                render_errors("espf.schema.kdl", SCHEMA_KDL, &errs)
-            )
-        })
-    });
+    static CATALOG: LazyLock<Catalog> = LazyLock::new(crate::generated_catalog::catalog);
     &CATALOG
 }
 
@@ -1030,6 +1029,7 @@ fn distance(a: &str, b: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use espforge_espgenerate_template::SCHEMA_KDL;
 
     const SAMPLE: &str = r##"
 section "espforge" {
@@ -1095,6 +1095,17 @@ element "wifi" section="espforge" {
             .iter()
             .find(|a| a.name == attr)
             .unwrap()
+    }
+
+    /// The table `espforge espf` uses is the one `build.rs` wrote, and it is
+    /// exactly what the loader reads out of the same file.
+    #[test]
+    fn the_generated_catalog_matches_the_loader() {
+        assert_eq!(
+            embedded(),
+            &load(SCHEMA_KDL).unwrap(),
+            "src/generated_catalog.rs is stale: rebuild espforge-options"
+        );
     }
 
     #[test]
