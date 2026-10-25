@@ -13,9 +13,9 @@ readme.workspace = true
 kdl = "6"
 
 [dependencies]
-espf = { path = "../espf" }
-espforge-model = { path = "../espforge-model" }
-espforge-espgenerate-template = { path = "../espforge-espgenerate-template" }
+espf = { workspace = true }
+espforge-model = { workspace = true }
+espforge-espgenerate-template = { workspace = true }
 # KDL v2 parser (the `span` feature is on by default).
 kdl = "6"
 # Same pin/feature as the espforge crate, so only one copy is compiled.

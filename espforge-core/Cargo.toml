@@ -9,14 +9,14 @@ repository.workspace = true
 readme.workspace = true
 
 [dependencies]
-espf = { path = "../espf" }
-espforge-bindings = { path = "../espforge-bindings" }
-espforge-diagnostics = { path = "../espforge-diagnostics" }
-espforge-emit = { path = "../espforge-emit" }
-espforge_examples = { version = "0.6.0", path = "../espforge-examples" }
-espforge-hardware = { path = "../espforge-hardware" }
-espforge-model = { path = "../espforge-model" }
-espforge-options = { path = "../espforge-options" }
+espf = { workspace = true }
+espforge-bindings = { workspace = true }
+espforge-diagnostics = { workspace = true }
+espforge-emit = { workspace = true }
+espforge_examples = { workspace = true }
+espforge-hardware = { workspace = true }
+espforge-model = { workspace = true }
+espforge-options = { workspace = true }
 anyhow = "1"
 serde_json = { workspace = true }
 

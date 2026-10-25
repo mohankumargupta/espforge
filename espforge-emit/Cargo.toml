@@ -9,9 +9,9 @@ repository.workspace = true
 readme.workspace = true
 
 [dependencies]
-espforge-model = { path = "../espforge-model" }
-espforge-options = { path = "../espforge-options" }
-espforge-espgenerate-template = { path = "../espforge-espgenerate-template" }
+espforge-model = { workspace = true }
+espforge-options = { workspace = true }
+espforge-espgenerate-template = { workspace = true }
 # Same pin/feature as the other crates, so only one copy is compiled.
 esp-metadata-generated = { version = "0.5.3", features = ["build-script"] }
 anyhow = "1"
@@ -28,4 +28,4 @@ toml = "1"
 
 [dev-dependencies]
 tempfile = "3"
-espforge_examples = { path = "../espforge-examples" }
+espforge_examples = { workspace = true }

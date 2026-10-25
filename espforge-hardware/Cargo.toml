@@ -11,11 +11,11 @@ readme.workspace = true
 [dependencies]
 # Lowering inputs: `ParsedNode` (espf) plus the generated attribute
 # accessors -> a `Board` from `espforge-model`.
-espforge-model = { path = "../espforge-model" }
-espf = { path = "../espf" }
-espforge-options = { path = "../espforge-options" }
-espforge-bindings = { path = "../espforge-bindings" }
+espforge-model = { workspace = true }
+espf = { workspace = true }
+espforge-options = { workspace = true }
+espforge-bindings = { workspace = true }
 
 [dev-dependencies]
 # The embedded corpus, as a data source for the lowering tests.
-espforge_examples = { path = "../espforge-examples" }
+espforge_examples = { workspace = true }

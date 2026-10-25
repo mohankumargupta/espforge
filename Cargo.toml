@@ -18,6 +18,22 @@ winnow = { version = "0.7", features = ["simd"] }
 annotate-snippets = "0.12"
 serde_json = "1"
 
+# Workspace crates, so members declare them with `{ workspace = true }` instead
+# of repeating a relative path. `path` is relative to this manifest (the
+# workspace root), not to the member. `version` is only consulted by
+# `cargo publish`; keep it in step with `[workspace.package] version`.
+espf = { path = "espf", version = "0.6.0" }
+espforge-bindings = { path = "espforge-bindings", version = "0.6.0" }
+espforge-core = { path = "espforge-core", version = "0.6.0" }
+espforge-diagnostics = { path = "espforge-diagnostics", version = "0.6.0" }
+espforge-emit = { path = "espforge-emit", version = "0.6.0" }
+# The package keeps its underscore name, so the dependency key matches it.
+espforge_examples = { path = "espforge-examples", version = "0.6.0" }
+espforge-espgenerate-template = { path = "espforge-espgenerate-template", version = "0.6.0" }
+espforge-hardware = { path = "espforge-hardware", version = "0.6.0" }
+espforge-model = { path = "espforge-model", version = "0.6.0" }
+espforge-options = { path = "espforge-options", version = "0.6.0" }
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"

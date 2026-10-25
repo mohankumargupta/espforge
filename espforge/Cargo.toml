@@ -9,26 +9,26 @@ repository.workspace = true
 readme.workspace = true
 
 [dependencies]
-espforge-core = { path = "../espforge-core" }
-espforge-options = { path = "../espforge-options" }
+espforge-core = { workspace = true }
+espforge-options = { workspace = true }
 # Only for its VERSION constant (`espforge version`).
-espforge-espgenerate-template = { path = "../espforge-espgenerate-template" }
+espforge-espgenerate-template = { workspace = true }
 anyhow = "1"
-espforge-diagnostics = { path = "../espforge-diagnostics" }
+espforge-diagnostics = { workspace = true }
 serde_json = { workspace = true }
-espforge-model = { path = "../espforge-model" }
+espforge-model = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 # Chip metadata (supported chips, their Rust target triples) used by doctor.
 esp-metadata-generated = { version = "0.5.3", features = ["build-script"] }
 cliclack = "0.5.6"
-espforge_examples = { version = "0.6.0", path = "../espforge-examples" }
+espforge_examples = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
 # `tests/codegen_equiv.rs` parses the golden trees through the comparators.
-espforge-emit = { path = "../espforge-emit" }
+espforge-emit = { workspace = true }
 # Only a test: the `espf` catalog must cover every driver tag.
-espforge-bindings = { path = "../espforge-bindings" }
+espforge-bindings = { workspace = true }
 
 [build-dependencies]
 cargo_metadata = "0.19"

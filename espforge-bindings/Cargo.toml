@@ -9,7 +9,7 @@ repository.workspace = true
 readme.workspace = true
 
 [dependencies]
-espf = { path = "../espf" }
+espf = { workspace = true }
 
 [build-dependencies]
 # Reads `espf.schema.kdl` to generate the component vocabulary.
