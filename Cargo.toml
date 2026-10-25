@@ -6,6 +6,7 @@ members = ["espf", "espforge", "espforge-core", "espforge-bindings", "espforge-d
 version = "0.6.0"
 edition = "2024"
 license = "MIT"
+description = "a scaffolding++ tool for creating esp32 no_std esphal without the hassle"
 repository = "https://github.com/mohankumargupta/espforge"
 homepage = "https://github.com/mohankumargupta/espforge"
 documentation = "https://github.com/mohankumargupta/espforge"
