@@ -1,0 +1,24 @@
+======================
+ASYNC BUTTON EXAMPLE
+
+A button task waits (edge-triggered, no polling) for the button to be pressed
+and signals a cross-task `Signal`. The `forever` task waits on that signal and
+toggles an LED each time the button is pressed.
+======================
+
+# espforge
+  <project name="button_async" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <gpio id="gpio7" pin="7" direction="output" />
+  <gpio id="gpio9" pin="9" direction="input" />
+
+# components
+  <led id="red_led" gpio="$gpio7" active_low="false" />
+  <button id="button" gpio="$gpio9" pull_up="true" />
+
+# devices
+
+# services

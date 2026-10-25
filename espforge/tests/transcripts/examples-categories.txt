@@ -1,0 +1,9 @@
+$ espforge examples categories
+exit: 0
+--- stdout ---
+01.Basics	2 examples
+02.Digital	2 examples
+04.Communication	7 examples
+05.Networking	1 example
+06.Displays	2 examples
+--- stderr ---

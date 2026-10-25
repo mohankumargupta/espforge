@@ -1,0 +1,21 @@
+$ espforge check structure-missing-sections.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: missing section `# espforge`
+ --> structure-missing-sections.espf.txt:4:1
+  |
+4 | # devices
+  | ^ every ESPF file needs a `# espforge` section (it may be empty)
+error: missing section `# components`
+ --> structure-missing-sections.espf.txt:4:1
+  |
+4 | # devices
+  | ^ every ESPF file needs a `# components` section (it may be empty)
+error: missing section `# services`
+ --> structure-missing-sections.espf.txt:4:1
+  |
+4 | # devices
+  | ^ every ESPF file needs a `# services` section (it may be empty)
+
+❌ Found 3 problem(s) in 'structure-missing-sections.espf.txt'; fix them and re-run.

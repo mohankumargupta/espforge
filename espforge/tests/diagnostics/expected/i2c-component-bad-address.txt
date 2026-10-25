@@ -1,0 +1,11 @@
+$ espforge check i2c-component-bad-address.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: invalid i2c_component
+  --> i2c-component-bad-address.espf.txt:10:3
+   |
+10 |   <i2c_component id="dev" i2c="$i2c0" address="0xZZ" />
+   |   ^^^^^^^^^^^^^^ ❌ [i2c_component] 'dev' invalid hex address '0xZZ'
+
+❌ Found 1 problem(s) in 'i2c-component-bad-address.espf.txt'; fix them and re-run.

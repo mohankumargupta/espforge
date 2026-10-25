@@ -1,0 +1,15 @@
+# espforge
+  <project name="bad" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <i2c id="i2c0" sda="4" scl="5" />
+
+# components
+  <i2c_component id="bus" i2c="$i2c0" address="0x48" />
+  <led id="led_on_bus" gpio="$bus" />
+
+# devices
+
+# services

@@ -1,0 +1,5 @@
+$ espforge check peripheral-many.espf.txt
+exit: 0
+--- stdout ---
+✓ peripheral-many.espf.txt is valid
+--- stderr ---

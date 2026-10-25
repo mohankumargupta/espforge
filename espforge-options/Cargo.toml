@@ -1,0 +1,22 @@
+[package]
+name = "espforge-options"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+readme.workspace = true
+
+[build-dependencies]
+# Reads `espf.schema.kdl` to transcribe the option half into Rust.
+kdl = "6"
+
+[dependencies]
+espf = { path = "../espf" }
+espforge-model = { path = "../espforge-model" }
+espforge-espgenerate-template = { path = "../espforge-espgenerate-template" }
+# KDL v2 parser (the `span` feature is on by default).
+kdl = "6"
+# Same pin/feature as the espforge crate, so only one copy is compiled.
+esp-metadata-generated = { version = "0.5.3", features = ["build-script"] }

@@ -1,0 +1,5 @@
+$ espforge check structure-unknown-section.espf.txt
+exit: 0
+--- stdout ---
+✓ structure-unknown-section.espf.txt is valid
+--- stderr ---

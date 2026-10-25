@@ -1,0 +1,11 @@
+$ espforge check uart-tx-equals-rx.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: uart wiring
+ --> uart-tx-equals-rx.espf.txt:7:3
+  |
+7 |   <uart id="uart1" tx="20" rx="20" />
+  |   ^^^^^ <uart id="uart1"> tx and rx cannot both be GPIO20
+
+❌ Found 1 problem(s) in 'uart-tx-equals-rx.espf.txt'; fix them and re-run.

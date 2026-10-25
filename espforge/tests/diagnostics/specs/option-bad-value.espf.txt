@@ -1,0 +1,13 @@
+# espforge
+  <project name="bad" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+  <options defaults="true" probe-rs="maybe" />
+
+# peripherals
+
+# components
+
+# devices
+
+# services

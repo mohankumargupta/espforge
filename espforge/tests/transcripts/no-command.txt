@@ -1,0 +1,23 @@
+$ espforge 
+exit: 0
+--- stdout ---
+ESPF runtime pipeline tool
+
+Usage: espforge [OPTIONS] [COMMAND]
+
+Commands:
+  new       Scaffold a new ESPF project (asks for what you do not give as flags)
+  check     Validate an ESPF file: syntax, options, `$` references, drivers
+  build     Generate the firmware project, then `cargo build` it
+  gen       Generate the firmware project only (no cargo)
+  examples  Turn an embedded ESPF example into an editable project folder
+  espf      Explore what an ESPF file can contain: sections, elements, examples. A trailing `help` or `examples` is that element's view
+  doctor    Check that prerequisites (toolchain, binaries, env) are met
+  version   Print version/build information
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -C, --directory <DIR>  Run as if started in DIR (like `cargo -C`)
+  -h, --help             Print help
+  -V, --version          Print version
+--- stderr ---

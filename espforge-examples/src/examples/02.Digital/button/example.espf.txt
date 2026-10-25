@@ -1,0 +1,22 @@
+====================
+BUTTON EXAMPLE
+====================
+
+# espforge
+  <project name="button" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <gpio id="gpio7" pin="7" direction="output" />
+  <gpio id="gpio9" pin="9" direction="input" />
+
+# components
+  <led id="red_led" gpio="$gpio7" active_low="false" />
+  <button id="button" gpio="$gpio9" pull_up="true" />
+
+# devices
+
+# services 
+
+

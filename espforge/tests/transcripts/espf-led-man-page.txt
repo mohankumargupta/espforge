@@ -1,0 +1,21 @@
+$ espforge espf components led help
+exit: 0
+--- stdout ---
+NAME
+    led - An LED on a GPIO output
+
+SYNOPSIS
+    <led id="..." gpio="$gpio" [active_low="true"] />
+
+DESCRIPTION
+    A component over <gpio>: gpio="$<gpio id>" must name an output pin.
+
+ATTRIBUTES
+    id         (required, ident)
+    gpio       (required, ref to gpio)
+    active_low (optional, bool, default false) true when the LED lights on a LOW pin.
+
+SEE ALSO
+    espforge espf peripherals gpio
+    espforge espf components led examples
+--- stderr ---

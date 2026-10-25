@@ -1,0 +1,16 @@
+==================
+WIFI HTTP EXAMPLE
+==================
+
+# espforge
+  <project name="wifi_http_example" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <wifi id="wifi0" ssid="Wokwi-GUEST" password="" auth="open" />
+
+# components
+  <http id="http" />
+
+# devices

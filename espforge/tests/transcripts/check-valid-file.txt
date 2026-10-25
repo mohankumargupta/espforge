@@ -1,0 +1,5 @@
+$ espforge check blink.espf.txt
+exit: 0
+--- stdout ---
+✓ blink.espf.txt is valid
+--- stderr ---

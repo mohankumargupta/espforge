@@ -1,0 +1,6 @@
+$ espforge examples get 01.Basics/helloworld --out hw
+exit: 0
+--- stdout ---
+hw/example.espf.txt
+hw/app/rust/app.rs
+--- stderr ---

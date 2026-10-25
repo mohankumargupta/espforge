@@ -1,0 +1,17 @@
+[project]
+name = "pytest-embedded-experiment"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "esptool>=5.5.0",
+    "pytest-embedded>=2.9.3",
+    "pytest-embedded-espemu>=2.9.3",
+    "pytest-embedded-idf>=2.9.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

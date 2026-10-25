@@ -1,0 +1,14 @@
+# espforge
+  <project name="bad" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <gpio id="g" pin="4" />
+  <i2c id="i2c0" sda="4" scl="5" />
+
+# components
+
+# devices
+
+# services

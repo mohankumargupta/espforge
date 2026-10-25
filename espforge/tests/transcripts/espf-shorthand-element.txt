@@ -1,0 +1,7 @@
+$ espforge espf i2c
+exit: 0
+--- stdout ---
+i2c - I2C bus controller
+espforge espf peripherals i2c help	man page: description, attributes, see also
+espforge espf peripherals i2c examples	copy-ready snippets and example projects
+--- stderr ---

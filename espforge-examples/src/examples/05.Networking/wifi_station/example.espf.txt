@@ -1,0 +1,17 @@
+====================
+WIFI STATION EXAMPLE
+====================
+
+# espforge
+  <project name="wifi_station" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+
+# components
+
+# devices
+
+# services
+  <wifi id="wifi0" network1.ssid="Wokwi-GUEST" />

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "author": "espforge",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 0, "left": 0 },
+    { "type": "wokwi-led", "id": "led1", "top": -40, "left": 96, "attrs": { "color": "red", "gpio": "18" } }
+  ],
+  "connections": [
+    [ "led1:A", "esp:18", "green", [] ],
+    [ "led1:C", "esp:GND.10", "black", [] ]
+  ]
+}

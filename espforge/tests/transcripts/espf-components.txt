@@ -1,0 +1,10 @@
+$ espforge espf components
+exit: 0
+--- stdout ---
+espforge espf components led	An LED on a GPIO output
+espforge espf components button	A push button on a GPIO input
+espforge espf components gpio_component	A GPIO pin used as an input or an output
+espforge espf components i2c_component	A device address on an I2C bus
+espforge espf components spi_component	A chip-select on an SPI bus
+espforge espf components uart_component	Serial settings on a UART port
+--- stderr ---

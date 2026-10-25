@@ -1,0 +1,16 @@
+[package]
+name = "espforge-bindings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+readme.workspace = true
+
+[dependencies]
+espf = { path = "../espf" }
+
+[build-dependencies]
+# Reads `espf.schema.kdl` to generate the component vocabulary.
+kdl = "6"

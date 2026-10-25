@@ -1,0 +1,5 @@
+$ espforge check ref-duplicate-id-silently-accepted.espf.txt
+exit: 0
+--- stdout ---
+✓ ref-duplicate-id-silently-accepted.espf.txt is valid
+--- stderr ---

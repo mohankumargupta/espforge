@@ -1,0 +1,11 @@
+$ espforge check option-bad-value.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: `probe-rs` is not a boolean
+ --> option-bad-value.espf.txt:5:38
+  |
+5 |   <options defaults="true" probe-rs="maybe" />
+  |                                      ^^^^^ "maybe" must be "true" or "false"
+
+❌ Found 1 problem(s) in 'option-bad-value.espf.txt'; fix them and re-run.
