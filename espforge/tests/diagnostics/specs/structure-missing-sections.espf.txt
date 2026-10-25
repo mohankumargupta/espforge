@@ -1,0 +1,4 @@
+# peripherals
+  <gpio id="gpio18" pin="18" />
+
+# devices

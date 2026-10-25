@@ -1,0 +1,14 @@
+# espforge
+  <project name="bad" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <spi id="spi2" sclk="6" mosi="7" miso="2" />
+
+# components
+  <spi_component id="dev" spi="$spi2" mode="0" cs="6" />
+
+# devices
+
+# services

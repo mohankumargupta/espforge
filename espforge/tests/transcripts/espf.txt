@@ -1,0 +1,10 @@
+$ espforge espf
+exit: 0
+--- stdout ---
+espforge espf espforge	The project itself: name, chip, runtime, console, options
+espforge espf peripherals	The chip's hardware blocks you use: gpio, i2c, spi, uart
+espforge espf components	How a peripheral is used: an address on a bus, a direction
+espforge espf devices	Drivers for specific parts: displays, sensors
+espforge espf services	Software services: wifi, ntp
+espforge espf overview	what an ESPF file is and how it is laid out
+--- stderr ---

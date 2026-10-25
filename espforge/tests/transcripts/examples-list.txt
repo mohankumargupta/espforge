@@ -1,0 +1,18 @@
+$ espforge examples list
+exit: 0
+--- stdout ---
+01.Basics/blink	BLINK EXAMPLE
+01.Basics/helloworld	HELLO WORLD EXAMPLE
+02.Digital/button	BUTTON EXAMPLE
+02.Digital/button_async	ASYNC BUTTON EXAMPLE
+04.Communication/i2c_example	I2C EXAMPLE
+04.Communication/i2c_example_async	I2C EXAMPLE (ASYNC)
+04.Communication/i2c_scanner	I2C SCANNER
+04.Communication/spi_example	SPI EXAMPLE
+04.Communication/spi_example_async	SPI EXAMPLE (ASYNC)
+04.Communication/uart_example	UART EXAMPLE
+04.Communication/uart_example_async	UART EXAMPLE (ASYNC)
+05.Networking/wifi_station	WIFI STATION EXAMPLE
+06.Displays/ili9341_example	ILI9341 TFT EXAMPLE
+06.Displays/ssd1306_example	SSD1306 OLED EXAMPLE
+--- stderr ---

@@ -1,0 +1,11 @@
+$ espforge check structure-element-outside-its-section.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: unsupported peripheral
+ --> structure-element-outside-its-section.espf.txt:8:3
+  |
+8 |   <led id="oops" gpio="$g" />
+  |   ^^^^ <led> in `# peripherals` is not supported by `build` yet (only <gpio>, <i2c>, <spi> and <uart>)
+
+❌ Found 1 problem(s) in 'structure-element-outside-its-section.espf.txt'; fix them and re-run.

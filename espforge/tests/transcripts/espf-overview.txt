@@ -1,0 +1,70 @@
+$ espforge espf overview
+exit: 0
+--- stdout ---
+NAME
+    ESPF - the file format espforge builds firmware from
+
+DESCRIPTION
+    An ESPF file lists the hardware your project uses and how it is wired.
+    espforge turns it into a Rust firmware project for an ESP32 chip.
+
+    A file has five sections. All five must be present, but any of them may
+    be empty:
+
+      espforge      the project itself: name, chip, runtime, console, options
+      peripherals   the chip's hardware blocks you use: gpio, i2c, spi, uart
+      components    how a peripheral is used: an address on a bus, a direction
+      devices       drivers for specific parts built on a component
+      services      software services: wifi, ntp
+
+    They feed each other in one direction: a component refers to a
+    peripheral, and a device refers to a component.
+
+SYNTAX
+    A section starts with a line `# name`. Inside a section, every element
+    is one self-closing tag on its own line:
+
+      <tag id="name" attribute="value" />
+
+    Every value is a double-quoted string and cannot span lines. After an
+    element, a trailing `// comment` is allowed. A block of comment text
+    between two lines made only of `=` is allowed at the very top of the
+    file, before the first section, and nowhere else.
+
+REFERENCES
+    An `id` names an element. Another element refers to it by writing the
+    id with a `$` in front:
+
+      <i2c id="i2c0" sda="6" scl="7" />
+      <i2c_component id="temp_bus" i2c="$i2c0" address="0x48" />
+
+    Every id must be unique across the whole file.
+
+DOTTED KEYS AND LISTS
+    A dotted key groups related values:  network1.ssid="home"
+
+    A list repeats a key with `+=`, and the first entry needs it too:
+
+      servers+="pool.ntp.org" servers+="time.google.com"
+
+EXAMPLE
+      # espforge
+        <project name="blink" />
+        <chip type="esp32c3" />
+        <runtime type="blocking" />
+
+      # peripherals
+        <gpio id="gpio4" pin="4" />
+
+      # components
+        <gpio_component id="blue_led" gpio="$gpio4" direction="output" />
+
+      # devices
+
+      # services
+
+NEXT
+    espforge espf peripherals     browse what you can declare
+    espforge examples             copy a complete example project
+    espforge new                  start a new project
+--- stderr ---

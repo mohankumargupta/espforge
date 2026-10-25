@@ -1,0 +1,24 @@
+$ espforge espf peripherals i2c help
+exit: 0
+--- stdout ---
+NAME
+    i2c - I2C bus controller
+
+SYNOPSIS
+    <i2c id="..." sda="PIN" scl="PIN" [frequency="FREQ"] />
+
+DESCRIPTION
+    Declares an I2C controller. Reference it from a component with i2c="$id".
+
+ATTRIBUTES
+    id        (required, ident)
+    sda, scl  (required, pin) GPIO number; must be valid for the chosen chip.
+    frequency (optional, freq, default 100kHz)
+
+REFERENCED BY
+    components/i2c_component   via i2c="$id"
+
+SEE ALSO
+    espforge espf components i2c_component
+    espforge espf peripherals i2c examples
+--- stderr ---

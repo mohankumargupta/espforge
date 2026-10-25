@@ -1,0 +1,10 @@
+[package]
+name = "espforge-espgenerate-template"
+version.workspace = true
+description = "The ESPF schema and prose the generator is built from"
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+readme.workspace = true

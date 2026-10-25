@@ -1,0 +1,18 @@
+==================
+I2C EXAMPLE (ASYNC)
+==================
+
+# espforge
+  <project name="i2c_example_async" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <i2c id="i2c0" sda="6" scl="7" frequency="100kHz" />
+
+# components
+  <i2c_component id="i2c0" i2c="$i2c0" />
+
+# devices
+
+# services

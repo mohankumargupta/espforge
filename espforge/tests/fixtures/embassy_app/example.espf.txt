@@ -1,0 +1,14 @@
+# espforge
+  <project name="embassy_app" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <gpio id="gpio18" pin="18" direction="output" />
+
+# components
+  <led id="red_led" gpio="$gpio18" />
+
+# devices
+
+# services

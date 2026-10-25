@@ -1,0 +1,11 @@
+$ espforge check runtime-missing.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: # espforge is incomplete
+ --> runtime-missing.espf.txt:1:1
+  |
+1 | # espforge
+  | ^ # espforge needs <runtime type="..." />
+
+❌ Found 1 problem(s) in 'runtime-missing.espf.txt'; fix them and re-run.

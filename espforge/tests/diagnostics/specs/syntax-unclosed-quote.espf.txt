@@ -1,0 +1,11 @@
+# espforge
+  <project name="bad" />
+
+# peripherals
+  <gpio id="gpio4" pin="4 />
+
+# components
+
+# devices
+
+# services

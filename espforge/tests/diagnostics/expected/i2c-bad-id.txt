@@ -1,0 +1,11 @@
+$ espforge check i2c-bad-id.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: invalid i2c id
+ --> i2c-bad-id.espf.txt:7:3
+  |
+7 |   <i2c id="bus" sda="4" scl="5" />
+  |   ^^^^ <i2c id="bus">: the id must be i2c0, i2c1 or i2c2
+
+❌ Found 1 problem(s) in 'i2c-bad-id.espf.txt'; fix them and re-run.

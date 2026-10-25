@@ -1,15 +1,6 @@
 [package]
 name = "espforge"
-version = "0.1.24"
-description = "A scaffolding++ project generator for ESP32 projects"
-include = [
-    "LICENSE.md",
-    "README.md",
-    "src",
-    "build.rs",
-    "dependencies.toml",
-    "espforge_versions.toml"
-]
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 keywords.workspace = true 
@@ -17,56 +8,27 @@ categories.workspace = true
 repository.workspace = true
 readme.workspace = true
 
-[lib]
-name = "espforge_lib"
-path = "src/lib.rs"
-
-[[bin]]
-name = "espforge"
-path = "src/bin/main.rs"
-required-features = ["cli"]
-
 [dependencies]
-espforge_common = { version = "0.1.8", path = "../espforge_common"}
-espforge_components_builder = { version = "0.1.10", path = "../espforge_components_builder" }
-espforge_configuration = { path = "../espforge_configuration", version = "0.4.0" }
-espforge_devices_builder = { version = "0.1.10", path = "../espforge_devices_builder" }
-espforge_codegen = { version = "0.5.0", path = "../espforge_codegen" }
-espforge_dialogue = { version = "0.1.7", path = "../espforge_dialogue" }
-espforge_esp32metadata = { path = "../espforge_esp32metadata", version = "0.2.6" }
-espforge_examples = { version = "0.1.9", path = "../espforge_examples" }
-
-espforge_platform = { version = "0.1.15", path = "../espforge_platform", optional = true }
-espforge_components = { version = "0.1.14", path = "../espforge_components", optional = true }
-espforge_devices = { version = "0.1.15", path = "../espforge_devices", optional = true }
-
-anyhow.workspace = true
-serde = { workspace = true, features = ["derive"] }
-include_dir = { workspace = true, features = ["glob"] }
-toml = { workspace = true, features = ["preserve_order"] }
-serde_yaml_ng.workspace = true
-inventory.workspace = true
-toml_edit.workspace = true
-log.workspace = true
-proc-macro2.workspace = true
-prettyplease.workspace = true 
-syn = { workspace = true, features = ["full", "parsing"] }
-
-# CLI Specific Dependencies (Optional)
-clap = { workspace = true, features = ["derive"], optional = true }
-dialoguer = { workspace = true, optional = true }
-dialogue-macro = { workspace = true, optional = true }
-serde_json.workspace = true
+espforge-core = { path = "../espforge-core" }
+espforge-options = { path = "../espforge-options" }
+# Only for its VERSION constant (`espforge version`).
+espforge-espgenerate-template = { path = "../espforge-espgenerate-template" }
+anyhow = "1"
+espforge-diagnostics = { path = "../espforge-diagnostics" }
+serde_json = { workspace = true }
+espforge-model = { path = "../espforge-model" }
+clap = { version = "4", features = ["derive"] }
+# Chip metadata (supported chips, their Rust target triples) used by doctor.
+esp-metadata-generated = { version = "0.5.3", features = ["build-script"] }
+cliclack = "0.5.6"
+espforge_examples = { version = "0.6.0", path = "../espforge-examples" }
 
 [dev-dependencies]
-assert_cmd.workspace = true
-assert_fs.workspace = true
-predicates.workspace = true
-
-[features]
-default = ["cli"]
-cli = ["dep:clap", "dep:dialoguer", "dep:dialogue-macro"]
+tempfile = "3"
+# `tests/codegen_equiv.rs` parses the golden trees through the comparators.
+espforge-emit = { path = "../espforge-emit" }
+# Only a test: the `espf` catalog must cover every driver tag.
+espforge-bindings = { path = "../espforge-bindings" }
 
 [build-dependencies]
-anyhow.workspace = true
-toml_edit.workspace = true
+cargo_metadata = "0.19"

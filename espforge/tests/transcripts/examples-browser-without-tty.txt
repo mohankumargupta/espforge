@@ -1,0 +1,7 @@
+$ espforge examples
+exit: 2
+--- stdout ---
+--- stderr ---
+┌  espforge examples
+│
+⚠️ Could not run the example browser: not connected

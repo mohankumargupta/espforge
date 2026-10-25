@@ -1,0 +1,5 @@
+$ espforge examples list 99.Nope
+exit: 1
+--- stdout ---
+--- stderr ---
+❌ failed to list examples: unknown category '99.Nope' (available: 01.Basics, 02.Digital, 04.Communication, 05.Networking, 06.Displays)

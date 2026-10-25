@@ -1,0 +1,6 @@
+$ espforge examples list 01.Basics
+exit: 0
+--- stdout ---
+01.Basics/blink	BLINK EXAMPLE
+01.Basics/helloworld	HELLO WORLD EXAMPLE
+--- stderr ---

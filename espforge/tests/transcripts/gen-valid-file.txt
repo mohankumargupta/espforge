@@ -1,0 +1,6 @@
+$ espforge gen blink.espf.txt
+exit: 0
+--- stdout ---
+build: wrote 'blink' to build
+  next: cd build && cargo build
+--- stderr ---

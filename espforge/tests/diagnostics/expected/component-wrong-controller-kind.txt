@@ -1,0 +1,11 @@
+$ espforge check component-wrong-controller-kind.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: invalid led
+  --> component-wrong-controller-kind.espf.txt:11:3
+   |
+11 |   <led id="led_on_bus" gpio="$bus" />
+   |   ^^^^ <led id="led_on_bus"> refers to `bus`, which is not a <gpio> in `# peripherals`
+
+❌ Found 1 problem(s) in 'component-wrong-controller-kind.espf.txt'; fix them and re-run.

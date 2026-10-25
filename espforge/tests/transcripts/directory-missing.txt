@@ -1,0 +1,5 @@
+$ espforge -C /nonexistent/espforge-transcript version
+exit: 2
+--- stdout ---
+--- stderr ---
+❌ cannot change to '/nonexistent/espforge-transcript': No such file or directory (os error 2)

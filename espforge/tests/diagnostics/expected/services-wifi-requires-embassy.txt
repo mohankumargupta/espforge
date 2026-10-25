@@ -1,0 +1,11 @@
+$ espforge check services-wifi-requires-embassy.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: `wifi` requires `embassy`
+  --> services-wifi-requires-embassy.espf.txt:13:3
+   |
+13 |   <wifi ssid="net" password="pw" />
+   |   ^^^^^ `wifi` is on (derived from <wifi> in # services), but `embassy` is off (off because <runtime type="blocking" />)
+
+❌ Found 1 problem(s) in 'services-wifi-requires-embassy.espf.txt'; fix them and re-run.

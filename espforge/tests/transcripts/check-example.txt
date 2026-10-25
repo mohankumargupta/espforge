@@ -1,0 +1,5 @@
+$ espforge check --example 01.Basics/helloworld
+exit: 0
+--- stdout ---
+✓ embedded:01.Basics/helloworld is valid
+--- stderr ---

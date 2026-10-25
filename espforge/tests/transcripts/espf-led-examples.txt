@@ -1,0 +1,7 @@
+$ espforge espf components led examples
+exit: 0
+--- stdout ---
+<led id="red_led" gpio="$gpio18" />                   // minimal
+
+<led id="status" gpio="$gpio18" active_low="true" />  // active low
+--- stderr ---

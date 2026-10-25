@@ -1,0 +1,5 @@
+$ espforge check
+exit: 1
+--- stdout ---
+--- stderr ---
+❌ no .espf file in '.'; give a FILE or --example <category/name>

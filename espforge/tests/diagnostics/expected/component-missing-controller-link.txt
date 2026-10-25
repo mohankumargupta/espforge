@@ -1,0 +1,11 @@
+$ espforge check component-missing-controller-link.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: component is missing its controller link
+ --> component-missing-controller-link.espf.txt:9:3
+  |
+9 |   <led id="red_led" />
+  |   ^^^^ <led id="red_led"> needs an i2c="/spi="/gpio="/uart=" attribute pointing at a peripheral id
+
+❌ Found 1 problem(s) in 'component-missing-controller-link.espf.txt'; fix them and re-run.

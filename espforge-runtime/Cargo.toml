@@ -1,0 +1,38 @@
+[package]
+name = "espforge-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+readme.workspace = true
+
+[dependencies]
+log = "0.4"
+# Blocking + async embedded-hal traits (the `i2c` component bridges esp-hal's
+# bus to them, so drivers and app code stay trait-generic).
+embedded-hal = "1.0"
+static_cell = "2.1"
+embassy-time = { version = "0.5", features = ["generic-queue-64"], optional = true }
+embassy-sync = { version = "0.7", optional = true }
+embedded-hal-async = { version = "1.0", optional = true }
+# Wi-Fi support (feature `wifi`). The generated project supplies the chip
+# features through feature unification, same as for esp-hal.
+embassy-executor = { version = "0.10", optional = true }
+embassy-net = { version = "0.9", features = ["tcp", "udp", "dhcpv4", "medium-ethernet"], optional = true }
+
+[features]
+# Selects the async `Delay` (yields via embassy_time) so the same
+# `ctx.delay.delay_ms(..)` call works in both runtimes.
+embassy = ["dep:embassy-time", "dep:embassy-sync", "dep:embedded-hal-async"]
+# Wi-Fi station driver (esp-radio + embassy-net). Needs the embassy runtime.
+wifi = ["embassy", "dep:esp-radio", "dep:embassy-executor", "dep:embassy-net"]
+
+# esp-hal only builds for esp targets, so keep it invisible to host builds.
+# The generated project supplies the chip feature.
+[target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
+esp-hal = { version = "1", features = ["unstable"] }
+# `requires-unstable` is how a library says it uses unstable esp-radio APIs;
+# the final binary enables `unstable` itself.
+esp-radio = { version = "1.0.0-beta.1", features = ["wifi", "requires-unstable"], optional = true }

@@ -1,0 +1,13 @@
+# espforge
+  <project name="bad" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <pwm id="pwm0" pin="4" />
+
+# components
+
+# devices
+
+# services

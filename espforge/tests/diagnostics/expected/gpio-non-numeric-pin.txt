@@ -1,0 +1,11 @@
+$ espforge check gpio-non-numeric-pin.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: invalid gpio pin
+ --> gpio-non-numeric-pin.espf.txt:7:3
+  |
+7 |   <gpio id="g" pin="abc" />
+  |   ^^^^^ <gpio id="g"> needs a numeric pin="..."
+
+❌ Found 1 problem(s) in 'gpio-non-numeric-pin.espf.txt'; fix them and re-run.

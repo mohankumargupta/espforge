@@ -1,0 +1,5 @@
+$ espforge check device-unknown-driver.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+❌ No compile-time driver engine found for runtime tag <made_up_part>

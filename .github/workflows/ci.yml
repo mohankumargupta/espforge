@@ -1,0 +1,44 @@
+name: CI
+
+# Manual only: run it from the Actions tab (`Run workflow`) when you want the
+# gates; nothing is checked on push or pull request.
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Tests (no hardware, no network)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imc-unknown-none-elf,riscv32imac-unknown-none-elf,riscv32imafc-unknown-none-elf
+      - uses: Swatinem/rust-cache@v2
+      # Includes the CLI transcripts, the diagnostics corpus and the golden
+      # generated projects (byte comparison only, no cargo on them).
+      - run: cargo test --workspace
+      # Generated code is checked in. If build.rs had to rewrite it, the
+      # checked-in copy was stale: commit the regenerated file.
+      - run: >
+          git diff --exit-code --
+          espforge-bindings/src/components/generated_vocab.rs
+          espforge-bindings/src/components/generated_elements.rs
+          espforge-bindings/src/drivers/generated_registry.rs
+          espforge-options/src/generated_options.rs
+          espforge-options/src/generated_catalog.rs
+
+  generated-projects:
+    name: Generated projects compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imc-unknown-none-elf
+      # The compile test points CARGO_TARGET_DIR at `target/golden-check`, so
+      # the default cache path covers it.
+      - uses: Swatinem/rust-cache@v2
+      # The invariant this repo lacked: a change to the emitter is compiled
+      # here, not discovered by a user running `espforge build`.
+      - run: cargo test -p espforge --test golden_projects -- --ignored

@@ -1,0 +1,11 @@
+$ espforge check ref-unknown-peripheral.espf.txt
+exit: 1
+--- stdout ---
+--- stderr ---
+error: unknown peripheral
+ --> ref-unknown-peripheral.espf.txt:9:27
+  |
+9 |   <led id="red_led" gpio="$nope" />
+  |                           ^^^^^ there is no `nope` in `# peripherals`; the `$` reference must match an id defined there
+
+❌ Found 1 problem(s) in 'ref-unknown-peripheral.espf.txt'; fix them and re-run.
