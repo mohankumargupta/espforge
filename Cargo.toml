@@ -1,9 +1,21 @@
 [workspace]
 resolver = "3"
-members = ["espf", "espforge", "espforge-core", "espforge-bindings", "espforge-diagnostics", "espforge-emit", "espforge-examples", "espforge-hardware", "espforge-model", "espforge-options", "espforge-runtime", "espforge-espgenerate-template"]
+members = [
+    "espf",
+    "espforge",
+    "espforge-core",
+    "espforge-diagnostics",
+    "espforge-drivers",
+    "espforge-elements",
+    "espforge-emit",
+    "espforge-examples",
+    "espforge-runtime",
+    "espforge-schema",
+]
+exclude = ["legacy"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "MIT"
 description = "a scaffolding++ tool for creating esp32 no_std esphal without the hassle"
@@ -14,28 +26,33 @@ keywords = ["esp32", "embedded", "hal", "framework", "esphome"]
 categories = ["embedded", "hardware-support", "no-std"]
 
 [workspace.dependencies]
-# Use the same versions your current prototype already builds with.
 winnow = { version = "0.7", features = ["simd"] }
 annotate-snippets = "0.12"
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"
+kdl = "6"
+toml_edit = "=0.22.27"
+syn = { version = "=3.0.8", features = ["full"] }
+quote = "=1.0.47"
+proc-macro2 = "=1.0.107"
+prettyplease = "=0.3.0"
+toml = "=1.1.8"
+clap = { version = "4", features = ["derive"] }
+include_dir = { version = "0.7.4", features = ["glob"] }
+esp-metadata-generated = { version = "0.5.3", features = ["build-script"] }
+tempfile = "3"
+linkme = "0.3.37"
 
-# Workspace crates, so members declare them with `{ workspace = true }` instead
-# of repeating a relative path. `path` is relative to this manifest (the
-# workspace root), not to the member. `version` is only consulted by
-# `cargo publish`; keep it in step with `[workspace.package] version`.
-espf = { path = "espf", version = "0.6.0" }
-espforge-bindings = { path = "espforge-bindings", version = "0.6.0" }
-espforge-core = { path = "espforge-core", version = "0.6.0" }
-espforge-diagnostics = { path = "espforge-diagnostics", version = "0.6.0" }
-espforge-emit = { path = "espforge-emit", version = "0.6.0" }
+# Workspace crates, so members declare them with `{ workspace = true }`
+# instead of repeating a relative path.
+espf = { path = "espf", version = "0.7.0" }
+espforge-core = { path = "espforge-core", version = "0.7.0" }
+espforge-diagnostics = { path = "espforge-diagnostics", version = "0.7.0" }
+espforge-drivers = { path = "espforge-drivers", version = "0.7.0" }
+espforge-elements = { path = "espforge-elements", version = "0.7.0" }
+espforge-emit = { path = "espforge-emit", version = "0.7.0" }
 # The package keeps its underscore name, so the dependency key matches it.
-espforge_examples = { path = "espforge-examples", version = "0.6.0" }
-espforge-espgenerate-template = { path = "espforge-espgenerate-template", version = "0.6.0" }
-espforge-hardware = { path = "espforge-hardware", version = "0.6.0" }
-espforge-model = { path = "espforge-model", version = "0.6.0" }
-espforge-options = { path = "espforge-options", version = "0.6.0" }
-
-# The profile that 'dist' will build with
-[profile.dist]
-inherits = "release"
-lto = "thin"
+espforge_examples = { path = "espforge-examples", version = "0.7.0" }
+espforge-runtime = { path = "espforge-runtime", version = "0.7.0" }
+espforge-schema = { path = "espforge-schema", version = "0.7.0" }

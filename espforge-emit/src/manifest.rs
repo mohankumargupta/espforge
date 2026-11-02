@@ -3,13 +3,13 @@
 //! `.espforge/manifest.json`:
 //!
 //! ```json
-//! { "template_version": "0.6.0", "files": { "Cargo.toml": "<fnv1a>", ... } }
+//! { "template_version": "0.7.0", "files": { "Cargo.toml": "<fnv1a>", ... } }
 //! ```
 //!
 //! `files` maps each `Owned` file to a checksum of what espforge wrote.
 
+use crate::artifact::{Artifact, Ownership};
 use anyhow::{Context, Result};
-use espforge_model::{Artifact, Ownership};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;

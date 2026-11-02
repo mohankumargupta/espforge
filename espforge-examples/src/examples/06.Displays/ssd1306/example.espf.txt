@@ -1,0 +1,19 @@
+==================
+SSD1306 OLED EXAMPLE
+==================
+
+# espforge
+  <project name="ssd1306" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <i2c id="i2c0" sda="6" scl="7" frequency="400kHz" />
+
+# components
+  <i2c_component id="oled_bus" i2c="$i2c0" address="0x3C" />
+
+# devices
+  <ssd1306 id="oled" i2c_component="$oled_bus" size="128x64" />
+
+# services

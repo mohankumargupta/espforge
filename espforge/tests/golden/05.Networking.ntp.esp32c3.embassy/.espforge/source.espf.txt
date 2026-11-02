@@ -1,0 +1,24 @@
+====================
+NTP CLIENT EXAMPLE
+
+Connects to Wi-Fi, then asks an NTP server for the current time every minute
+with the `<ntp>` service. The reply carries Unix seconds, a sub-second
+fraction, the round-trip delay and the clock offset relative to the board.
+SNTP (RFC 4330) asks clients to poll no more often than once a minute.
+====================
+
+# espforge
+  <project name="ntp" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <wifi id="radio" />
+
+# components
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
+
+# devices
+
+# services
+  <ntp id="clock" network="$home" />

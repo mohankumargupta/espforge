@@ -1,15 +1,12 @@
-//! `AnswerArgs`: the answers a user can give on the command line, shared by
-//! `build` and `new` (flattened into both). A flag always wins over the
-//! `.espf`; when it actually changes something a `note:` is printed.
+//! The answers a user can give on the command line.
 //!
 //! This module is only the flag surface: the spellings, the value enums and
-//! the conversion into `espforge_core::answers::Overrides`. Applying an
-//! override — which value wins, when a note is owed, what an unknown chip
-//! means — is library behaviour.
+//! the conversion into [`Overrides`]. Applying an override — which value wins,
+//! when a `note:` is owed, what an unknown chip means — is library behaviour.
 
 use clap::{Args, ValueEnum};
 use espforge_core::answers::Overrides;
-use espforge_model::{Console, Runtime};
+use espforge_elements::{Console, Runtime};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum RuntimeArg {
@@ -40,7 +37,7 @@ pub struct AnswerArgs {
     /// Fill unspecified options from their defaults (true/false)
     #[arg(long, value_name = "BOOL")]
     pub defaults: Option<bool>,
-    /// Set an option, repeatable: --option wifi=true --option log=false
+    /// Set an option, repeatable: --option alloc=false
     #[arg(long = "option", value_name = "NAME=VALUE")]
     pub options: Vec<String>,
 }
@@ -89,7 +86,7 @@ mod tests {
             runtime: Some(RuntimeArg::Embassy),
             console: Some(ConsoleArg::JtagSerial),
             defaults: Some(true),
-            options: vec!["wifi=true".into()],
+            options: vec!["alloc=false".into()],
         };
         let o = args.overrides();
         assert_eq!(o.name.as_deref(), Some("hello"));
@@ -97,7 +94,7 @@ mod tests {
         assert_eq!(o.runtime, Some(Runtime::Embassy));
         assert_eq!(o.console, Some(Console::JtagSerial));
         assert_eq!(o.defaults, Some(true));
-        assert_eq!(o.options, ["wifi=true"]);
+        assert_eq!(o.options, ["alloc=false"]);
     }
 
     #[test]

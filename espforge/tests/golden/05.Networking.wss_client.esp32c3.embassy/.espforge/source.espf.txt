@@ -1,0 +1,23 @@
+====================
+SECURE WEBSOCKET CLIENT EXAMPLE
+
+Streams a JSON status message to a TLS 1.3 WebSocket endpoint every few
+seconds with the `<wss_client>` service. `insecure="true"` (dev only) skips
+certificate verification, which also makes the build print a warning.
+====================
+
+# espforge
+  <project name="wss_client" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <wifi id="radio" />
+
+# components
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
+
+# devices
+
+# services
+  <wss_client id="secure_ws" network="$home" insecure="true" />

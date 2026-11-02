@@ -1,0 +1,22 @@
+==================
+ILI9341 TFT EXAMPLE
+==================
+
+# espforge
+  <project name="ili9341" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <spi id="spi2" sclk="8" mosi="7" mode="0" frequency="40000kHz" />
+  <gpio id="gpio4" pin="4" direction="output" />
+  <gpio id="gpio5" pin="5" direction="output" />
+  <gpio id="gpio6" pin="6" direction="output" />
+
+# components
+  <spi_component id="tft_bus" spi="$spi2" cs="9" />
+
+# devices
+  <ili9341 id="tft" spi_component="$tft_bus" dc="$gpio4" reset="$gpio5" backlight="$gpio6" rotation="90" />
+
+# services

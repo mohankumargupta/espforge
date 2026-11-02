@@ -1,0 +1,27 @@
+[package]
+name = "espforge-elements"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+
+[build-dependencies]
+# The Attrs generator reads the same composed schema the crate interprets at
+# runtime: the core vocabulary from `espforge-schema`, the devices from
+# `espforge-drivers`. Neither depends on this crate, so there is no cycle.
+espforge-schema = { workspace = true }
+espforge-drivers = { workspace = true }
+
+[dependencies]
+espf = { workspace = true }
+espforge-diagnostics = { workspace = true }
+espforge-schema = { workspace = true }
+# The `# devices` half of the schema rides with the drivers it describes.
+espforge-drivers = { workspace = true }
+esp-metadata-generated = { workspace = true }
+linkme = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }

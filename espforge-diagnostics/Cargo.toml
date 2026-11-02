@@ -7,10 +7,6 @@ license.workspace = true
 keywords.workspace = true
 categories.workspace = true
 repository.workspace = true
-readme.workspace = true
 
-# A leaf crate: it knows how to describe and render a problem, not what ESPF is.
-# Every other crate may depend on it, and it depends on none of them.
 [dependencies]
 annotate-snippets = { workspace = true }
-serde_json = { workspace = true }

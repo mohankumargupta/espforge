@@ -1,5 +1,6 @@
 use crate::context::{AttrOp, ParsedNode, TagAttribute};
-use crate::diag::{EspfError, JunkKind, JunkSpan};
+use crate::diag::{JunkKind, JunkSpan};
+use espforge_diagnostics::{Diagnostic, codes};
 use std::collections::HashMap;
 use winnow::{
     ModalResult, Parser,
@@ -28,7 +29,7 @@ pub struct Parsed<'a> {
     /// Byte offset of each section's `#` header (first definition).
     pub header_offsets: HashMap<String, usize>,
     /// Located structural errors: duplicate and missing sections.
-    pub structure_errors: Vec<EspfError>,
+    pub structure_errors: Vec<Diagnostic>,
 }
 
 /// Identifier-like token: letters, digits, `_`, `-`.
@@ -313,14 +314,15 @@ fn parse_impl<'a>(mut input: &'a str, file: &'a str) -> Parsed<'a> {
             Ok(nodes) => {
                 if let Some(&first) = header_offsets.get(section_name) {
                     // Keep the first definition; report the repeat.
-                    structure_errors.push(EspfError {
-                        title: format!("duplicate section `# {section_name}`"),
-                        label: format!(
+                    structure_errors.push(Diagnostic::error(
+                        codes::STRUCTURE_DUPLICATE_SECTION,
+                        header_offset..header_end,
+                        format!("duplicate section `# {section_name}`"),
+                        format!(
                             "`# {section_name}` is already defined on line {}; merge the two sections",
                             crate::diag::line_number_for_offset(file, first)
                         ),
-                        span: header_offset..header_end,
-                    });
+                    ));
                 } else {
                     header_offsets.insert(section_name.to_string(), header_offset);
                     sections.insert(section_name.to_string(), nodes);
@@ -340,11 +342,12 @@ fn parse_impl<'a>(mut input: &'a str, file: &'a str) -> Parsed<'a> {
     let anchor = header_offsets.values().copied().max().unwrap_or(0);
     for name in REQUIRED_SECTIONS {
         if !sections.contains_key(name) {
-            structure_errors.push(EspfError {
-                title: format!("missing section `# {name}`"),
-                label: format!("every ESPF file needs a `# {name}` section (it may be empty)"),
-                span: anchor..anchor,
-            });
+            structure_errors.push(Diagnostic::error(
+                codes::STRUCTURE_MISSING_SECTION,
+                anchor..anchor,
+                format!("missing section `# {name}`"),
+                format!("every ESPF file needs a `# {name}` section (it may be empty)"),
+            ));
         }
     }
 
@@ -631,11 +634,12 @@ mod tests {
         let p = parse_espf(src);
         assert_eq!(p.structure_errors.len(), 1, "{:?}", p.structure_errors);
         let e = &p.structure_errors[0];
-        assert!(e.title.contains("duplicate section"));
-        assert_eq!(&src[e.span.clone()], "# peripherals");
+        assert_eq!(e.code, codes::STRUCTURE_DUPLICATE_SECTION);
+        assert!(e.message.contains("duplicate section"));
+        assert_eq!(&src[e.primary.clone()], "# peripherals");
         // The *second* header is the one underlined.
-        assert_eq!(e.span.start, src.rfind("# peripherals").unwrap());
-        assert!(e.label.contains("line 2"), "{}", e.label);
+        assert_eq!(e.primary.start, src.rfind("# peripherals").unwrap());
+        assert!(e.labels[0].text.contains("line 2"), "{}", e.labels[0].text);
         // First definition wins.
         assert_eq!(p.sections["peripherals"][0].id, "a");
     }
@@ -647,7 +651,7 @@ mod tests {
         let titles: Vec<&str> = p
             .structure_errors
             .iter()
-            .map(|e| e.title.as_str())
+            .map(|e| e.message.as_str())
             .collect();
         assert_eq!(
             titles,
@@ -661,7 +665,7 @@ mod tests {
         assert!(
             p.structure_errors
                 .iter()
-                .all(|e| e.span.start == last_header)
+                .all(|e| e.primary.start == last_header)
         );
     }
 
@@ -669,6 +673,11 @@ mod tests {
     fn empty_file_reports_all_five_missing_at_top() {
         let p = parse_espf("");
         assert_eq!(p.structure_errors.len(), 5);
-        assert!(p.structure_errors.iter().all(|e| e.span == (0..0)));
+        assert!(p.structure_errors.iter().all(|e| e.primary == (0..0)));
+        assert!(
+            p.structure_errors
+                .iter()
+                .all(|e| e.code == codes::STRUCTURE_MISSING_SECTION)
+        );
     }
 }

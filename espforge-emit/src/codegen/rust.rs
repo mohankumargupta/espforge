@@ -1,23 +1,33 @@
-//! The Rust backend (Phase 3): `src/generated.rs`, `src/lib.rs`,
-//! `src/bin/main.rs` and `build.rs`, emitted from `Board` with `quote!` and
-//! printed by `prettyplease`.
+//! The Rust backend: `src/generated.rs`, `src/lib.rs`, `src/bin/main.rs` and
+//! `build.rs`, emitted from `Board` with `quote!` and printed by
+//! `prettyplease`.
 //!
 //! Comments are inserted by [`super::comments`] after printing; the AST cannot
 //! carry them. The four files are owned by the project (regenerated on every
 //! build).
+//!
+//! `generated()` walks `board.components` and calls each component's
+//! `Lowered::emit` through an `EmitCx`; it has no arm per element. With zero
+//! components it emits exactly the empty `Components`, `Devices {}` and
+//! `Services {}` of the helloworld golden.
 
-use anyhow::{Context, Result, bail};
-use espforge_model::{
-    Artifact, Board, Bus, Component, Meta, Ownership, Parity, Runtime, Service, StopBits,
-};
-use espforge_options::ResolvedOptions;
+use anyhow::{Context, Result};
+use espforge_elements::element::EmitParts;
+use espforge_elements::{Board, EmitCx, Lowered, MainCtx, Meta, ResolvedOptions, Runtime};
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use proc_macro2::Literal;
+use quote::format_ident;
 
 use super::comments::{self, Comment};
+use crate::artifact::{Artifact, Ownership};
 
 /// Every Rust artifact, in a deterministic order.
+///
+/// The elements are asked to emit **once**, here: the same `EmitParts` feed
+/// `generated.rs` (fields, initialisers, prelude, safety notes) and `main.rs`
+/// (startup statements). A component cannot be asked to emit twice.
 pub fn generate(board: &Board, meta: &Meta, opts: &ResolvedOptions) -> Result<Vec<Artifact>> {
+    let parts = collect(board);
     Ok(vec![
         Artifact {
             path: "build.rs".into(),
@@ -26,17 +36,17 @@ pub fn generate(board: &Board, meta: &Meta, opts: &ResolvedOptions) -> Result<Ve
         },
         Artifact {
             path: "src/bin/main.rs".into(),
-            content: main(board, meta, opts)?,
+            content: main(board, &parts, meta, opts)?,
             ownership: Ownership::Owned,
         },
         Artifact {
             path: "src/generated.rs".into(),
-            content: generated(board, meta)?,
+            content: generated(&parts, meta)?,
             ownership: Ownership::Owned,
         },
         Artifact {
             path: "src/lib.rs".into(),
-            content: lib(meta)?,
+            content: lib(meta, !board.devices.is_empty())?,
             ownership: Ownership::Owned,
         },
     ])
@@ -47,257 +57,69 @@ fn print(tokens: TokenStream) -> Result<String> {
     Ok(prettyplease::unparse(&file))
 }
 
-fn gpio(pin: u8) -> TokenStream {
-    let gpio = format_ident!("GPIO{}", pin);
-    quote! { unsafe { registry.peripherals.#gpio.clone_unchecked() } }
-}
+fn generated(parts: &EmitParts, _meta: &Meta) -> Result<String> {
+    let fields = &parts.fields;
+    let inits = &parts.inits;
+    let prelude = &parts.prelude;
+    let device_fields = &parts.device_fields;
+    let device_inits = &parts.device_inits;
+    let service_fields = &parts.service_fields;
+    let service_inits = &parts.service_inits;
 
-fn peripheral_access(name: &str) -> TokenStream {
-    let peripheral = format_ident!("{}", name);
-    quote! { unsafe { registry.peripherals.#peripheral.clone_unchecked() } }
-}
-
-/// An integer literal spelled as the templates spell it: no type suffix.
-fn int(value: u32) -> proc_macro2::Literal {
-    proc_macro2::Literal::u32_unsuffixed(value)
-}
-
-fn rate(khz: u32) -> TokenStream {
-    let khz = int(khz);
-    quote! { esp_hal::time::Rate::from_khz(#khz) }
-}
-
-fn parity(value: Parity) -> TokenStream {
-    match value {
-        Parity::None => quote! { esp_hal::uart::Parity::None },
-        Parity::Even => quote! { esp_hal::uart::Parity::Even },
-        Parity::Odd => quote! { esp_hal::uart::Parity::Odd },
-    }
-}
-
-fn stop_bits(value: StopBits) -> TokenStream {
-    match value {
-        StopBits::One => quote! { esp_hal::uart::StopBits::_1 },
-        StopBits::Two => quote! { esp_hal::uart::StopBits::_2 },
-    }
-}
-
-fn mode(value: u8) -> TokenStream {
-    let mode = format_ident!("_{}", value);
-    quote! { esp_hal::spi::Mode::#mode }
-}
-
-fn runtime_type(meta: &Meta) -> TokenStream {
-    match meta.runtime {
-        Runtime::Blocking => quote! { esp_hal::Blocking },
-        Runtime::Embassy => quote! { esp_hal::Async },
-    }
-}
-
-fn bus_of(board: &Board, id: espforge_model::BusId) -> Result<&Bus> {
-    board.bus(id).context("board component names a missing bus")
-}
-
-fn generated(board: &Board, meta: &Meta) -> Result<String> {
-    let runtime_type = runtime_type(meta);
-    let mut fields = Vec::new();
-    let mut inits = Vec::new();
-    let mut bus_lets = Vec::new();
-
-    for component in &board.components {
-        match component {
-            Component::Led(led) => {
-                let name = format_ident!("{}", led.id.rust_name());
-                let pin = gpio(led.pin.pin().0);
-                let active_low = led.active_low;
-                fields.push(quote! { pub #name: espforge_runtime::Led, });
-                inits.push(quote! {
-                    #name: espforge_runtime::Led::new(#pin, #active_low),
-                });
-            }
-            Component::Button(button) => {
-                let name = format_ident!("{}", button.id.rust_name());
-                let pin = gpio(button.pin.pin().0);
-                let pull_up = button.pull_up;
-                fields.push(quote! { pub #name: espforge_runtime::Button, });
-                inits.push(quote! {
-                    #name: espforge_runtime::Button::new(#pin, #pull_up),
-                });
-            }
-            Component::I2c(_) | Component::Spi(_) | Component::Uart(_) => {}
+    // `Devices` is byte-identical to the styles that predate devices (the
+    // helloworld `Devices {}` with no `new`) when nothing is declared.
+    let devices = if device_fields.is_empty() {
+        quote::quote! {
+            #[doc = " Constructed devices (none yet)."]
+            pub struct Devices {}
         }
-    }
+    } else {
+        quote::quote! {
+            #[doc = " Constructed devices."]
+            pub struct Devices {
+                #(#device_fields)*
+            }
 
-    // SPI buses are constructed once, before `Self`, because devices borrow
-    // their handle. Only buses with at least one device are emitted.
-    for (index, bus) in board.resources.buses().iter().enumerate() {
-        let Bus::Spi {
-            id,
-            peripheral,
-            sclk,
-            mosi,
-            miso,
-            khz,
-            mode: bus_mode,
-        } = bus
-        else {
-            continue;
-        };
-        let used = board
-            .components
-            .iter()
-            .any(|c| matches!(c, Component::Spi(spi) if spi.bus.0 == index));
-        if !used {
-            continue;
-        }
-        let handle = format_ident!("{}_bus", id.rust_name());
-        let peripheral = peripheral_access(peripheral);
-        let sclk = gpio(sclk.pin().0);
-        let mosi = gpio(mosi.pin().0);
-        let rate = rate(*khz);
-        let spi_mode = mode(*bus_mode);
-        bus_lets.push(match miso {
-            Some(miso) => {
-                let miso = gpio(miso.pin().0);
-                quote! {
-                    let #handle = espforge_runtime::SpiBus::build(
-                        #peripheral, #sclk, #mosi, #miso,
-                        espforge_runtime::SpiConfig {
-                            frequency: #rate,
-                            mode: #spi_mode,
-                        },
-                    )
-                    .expect("SPI bus configuration failed");
-                }
-            }
-            None => quote! {
-                let #handle = espforge_runtime::SpiBus::build_write_only(
-                    #peripheral, #sclk, #mosi,
-                    espforge_runtime::SpiConfig {
-                        frequency: #rate,
-                        mode: #spi_mode,
-                    },
-                )
-                .expect("SPI bus configuration failed");
-            },
-        });
-    }
-
-    for component in &board.components {
-        match component {
-            Component::I2c(i2c) => {
-                let bus = bus_of(board, i2c.bus)?;
-                let Bus::I2c {
-                    peripheral,
-                    sda,
-                    scl,
-                    khz,
-                    ..
-                } = bus
-                else {
-                    bail!("i2c component names a non-i2c bus");
-                };
-                let name = format_ident!("{}", i2c.id.rust_name());
-                let peripheral = peripheral_access(peripheral);
-                let sda = gpio(sda.pin().0);
-                let scl = gpio(scl.pin().0);
-                let rate = rate(*khz);
-                fields.push(quote! {
-                    pub #name: espforge_runtime::I2cBus<#runtime_type>,
-                });
-                inits.push(quote! {
-                    #name: espforge_runtime::I2cBus::build(
-                        #peripheral, #sda, #scl,
-                        espforge_runtime::I2cConfig { frequency: #rate },
-                    )
-                    .expect("I2C bus configuration failed"),
-                });
-            }
-            Component::Spi(spi) => {
-                let bus = bus_of(board, spi.bus)?;
-                let handle = format_ident!("{}_bus", bus.id().rust_name());
-                let name = format_ident!("{}", spi.id.rust_name());
-                let cs = gpio(spi.cs.pin().0);
-                fields.push(quote! {
-                    pub #name: espforge_runtime::SpiDevice<#runtime_type>,
-                });
-                inits.push(quote! {
-                    #name: espforge_runtime::SpiDevice::new(
-                        #handle,
-                        esp_hal::gpio::Output::new(
-                            #cs,
-                            esp_hal::gpio::Level::High,
-                            esp_hal::gpio::OutputConfig::default(),
-                        ),
-                        espforge_runtime::Delay::new(),
-                    ),
-                });
-            }
-            Component::Uart(uart) => {
-                let bus = bus_of(board, uart.port)?;
-                let Bus::Uart {
-                    peripheral, tx, rx, ..
-                } = bus
-                else {
-                    bail!("uart component names a non-uart bus");
-                };
-                let name = format_ident!("{}", uart.id.rust_name());
-                let peripheral = peripheral_access(peripheral);
-                let tx = gpio(tx.pin().0);
-                let rx = gpio(rx.pin().0);
-                let baud = int(uart.baud);
-                let parity = parity(uart.framing.parity);
-                let stop_bits = stop_bits(uart.framing.stop_bits);
-                fields.push(quote! {
-                    pub #name: espforge_runtime::UartDevice<#runtime_type>,
-                });
-                inits.push(quote! {
-                    #name: espforge_runtime::UartDevice::build(
-                        #peripheral, #tx, #rx,
-                        espforge_runtime::UartConfig {
-                            baudrate: #baud,
-                            data_bits: esp_hal::uart::DataBits::_8,
-                            parity: #parity,
-                            stop_bits: #stop_bits,
-                        },
-                    )
-                    .expect("UART configuration failed"),
-                });
-            }
-            Component::Led(_) | Component::Button(_) => {}
-        }
-    }
-
-    let wifi = wifi(board);
-    let wifi_field = wifi
-        .as_ref()
-        .map(|_| quote! { pub wifi: espforge_runtime::Wifi, });
-    let wifi_impl = wifi.as_ref().map(|wifi| {
-        let ssid = &wifi.ssid;
-        let password = &wifi.password;
-        quote! {
-            impl Services {
-                #[doc = " Starts the Wi-Fi station: it returns right away and connects in the"]
-                #[doc = " background. Call `wifi.wait_connected().await` to wait for an address."]
+            impl Devices {
                 pub fn new(
-                    wifi: esp_hal::peripherals::WIFI<'static>,
-                    spawner: &embassy_executor::Spawner,
-                ) -> Result<Self, espforge_runtime::WifiError> {
-                    let wifi = espforge_runtime::Wifi::start(
-                        spawner,
-                        wifi,
-                        espforge_runtime::WifiConfig {
-                            ssid: #ssid,
-                            password: #password,
-                        },
-                    )?;
-                    Ok(Self { wifi })
+                    registry: &mut PeripheralRegistry,
+                    components: &mut Components,
+                ) -> Self {
+                    Self {
+                        #(#device_inits)*
+                    }
                 }
             }
         }
-    });
+    };
 
-    let tokens = quote! {
+    // `Services` is byte-identical to the styles that predate services (the
+    // helloworld `Services {}` with no `new`) when nothing is declared, so
+    // adding a service is a change to projects that have one, and no change to
+    // the projects that do not.
+    let services = if service_fields.is_empty() {
+        quote::quote! {
+            #[doc = " Constructed services."]
+            pub struct Services {}
+        }
+    } else {
+        quote::quote! {
+            #[doc = " Constructed services."]
+            pub struct Services {
+                #(#service_fields)*
+            }
+
+            impl Services {
+                pub fn new(components: &Components) -> Self {
+                    Self {
+                        #(#service_inits)*
+                    }
+                }
+            }
+        }
+    };
+
+    let tokens = quote::quote! {
         #![allow(dead_code, unused_variables)]
 
         #[doc = " Raw ESP32 peripherals, moved out of `esp_hal::peripherals::Peripherals` once at init."]
@@ -318,147 +140,76 @@ fn generated(board: &Board, meta: &Meta) -> Result<String> {
 
         impl Components {
             pub fn new(registry: &mut PeripheralRegistry) -> Self {
-                #(#bus_lets)*
+                #(#prelude)*
                 Self {
                     #(#inits)*
                 }
             }
         }
 
-        #[doc = " Constructed devices (none yet)."]
-        pub struct Devices {}
+        #devices
 
-        #[doc = " Constructed services."]
-        pub struct Services {
-            #wifi_field
-        }
-
-        #wifi_impl
+        #services
     };
 
     let mut text = comments::prepend(
         print(tokens)?,
         &["GENERATED BY ESPFORGE — DO NOT EDIT. Source of truth is the project .espf file."],
     );
-    text = comments::apply(text, &safety_comments(board)?)?;
+    text = comments::apply(text, &safety_comments(&parts.safety))?;
     // Re-parse: an inserted comment must never change what the file means.
     syn::parse_file(&text).context("commented generated.rs does not parse")?;
     Ok(text)
 }
 
-fn wifi<'a>(board: &'a Board) -> Option<&'a espforge_model::WifiService> {
-    board.services.iter().find_map(|service| match service {
-        Service::Wifi(wifi) => Some(wifi),
-    })
-}
-
-/// The `SAFETY` notes the old template emitted around the unsafe moves.
-fn safety_comments(board: &Board) -> Result<Vec<Comment>> {
-    let mut comments = Vec::new();
-
-    for (index, bus) in board.resources.buses().iter().enumerate() {
-        let Bus::Spi {
-            id,
-            sclk,
-            mosi,
-            miso,
-            ..
-        } = bus
-        else {
-            continue;
-        };
-        let used = board
-            .components
-            .iter()
-            .any(|c| matches!(c, Component::Spi(spi) if spi.bus.0 == index));
-        if !used {
-            continue;
-        }
-        let mut pins = format!("GPIO{}/GPIO{}", sclk.pin().0, mosi.pin().0);
-        if let Some(miso) = miso {
-            pins.push_str(&format!("/GPIO{}", miso.pin().0));
-        }
-        let anchor = format!("let {}_bus =", id.rust_name());
-        comments.push(Comment::block(
-            anchor.clone(),
-            &[
-                "SAFETY: espforge checked that no other component uses this",
-                &format!("peripheral or {pins}."),
-            ],
-        ));
-        if miso.is_none() {
-            comments.push(Comment::new(
-                anchor,
-                "No miso: a write-only bus (displays).",
-            ));
-        }
-    }
-
+/// Fill the `Components` and `Services` fields and initialisers, and collect
+/// the `main()` startup statements, by asking every component and service to
+/// emit itself. There is no `match` on `Component` here: an element's own file
+/// owns every token it prints.
+///
+/// Components emit before services, so a service's `components.<network>`
+/// reference is to a field declared above it.
+fn collect(board: &Board) -> EmitParts {
+    let mut cx = EmitCx::with_main(MainCtx::default());
     for component in &board.components {
-        match component {
-            Component::Led(led) => {
-                let name = led.id.rust_name();
-                let pin = led.pin.pin().0;
-                comments.push(Comment::new(
-                    format!("{name}: espforge_runtime::Led::new("),
-                    format!("SAFETY: espforge checked that no other component uses GPIO{pin}."),
-                ));
-            }
-            Component::Button(button) => {
-                let name = button.id.rust_name();
-                let pin = button.pin.pin().0;
-                comments.push(Comment::new(
-                    format!("{name}: espforge_runtime::Button::new("),
-                    format!("SAFETY: espforge checked that no other component uses GPIO{pin}."),
-                ));
-            }
-            Component::I2c(i2c) => {
-                let bus = bus_of(board, i2c.bus)?;
-                let Bus::I2c { sda, scl, .. } = bus else {
-                    bail!("i2c component names a non-i2c bus");
-                };
-                let name = i2c.id.rust_name();
-                comments.push(Comment::block(
-                    format!("{name}: espforge_runtime::I2cBus::build("),
-                    &[
-                        "SAFETY: espforge checked that no other component uses this",
-                        &format!("peripheral or GPIO{}/GPIO{}.", sda.pin().0, scl.pin().0),
-                    ],
-                ));
-            }
-            Component::Spi(spi) => {
-                let name = spi.id.rust_name();
-                let cs = spi.cs.pin().0;
-                comments.push(Comment::block(
-                    format!("{name}: espforge_runtime::SpiDevice::new("),
-                    &[
-                        &format!("SAFETY: espforge checked that no other component uses GPIO{cs}."),
-                        "Chip-select idles high (deasserted).",
-                    ],
-                ));
-            }
-            Component::Uart(uart) => {
-                let bus = bus_of(board, uart.port)?;
-                let Bus::Uart { tx, rx, .. } = bus else {
-                    bail!("uart component names a non-uart bus");
-                };
-                let name = uart.id.rust_name();
-                comments.push(Comment::block(
-                    format!("{name}: espforge_runtime::UartDevice::build("),
-                    &[
-                        "SAFETY: espforge checked that no other component uses this",
-                        &format!("peripheral or GPIO{}/GPIO{}.", tx.pin().0, rx.pin().0),
-                    ],
-                ));
-            }
-        }
+        component.emit(board, &mut cx);
     }
-    Ok(comments)
+    for device in &board.devices {
+        device.emit(board, &mut cx);
+    }
+    for service in &board.services {
+        service.emit(board, &mut cx);
+    }
+    cx.into_parts()
 }
 
-fn lib(meta: &Meta) -> Result<String> {
+/// Turn the elements' `(anchor, line)` notes into comment blocks, in board
+/// order.
+fn safety_comments(safety: &[(String, Vec<String>)]) -> Vec<Comment> {
+    safety
+        .iter()
+        .map(|(anchor, lines)| {
+            if let [line] = lines.as_slice() {
+                Comment::new(anchor.clone(), line.clone())
+            } else {
+                let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+                Comment::block(anchor.clone(), &refs)
+            }
+        })
+        .collect()
+}
+
+fn lib(meta: &Meta, has_devices: bool) -> Result<String> {
+    // A device is a draw target: drawing needs `&mut`, so with devices the
+    // macro hands one out. A project without devices keeps the `&` spelling it
+    // has always had (the helloworld golden depends on it byte for byte).
+    let device_borrow = if has_devices {
+        quote::quote! { &mut }
+    } else {
+        quote::quote! { & }
+    };
     let signal = if meta.runtime == Runtime::Embassy {
-        quote! {
+        quote::quote! {
             #[doc = " Define a cross-task signal. Usage: `crate::signal!(BUTTON_PRESSED)`"]
             #[macro_export]
             macro_rules! signal {
@@ -471,10 +222,10 @@ fn lib(meta: &Meta) -> Result<String> {
             }
         }
     } else {
-        quote! {}
+        quote::quote! {}
     };
 
-    let tokens = quote! {
+    let tokens = quote::quote! {
         #![no_std]
 
         pub mod generated;
@@ -494,7 +245,7 @@ fn lib(meta: &Meta) -> Result<String> {
         #[macro_export]
         macro_rules! device {
             ($ctx:expr, $name:ident) => {
-                &$ctx.devices.$name
+                #device_borrow $ctx.devices.$name
             };
         }
 
@@ -538,21 +289,62 @@ fn lib(meta: &Meta) -> Result<String> {
     Ok(text)
 }
 
-fn main(board: &Board, meta: &Meta, opts: &ResolvedOptions) -> Result<String> {
-    let crate_name = format_ident!("{}", meta.crate_name());
-    let wifi = wifi(board).is_some();
-    let heap = opts.is_on("wifi") || opts.is_on("ble-trouble");
-    let services = if wifi {
-        quote! {
-            let services = Services::new(registry.peripherals.WIFI, &spawner)
-                .expect("failed to start Wi-Fi");
+/// The heap line `main()` must install, if any.
+///
+/// The radio is the only thing that asks for one: `esp-radio` allocates, and
+/// without a heap the WiFi tasks fail to start. A service that states
+/// `heap_bytes` (TLS keeps `embedded-tls`'s crypto scratch and record buffers)
+/// asks for its own, and the largest one wins. The number is written
+/// unsuffixed, as whole KiB when it is one, because that is the form the
+/// goldens carry. The caller leaves the line out entirely when nothing wants a
+/// heap (a blocking project cannot have a radio: `wifi` requires `embassy`).
+fn heap_line(board: &Board, opts: &ResolvedOptions) -> TokenStream {
+    if let Some(heap_size) = board.max_service_heap() {
+        if heap_size % 1024 == 0 {
+            let kib = Literal::u32_unsuffixed(heap_size / 1024);
+            quote::quote! { esp_alloc::heap_allocator!(size: #kib * 1024); }
+        } else {
+            let size = Literal::u32_unsuffixed(heap_size);
+            quote::quote! { esp_alloc::heap_allocator!(size: #size); }
         }
+    } else if opts.is_on("wifi") {
+        quote::quote! { esp_alloc::heap_allocator!(size: 72 * 1024); }
     } else {
-        quote! { let services = Services {}; }
+        quote::quote! {}
+    }
+}
+
+fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -> Result<String> {
+    let crate_name = format_ident!("{}", meta.crate_name());
+    let heap = heap_line(board, opts);
+    let startup = &parts.startup;
+
+    // The empty `Devices {}` keeps the helloworld golden byte-identical; a
+    // declared device gets the constructor that takes its bus from
+    // `Components`.
+    let (devices, components_mut) = if parts.device_fields.is_empty() {
+        (
+            quote::quote! { let devices = Devices {}; },
+            quote::quote! {},
+        )
+    } else {
+        (
+            quote::quote! { let devices = Devices::new(&mut registry, &mut components); },
+            quote::quote! { mut },
+        )
+    };
+
+    // `Services {}` without a `new` when nothing is declared keeps the
+    // helloworld golden byte-identical; a declared service gets the
+    // `Services::new(&components)` constructor instead.
+    let services = if parts.service_fields.is_empty() {
+        quote::quote! { let services = Services {}; }
+    } else {
+        quote::quote! { let services = Services::new(&components); }
     };
 
     let tokens = match meta.runtime {
-        Runtime::Blocking => quote! {
+        Runtime::Blocking => quote::quote! {
             #![no_std]
             #![no_main]
 
@@ -572,9 +364,9 @@ fn main(board: &Board, meta: &Meta, opts: &ResolvedOptions) -> Result<String> {
                 let logger = espforge_runtime::Logger::new();
                 let delay = espforge_runtime::Delay::new();
 
-                let components = Components::new(&mut registry);
-                let devices = Devices {};
-                let services = Services {};
+                let #components_mut components = Components::new(&mut registry);
+                #devices
+                #services
 
                 let ctx = Context { logger, delay, components, devices, services };
                 let ctx = CTX.init(ctx);
@@ -584,52 +376,47 @@ fn main(board: &Board, meta: &Meta, opts: &ResolvedOptions) -> Result<String> {
                 }
             }
         },
-        Runtime::Embassy => {
-            let heap = if heap {
-                quote! { esp_alloc::heap_allocator!(size: 72 * 1024); }
-            } else {
-                quote! {}
-            };
-            quote! {
-                #![no_std]
-                #![no_main]
+        Runtime::Embassy => quote::quote! {
+            #![no_std]
+            #![no_main]
 
-                use embassy_executor::Spawner;
-                use esp_backtrace as _;
-                use esp_hal::timer::timg::TimerGroup;
-                use #crate_name::{app, Components, Context, Devices, PeripheralRegistry, CTX};
-                use #crate_name::Services;
+            use embassy_executor::Spawner;
+            use esp_backtrace as _;
+            use esp_hal::timer::timg::TimerGroup;
+            use #crate_name::{app, Components, Context, Devices, PeripheralRegistry, CTX};
+            use #crate_name::Services;
 
-                #[esp_rtos::main]
-                async fn main(spawner: Spawner) {
-                    esp_println::logger::init_logger_from_env();
-                    esp_println::print!("\x1b[20h");
-                    esp_bootloader_esp_idf::esp_app_desc!();
-                    let peripherals = esp_hal::init(esp_hal::Config::default());
-                    #heap
-                    #[allow(unused_mut)]
-                    let mut registry = PeripheralRegistry::new(peripherals);
+            #[esp_rtos::main]
+            async fn main(spawner: Spawner) {
+                esp_println::logger::init_logger_from_env();
+                esp_println::print!("\x1b[20h");
+                esp_bootloader_esp_idf::esp_app_desc!();
+                let peripherals = esp_hal::init(esp_hal::Config::default());
+                #heap
+                #[allow(unused_mut)]
+                let mut registry = PeripheralRegistry::new(peripherals);
 
-                    let components = Components::new(&mut registry);
-                    let devices = Devices {};
+                let #components_mut components = Components::new(&mut registry);
+                #devices
 
-                    let timg0 = TimerGroup::new(registry.peripherals.TIMG0);
-                    esp_rtos::start(timg0.timer0, registry.peripherals.FROM_CPU_INTR0);
+                let timg0 = TimerGroup::new(registry.peripherals.TIMG0);
+                esp_rtos::start(timg0.timer0, registry.peripherals.FROM_CPU_INTR0);
 
-                    let logger = espforge_runtime::Logger::new();
-                    let delay = espforge_runtime::Delay::new();
+                #(#startup)*
 
-                    #services
+                let logger = espforge_runtime::Logger::new();
+                let delay = espforge_runtime::Delay::new();
 
-                    let ctx = Context { logger, delay, components, devices, services };
-                    let ctx = CTX.init(ctx);
-                    app::setup(ctx, spawner).await;
-                    loop {
-                        app::forever(ctx).await;
-                    }
+                #services
+
+                let ctx = Context { logger, delay, components, devices, services };
+                let ctx = CTX.init(ctx);
+                app::setup(ctx, spawner).await;
+                loop {
+                    app::forever(ctx).await;
                 }
             }
-        }
+        },
     };
 
     let mut text = comments::prepend(
@@ -639,24 +426,24 @@ fn main(board: &Board, meta: &Meta, opts: &ResolvedOptions) -> Result<String> {
             "Source of truth is the project .espf file.",
         ],
     );
-    let mut comments = vec![Comment::new(
-        "let components = Components::new(",
+    let mut notes = vec![Comment::new(
+        "components = Components::new(",
         "Built first: it borrows the whole registry, which the moves below break.",
     )];
     if meta.runtime == Runtime::Embassy {
-        comments.push(Comment::block(
+        notes.push(Comment::block(
             "let logger = espforge_runtime::Logger::new();",
             &[
                 "Hoisted above the component/device wiring because some drivers take",
                 "`&ctx.delay` at construct time.",
             ],
         ));
-        comments.push(Comment::new(
+        notes.push(Comment::new(
             "let services =",
             "Services need the scheduler (started above) and the spawner.",
         ));
     }
-    text = comments::apply(text, &comments)?;
+    text = comments::apply(text, &notes)?;
     Ok(text)
 }
 
@@ -666,12 +453,12 @@ fn build_rs(meta: &Meta) -> Result<String> {
         .with_context(|| format!("unknown chip `{}`", meta.chip))?;
     let xtensa = chip.is_xtensa();
     let xtensa_check = if xtensa {
-        quote! { check_xtensa_linker_available(); }
+        quote::quote! { check_xtensa_linker_available(); }
     } else {
-        quote! {}
+        quote::quote! {}
     };
     let xtensa_funcs = if xtensa {
-        quote! {
+        quote::quote! {
             #[cfg(unix)]
             fn check_xtensa_linker_available() {
                 println!("cargo:rerun-if-env-changed=PATH");
@@ -734,17 +521,17 @@ fn build_rs(meta: &Meta) -> Result<String> {
             }
         }
     } else {
-        quote! {}
+        quote::quote! {}
     };
     let arch_arg = if xtensa {
-        quote! {
+        quote::quote! {
             println!(
                 "cargo:rustc-link-arg=-Wl,--error-handling-script={}",
                 std::env::current_exe().unwrap().display()
             );
         }
     } else {
-        quote! {
+        quote::quote! {
             println!(
                 "cargo:rustc-link-arg=--error-handling-script={}",
                 std::env::current_exe().unwrap().display()
@@ -752,7 +539,7 @@ fn build_rs(meta: &Meta) -> Result<String> {
         }
     };
 
-    let tokens = quote! {
+    let tokens = quote::quote! {
         fn main() {
             linker_be_nice();
             #xtensa_check
@@ -821,4 +608,208 @@ fn build_rs(meta: &Meta) -> Result<String> {
         )],
     )?;
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codegen::test_support::{case, service};
+    use espforge_elements::components::recipe::RecipeComponent;
+    use espforge_elements::{Component, Ident, Owner, OwnerKind, Pin, PinUse, ResourceGraph};
+
+    /// `blink`: one LED on GPIO18.
+    fn blink() -> (Board, Meta) {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = Board {
+            meta: case.meta.clone(),
+            resources: ResourceGraph::default(),
+            components: Vec::new(),
+            devices: Vec::new(),
+            services: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let id = Ident::new("red_led", 0..0);
+        let pin = board
+            .resources
+            .claim(
+                Pin(18),
+                Owner::new(OwnerKind::Recipe("led"), id.clone()),
+                0..0,
+                PinUse::Output,
+            )
+            .expect("pin 18 is free");
+        board
+            .components
+            .push(Component::Recipe(RecipeComponent::new(
+                "led",
+                id,
+                pin,
+                vec![false],
+            )));
+        (board, case.meta)
+    }
+
+    #[test]
+    fn a_led_emits_its_field_init_and_safety_note() {
+        let (board, meta) = blink();
+        let text = generated(&collect(&board), &meta).unwrap();
+        assert!(
+            text.contains("pub red_led: espforge_runtime::Led,"),
+            "{text}"
+        );
+        assert!(
+            text.contains("unsafe { registry.peripherals.GPIO18.clone_unchecked() }"),
+            "{text}"
+        );
+        assert!(
+            text.contains("// SAFETY: espforge checked that no other component uses GPIO18."),
+            "{text}"
+        );
+        assert!(text.contains("false,"), "{text}");
+    }
+
+    /// A declared display fills `Devices`, gets a constructor that takes its
+    /// bus out of `Components`, and flips `components` to `mut` in `main`.
+    #[test]
+    fn a_display_fills_the_devices_struct() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = empty_board(&case);
+        board.devices.push(espforge_elements::Device {
+            id: Ident::new("oled", 0..0),
+            tag: "ssd1306",
+            bus_component: Ident::new("oled_bus", 0..0),
+            feature: "ssd1306".into(),
+            deps: vec!["embedded-graphics".into()],
+            ty: "espforge_drivers::Ssd1306Display<espforge_drivers::Oled128x64>".into(),
+            new: "espforge_drivers::Ssd1306Display::new".into(),
+            takes_bus: false,
+            taken: None,
+            pins: Vec::new(),
+            args: vec![
+                "espforge_drivers::Oled128x64".into(),
+                "espforge_drivers::DisplayRotation::Rotate0".into(),
+            ],
+        });
+        let parts = collect(&board);
+        let text = generated(&parts, &case.meta).unwrap();
+        assert!(
+            text.contains(
+                "pub oled: espforge_drivers::Ssd1306Display<espforge_drivers::Oled128x64>,"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("components.oled_bus"), "{text}");
+        assert!(text.contains("impl Devices"), "{text}");
+
+        let boot = main(&board, &parts, &case.meta, &case.opts).unwrap();
+        assert!(
+            boot.contains("let mut components = Components::new("),
+            "{boot}"
+        );
+        assert!(
+            boot.contains("let devices = Devices::new(&mut registry, &mut components);"),
+            "{boot}"
+        );
+        // Drawing needs `&mut`, so the accessor hands one out.
+        let lib = lib(&case.meta, true).unwrap();
+        assert!(lib.contains("& mut $ctx .devices"), "{lib}");
+    }
+
+    #[test]
+    fn a_component_free_board_still_prints_empty_structs() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let board = Board {
+            meta: case.meta.clone(),
+            resources: ResourceGraph::default(),
+            components: Vec::new(),
+            devices: Vec::new(),
+            services: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        assert!(text.contains("pub struct Components {}"), "{text}");
+        assert!(text.contains("pub struct Services {}"), "{text}");
+        assert!(!text.contains("Services::new"), "{text}");
+        assert!(!text.contains("SAFETY"), "{text}");
+    }
+
+    fn empty_board(case: &crate::codegen::test_support::Case) -> Board {
+        Board {
+            meta: case.meta.clone(),
+            resources: ResourceGraph::default(),
+            components: Vec::new(),
+            devices: Vec::new(),
+            services: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    /// The heap line, spelled exactly as the legacy `wifi_station` golden has
+    /// it, in the position it has there: the radio allocates, and the
+    /// allocator must exist before `PeripheralRegistry::new` takes the
+    /// peripherals apart.
+    #[test]
+    fn wifi_installs_the_heap_the_radio_needs() {
+        let case = case("esp32c3", Runtime::Embassy, true, &[], &["wifi"]);
+        let board = empty_board(&case);
+        let text = main(&board, &collect(&board), &case.meta, &case.opts).unwrap();
+        assert!(
+            text.contains("esp_alloc::heap_allocator!(size : 72 * 1024);"),
+            "{text}"
+        );
+        let init = text.find("esp_hal::init(").unwrap();
+        let heap = text.find("heap_allocator!").unwrap();
+        let registry = text.find("PeripheralRegistry::new(").unwrap();
+        assert!(init < heap && heap < registry, "{text}");
+    }
+
+    #[test]
+    fn a_project_without_a_radio_allocates_nothing() {
+        let case = case("esp32c3", Runtime::Embassy, true, &[], &[]);
+        let board = empty_board(&case);
+        let text = main(&board, &collect(&board), &case.meta, &case.opts).unwrap();
+        assert!(!text.contains("heap_allocator"), "{text}");
+    }
+
+    /// A TLS client needs a bigger heap than the radio alone: `embedded-tls`
+    /// keeps crypto scratch and record buffers.
+    #[test]
+    fn an_https_client_bumps_the_heap() {
+        let case = case("esp32c3", Runtime::Embassy, true, &[], &["wifi"]);
+        let mut board = empty_board(&case);
+        board
+            .services
+            .push(service("https_client", "https-client", Some(98304)));
+        let text = main(&board, &collect(&board), &case.meta, &case.opts).unwrap();
+        assert!(
+            text.contains("esp_alloc::heap_allocator!(size : 96 * 1024);"),
+            "{text}"
+        );
+    }
+
+    /// A secure WebSocket client needs the same `embedded-tls` scratch as
+    /// HTTPS, so it bumps the heap too; the plain one does not.
+    #[test]
+    fn a_wss_client_bumps_the_heap_but_a_ws_client_does_not() {
+        let case = case("esp32c3", Runtime::Embassy, true, &[], &["wifi"]);
+        let mut board = empty_board(&case);
+        board
+            .services
+            .push(service("ws_client", "ws-client", None));
+        let text = main(&board, &collect(&board), &case.meta, &case.opts).unwrap();
+        assert!(
+            text.contains("esp_alloc::heap_allocator!(size : 72 * 1024);"),
+            "{text}"
+        );
+
+        board.services.clear();
+        board
+            .services
+            .push(service("wss_client", "wss-client", Some(98304)));
+        let text = main(&board, &collect(&board), &case.meta, &case.opts).unwrap();
+        assert!(
+            text.contains("esp_alloc::heap_allocator!(size : 96 * 1024);"),
+            "{text}"
+        );
+    }
 }

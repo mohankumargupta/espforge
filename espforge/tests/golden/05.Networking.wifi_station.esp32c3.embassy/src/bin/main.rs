@@ -21,13 +21,16 @@ async fn main(spawner: Spawner) {
     let devices = Devices {};
     let timg0 = TimerGroup::new(registry.peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, registry.peripherals.FROM_CPU_INTR0);
+    components
+        .home
+        .start(registry.peripherals.WIFI, &spawner)
+        .expect("wifi start failed");
     // Hoisted above the component/device wiring because some drivers take
     // `&ctx.delay` at construct time.
     let logger = espforge_runtime::Logger::new();
     let delay = espforge_runtime::Delay::new();
     // Services need the scheduler (started above) and the spawner.
-    let services = Services::new(registry.peripherals.WIFI, &spawner)
-        .expect("failed to start Wi-Fi");
+    let services = Services {};
     let ctx = Context {
         logger,
         delay,

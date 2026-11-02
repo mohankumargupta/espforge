@@ -1,5 +1,0 @@
-$ espforge new
-exit: 1
---- stdout ---
---- stderr ---
-❌ not a terminal: pass --yes (and flags) to run `new` without prompts

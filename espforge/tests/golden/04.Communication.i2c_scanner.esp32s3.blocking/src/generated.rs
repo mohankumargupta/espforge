@@ -15,19 +15,18 @@ pub struct Components {
 }
 impl Components {
     pub fn new(registry: &mut PeripheralRegistry) -> Self {
-        Self {
-            // SAFETY: espforge checked that no other component uses this
-            // peripheral or GPIO6/GPIO7.
-            i2c0: espforge_runtime::I2cBus::build(
-                    unsafe { registry.peripherals.I2C0.clone_unchecked() },
-                    unsafe { registry.peripherals.GPIO6.clone_unchecked() },
-                    unsafe { registry.peripherals.GPIO7.clone_unchecked() },
-                    espforge_runtime::I2cConfig {
-                        frequency: esp_hal::time::Rate::from_khz(100),
-                    },
-                )
-                .expect("I2C bus configuration failed"),
-        }
+        // SAFETY: espforge checked that no other component uses this
+        // peripheral or GPIO6/GPIO7.
+        let i2c0_bus = espforge_runtime::I2cBus::build(
+                unsafe { registry.peripherals.I2C0.clone_unchecked() },
+                unsafe { registry.peripherals.GPIO6.clone_unchecked() },
+                unsafe { registry.peripherals.GPIO7.clone_unchecked() },
+                espforge_runtime::I2cConfig {
+                    frequency: esp_hal::time::Rate::from_khz(100),
+                },
+            )
+            .expect("I2C bus configuration failed");
+        Self { i2c0: i2c0_bus }
     }
 }
 /// Constructed devices (none yet).

@@ -1,22 +1,15 @@
-//! The typed codegen that replaced the project-template stack (Phase 3).
+//! The typed codegen: one file plan, one backend per source.
 //!
 //! [`plan::FilePlan`] is the single list of emitted files and their owners;
 //! [`generate`] walks it and asks one backend per [`plan::Source`] for the
-//! content. [`equiv`] is the semantic comparator the dual-run gate uses while
-//! the old and new producers coexist, and [`comments`] puts back the comments
-//! `syn` cannot carry in the Rust files.
-//!
-//! Landed: the four Rust files ([`rust`], increment 2), the data files
-//! ([`cargo`], [`config`], [`wokwi`], [`diagram`], increment 3) and the
-//! example-overlay token resolver ([`overlay`], increment 4). The template
-//! tree, the template crate's project files and the old `Hardware` projection
-//! are deleted.
+//! content. [`equiv`] is the semantic comparator used while debugging a golden
+//! diff, and [`comments`] puts back the comments `syn` cannot carry.
 
 use anyhow::{Context, Result};
-use espforge_model::{Artifact, Board, Meta};
-use espforge_options::ResolvedOptions;
+use espforge_elements::{Board, Meta, ResolvedOptions};
 use std::collections::BTreeMap;
 
+use crate::artifact::Artifact;
 use crate::runtime_source::RuntimeSource;
 use plan::{FilePlan, Source};
 
@@ -58,7 +51,7 @@ pub fn generate(
                 .get(file.out_path)
                 .with_context(|| format!("the Rust backend has no `{}`", file.out_path))?
                 .clone(),
-            Source::Cargo => cargo::manifest(meta, opts, runtime, &chip)?,
+            Source::Cargo => cargo::manifest(meta, opts, runtime, &chip, board)?,
             Source::CargoConfig => config::cargo_config(opts, &chip)?,
             Source::EspConfig => config::esp_config().to_string(),
             Source::Toolchain => config::toolchain(&chip)?,
@@ -77,10 +70,8 @@ pub fn generate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use espforge_model::{Console, Ownership, ResourceGraph, Runtime};
-
-    use crate::runtime_source::RuntimeSource;
-    use espforge_options::{Answers, DerivedInputs};
+    use crate::artifact::Ownership;
+    use espforge_elements::{Answers, Console, DerivedInputs, Runtime, resolve};
 
     /// A project with no hardware: enough for the dispatcher and the data
     /// backends, which do not read components.
@@ -92,14 +83,14 @@ mod tests {
             runtime: Runtime::Blocking,
             console: Console::Uart,
         };
-        let opts =
-            espforge_options::resolve(&meta, &Answers::empty(0..0), &DerivedInputs::default())
-                .unwrap();
+        let opts = resolve(&meta, &Answers::empty(0..0), &DerivedInputs::default()).unwrap();
         let board = Board {
             meta: meta.clone(),
-            resources: ResourceGraph::default(),
+            resources: espforge_elements::ResourceGraph::default(),
             components: Vec::new(),
+            devices: Vec::new(),
             services: Vec::new(),
+            warnings: Vec::new(),
         };
         (board, meta, opts)
     }

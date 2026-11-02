@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "author": "espforge",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-c3-devkitm-1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-ili9341", "id": "tft1", "top": -120, "left": 220, "attrs": {} }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "esp:3V3.1", "tft1:VCC", "red", [ "h0" ] ],
+    [ "esp:GND.1", "tft1:GND", "black", [ "h0" ] ],
+    [ "esp:6", "tft1:LED", "orange", [ "h0" ] ],
+    [ "esp:4", "tft1:D/C", "blue", [ "h0" ] ],
+    [ "esp:5", "tft1:RST", "purple", [ "h0" ] ],
+    [ "esp:9", "tft1:CS", "green", [ "h0" ] ],
+    [ "esp:7", "tft1:MOSI", "magenta", [ "h0" ] ],
+    [ "esp:8", "tft1:SCK", "yellow", [ "h0" ] ]
+  ],
+  "dependencies": {}
+}

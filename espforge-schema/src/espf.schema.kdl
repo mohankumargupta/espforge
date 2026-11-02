@@ -1,0 +1,344 @@
+// The schema (KDL v2): the single source of truth for what an ESPF file may
+// contain and for the build options it can turn on.
+//
+// This is the file cut to what is implemented: the five required sections
+// (`gpio`, `led` and `button` are the only elements outside `espforge`), and
+// the options helloworld's Cargo.toml depends on. An element is in this file
+// if and only if it is implemented; buses, services and devices arrive with
+// their implementations.
+//
+//   section "name" { summary ".."; description ".." }
+//   element "tag" section="name" {
+//       summary ".." [description ".."
+//           recipe pin=".." direction="input|output" runtime=".." [invalid=".."]]
+//       attr "name" kind=".." [required=#true]
+//       [default=".."] [to="tag"] [of="kind"] { choices "a" "b"; help ".." }
+//       example "title" "fragment"  [see_also "section/tag"]
+//   }
+//
+// A component whose attributes are an `id`, one `ref` and booleans carries a
+// `recipe` and needs no Rust element file; the recipe tier reads it.
+//   options {
+//       option "name" [display_name=".."] [kind="bool|string|choice|list"]
+//           [default=#true|".."] [derived=#true] [requires_nightly=#true]
+//           [selection_group=".."] {
+//           help ".."; requires "a" "b"; requires_tools "..";
+//           choices "a" "b"; compatible { chip "esp32c3" }
+//       }
+//   }
+//
+// Every element needs at least one `example`, and the tests parse them with
+// `espf`, so they cannot drift from the attributes declared here.
+
+// ---------------------------------------------------------------- espforge
+
+section "espforge" {
+    summary "The project itself: name, chip, runtime, console, options"
+    description "Settings for the build as a whole. Nothing here is referred to from other sections, so these elements need no id."
+}
+
+element "project" section="espforge" {
+    summary "Project name and description"
+    attr "name" kind="str" required=#true {
+        help "Becomes the crate name: lowercased, other characters become _."
+    }
+    attr "description" kind="str"
+    example "minimal" #"<project name="blink" />"#
+    example "with a description" #"<project name="blink" description="Blinks an LED" />"#
+}
+
+element "chip" section="espforge" {
+    summary "The ESP32 chip to build for"
+    // The list of chips comes from esp-metadata, not from this file.
+    attr "type" kind="str" required=#true
+    example "esp32c3" #"<chip type="esp32c3" />"#
+}
+
+element "runtime" section="espforge" {
+    summary "blocking or embassy (async) runtime"
+    attr "type" kind="choice" required=#true {
+        choices "blocking" "embassy"
+    }
+    example "blocking" #"<runtime type="blocking" />"#
+    example "async" #"<runtime type="embassy" />"#
+}
+
+element "console" section="espforge" {
+    summary "Where log output goes: uart or the built-in USB serial"
+    attr "type" kind="choice" default="uart" {
+        choices "uart" "jtag-serial"
+        help "jtag-serial needs a chip with USB-Serial-JTAG."
+    }
+    example "usb serial" #"<console type="jtag-serial" />"#
+}
+
+element "options" section="espforge" {
+    summary "Build options from this file's options block"
+    attr "defaults" kind="bool" default="true" {
+        help "false turns every unspecified option off."
+    }
+    example "defaults only" #"<options defaults="true" />"#
+    example "defaults off" #"<options defaults="false" />"#
+}
+
+// -------------------------------------------------------------- peripherals
+
+section "peripherals" {
+    summary "The chip's hardware blocks you use: gpio, i2c, spi, uart"
+    description "The chip's hardware blocks that your project uses. Each one gets an id that components refer to with $id."
+}
+
+element "gpio" section="peripherals" {
+    summary "A single GPIO pin"
+    attr "id" kind="ident" required=#true
+    attr "pin" kind="pin" required=#true
+    attr "direction" kind="choice" {
+        choices "output" "input"
+    }
+    example "minimal" #"<gpio id="gpio18" pin="18" />"#
+    example "output" #"<gpio id="gpio18" pin="18" direction="output" />"#
+}
+
+element "i2c" section="peripherals" {
+    summary "I2C bus controller"
+    description #"Declares an I2C controller. Reference it from a component with i2c="$id"."#
+    attr "id" kind="ident" required=#true {
+        help "i2c0, i2c1 or i2c2: the id names the esp-hal peripheral."
+    }
+    attr "sda" kind="pin" required=#true {
+        help "GPIO number; must be valid for the chosen chip."
+    }
+    attr "scl" kind="pin" required=#true
+    attr "frequency" kind="freq" default="100kHz"
+    example "minimal" #"<i2c id="i2c0" sda="6" scl="7" />"#
+    example "with a bus speed" #"<i2c id="i2c0" sda="6" scl="7" frequency="400kHz" />"#
+    example "with a component" #"""
+        # espforge
+          <project name="i2c" />
+          <chip type="esp32c3" />
+          <runtime type="blocking" />
+        # peripherals
+          <i2c id="i2c0" sda="6" scl="7" />
+        # components
+          <i2c_component id="temp_bus" i2c="$i2c0" address="0x48" />
+        # devices
+        # services
+        """#
+    see_also "components/i2c_component"
+}
+
+element "spi" section="peripherals" {
+    summary "SPI bus controller"
+    attr "id" kind="ident" required=#true {
+        help "spi2: the esp-hal peripheral this runtime type builds."
+    }
+    attr "sclk" kind="pin" required=#true
+    attr "mosi" kind="pin" required=#true
+    attr "miso" kind="pin" {
+        help "Displays generally omit it."
+    }
+    attr "mode" kind="u32" default="0" range="0..=3"
+    attr "frequency" kind="freq" {
+        help "Defaults to 1MHz when omitted."
+    }
+    example "write-only" #"<spi id="spi2" sclk="6" mosi="7" />"#
+    example "full duplex" #"<spi id="spi2" sclk="8" mosi="7" miso="6" mode="0" frequency="100kHz" />"#
+    see_also "components/spi_component"
+}
+
+element "uart" section="peripherals" {
+    summary "UART port"
+    attr "id" kind="ident" required=#true
+    attr "uart" kind="str" {
+        help "Physical peripheral, e.g. UART1. Optional: without it the id itself must be uart0, uart1, uart2 or uart3 and names the peripheral."
+    }
+    attr "tx" kind="pin" required=#true
+    attr "rx" kind="pin" required=#true
+    example "minimal" #"<uart id="uart1" tx="20" rx="21" />"#
+    example "explicit peripheral" #"<uart id="gps" uart="UART1" tx="20" rx="21" />"#
+    see_also "components/uart_component"
+}
+
+element "wifi" section="peripherals" {
+    summary "The on-chip Wi-Fi radio"
+    description "Claims the WIFI hardware block. One per chip, and only on a chip that has one."
+    attr "id" kind="ident" required=#true
+    example "minimal" #"<wifi id="radio" />"#
+    see_also "components/wifi_station"
+}
+
+// --------------------------------------------------------------- components
+
+section "components" {
+    summary "How a peripheral is used: an address on a bus, a direction"
+    description "A component binds a peripheral to a purpose. It refers to its peripheral with $id, for example i2c=\"$i2c0\"."
+}
+
+element "led" section="components" {
+    summary "An LED on a GPIO output"
+    recipe pin="gpio" direction="output" runtime="espforge_runtime::Led" invalid="E0601"
+    attr "id" kind="ident" required=#true
+    attr "gpio" kind="ref" to="gpio" required=#true
+    attr "active_low" kind="bool" default="false" {
+        help "true when the LED lights on a LOW pin."
+    }
+    // Its examples are complete documents carrying their own <gpio>: anything
+    // starting with a `#` header is parsed as-is, so it must carry all five
+    // sections (three of them may be empty).
+    example "esp32c3, blocking" "# espforge\n  <project name=\"blink\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# components\n  <led id=\"red_led\" gpio=\"$gpio18\" />\n# devices\n# services\n"
+    example "active low" "# espforge\n  <project name=\"blink\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# components\n  <led id=\"red_led\" gpio=\"$gpio18\" active_low=\"true\" />\n# devices\n# services\n"
+    see_also "peripherals/gpio"
+}
+
+element "button" section="components" {
+    summary "A push button on a GPIO input"
+    description #"A component over <gpio>: gpio="$<gpio id>" must name an input pin."#
+    recipe pin="gpio" direction="input" runtime="espforge_runtime::Button" invalid="E0602"
+    attr "id" kind="ident" required=#true
+    attr "gpio" kind="ref" to="gpio" required=#true
+    attr "pull_up" kind="bool" default="false" {
+        help "true when the pin has an external pull-up (button to GND)."
+    }
+    example "esp32c3, blocking" "# espforge\n  <project name=\"button\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio9\" pin=\"9\" direction=\"input\" />\n# components\n  <button id=\"button\" gpio=\"$gpio9\" />\n# devices\n# services\n"
+    example "pull-up" "# espforge\n  <project name=\"button\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio9\" pin=\"9\" direction=\"input\" />\n# components\n  <button id=\"button\" gpio=\"$gpio9\" pull_up=\"true\" />\n# devices\n# services\n"
+    see_also "peripherals/gpio"
+}
+
+element "i2c_component" section="components" {
+    summary "An addressed device endpoint or raw bus handle on an I2C controller"
+    description #"I2C is multi-drop: several components may share one <i2c>. With address="0x3C" the component is an addressed device (I2cDevice); without one it is the raw bus (I2cBus), which an I2C scanner sweeps."#
+    attr "id" kind="ident" required=#true
+    attr "i2c" kind="ref" to="i2c" required=#true {
+        help "The I2C bus controller in `# peripherals`."
+    }
+    // The specification reserves 0x00..=0x07 and 0x78..=0x7F; a usable 7-bit
+    // address is 0x08..=0x77. Omitted, the component is the raw bus.
+    attr "address" kind="hex" {
+        help "7-bit slave address in 0x08..=0x77. Omit for raw bus access (an I2C scanner)."
+    }
+    example "sensor endpoint" #"<i2c_component id="temp_bus" i2c="$i2c0" address="0x48" />"#
+    example "raw scanner" #"<i2c_component id="bus_scanner" i2c="$i2c0" />"#
+    see_also "peripherals/i2c"
+}
+
+element "spi_component" section="components" {
+    summary "A chip-select on an SPI bus"
+    attr "id" kind="ident" required=#true
+    attr "spi" kind="ref" to="spi" required=#true
+    attr "mode" kind="u32" default="0" range="0..=3" {
+        help "SPI mode, 0 to 3. Optional on the component; the SPI examples keep it on <spi>."
+    }
+    attr "cs" kind="pin_or_ref" required=#true {
+        help "A GPIO number (`cs=\"9\"`), a <gpio> id (`cs=\"gpio5\"`) or a reference to one (`cs=\"$gpio5\"`)."
+    }
+    example "display bus" #"<spi_component id="display_bus" spi="$spi2" mode="0" cs="gpio5" />"#
+    see_also "peripherals/spi"
+}
+
+element "uart_component" section="components" {
+    summary "Serial settings on a UART port"
+    attr "id" kind="ident" required=#true
+    attr "uart" kind="ref" to="uart" required=#true
+    attr "baud_rate" kind="u32" required=#true
+    attr "parity" kind="choice" default="none" {
+        choices "none" "even" "odd"
+    }
+    attr "stop_bits" kind="choice" default="1" {
+        choices "1" "2"
+    }
+    example "9600 baud" #"<uart_component id="serial_bus" uart="$uart1" baud_rate="9600" />"#
+    see_also "peripherals/uart"
+}
+
+element "wifi_station" section="components" {
+    summary "Connect to an existing Wi-Fi network"
+    description "Associates with an access point and brings up DHCP over the referenced <wifi> radio. The network stack is what network services (HTTP, NTP) connect through."
+    attr "id" kind="ident" required=#true
+    attr "wifi" kind="ref" to="wifi" required=#true {
+        help "The <wifi> radio this station uses."
+    }
+    attr "ssid" kind="str" required=#true {
+        help "1 to 32 bytes."
+    }
+    attr "auth" kind="choice" default="wpa2" {
+        choices "open" "wpa2"
+    }
+    attr "password" kind="str" {
+        help "Literal, or env:NAME to read NAME at build time. Warns: the value is compiled into the firmware. Required unless auth=\"open\"."
+    }
+    example "home network" #"<wifi_station id="home" wifi="$radio" ssid="my-network" password="secret12" />"#
+    example "open network" #"<wifi_station id="home" wifi="$radio" ssid="my-network" auth="open" />"#
+    see_also "peripherals/wifi"
+}
+
+// ------------------------------------------------------------------ devices
+
+section "devices" {
+    summary "Drivers for specific parts: displays, sensors"
+    description "A device is a driver for a specific part. It refers to the component it is attached to, for example i2c_component=\"$temp_bus\"."
+}
+
+// The devices themselves live beside their drivers, in
+// `espforge-drivers/drivers.schema.kdl`: a driver crate owns the elements it
+// implements, and `espforge-schema::load_all` composes the two files. This
+// section stays here because a device element names the section it lives in.
+
+// ----------------------------------------------------------------- services
+
+section "services" {
+    summary "Software services: http_client, https_client, ws_client, wss_client, ntp"
+    description "Services are software, not hardware: they refer to components or devices, never peripherals."
+}
+
+// The services themselves live in `services.schema.kdl` beside this file: one
+// recipe block per network feature, composed by `espforge-schema::load_all`.
+// This section stays here with the rest of the vocabulary, because a service
+// element names the section it lives in.
+
+
+// ------------------------------------------------------------------- options
+//
+// What `<options ... />` and the `--option` flags can turn on.
+
+options {
+    option "unstable-hal" display_name="Enable unstable HAL features." default=#true {
+        help "This configuration enables unstable esp-hal features. These come with no stability guarantees, and could be changed or removed at any time."
+    }
+
+    option "alloc" display_name="Enable allocations via the esp-alloc crate." default=#true {
+        help "esp-alloc comes with no stability guarantees at this time."
+    }
+
+    // Computed from `<runtime type="embassy" />`; users may not set it.
+    option "embassy" display_name="Add embassy framework support." derived=#true selection_group="base-template" {
+        help "esp-rtos module responsible for embassy support comes with no stability guarantees at this time."
+        requires "unstable-hal"
+    }
+
+    // Computed from a `<wifi>` radio in `# peripherals`; users may not set it.
+    // No chip `compatible` list: a chip without a radio is refused by `<wifi>`
+    // itself, where the error can point at the element that asked for it.
+    option "wifi" display_name="Enable Wi-Fi via the esp-radio crate." derived=#true {
+        requires "alloc" "unstable-hal" "embassy"
+        help "esp-radio comes with no stability guarantees at this time. Wi-Fi also allocates a heap."
+    }
+
+    option "probe-rs" display_name="Use probe-rs to flash and monitor instead of espflash." {
+        requires_tools "probe-rs"
+        help "probe-rs is a debugger that connects"
+    }
+
+    option "stack-smashing-protection" display_name="Enable stack smashing protection." requires_nightly=#true {
+        help "Requires nightly Rust. Note that this option generates additional checks in most functions and will slow down your code."
+    }
+
+    // Emit the Wokwi simulation files (diagram.json, wokwi.toml).
+    option "wokwi" display_name="Generate Wokwi simulation files." default=#true {
+        help "Writes diagram.json and wokwi.toml so the project can be simulated in Wokwi."
+    }
+
+    // Copy an example's `chip/` Zig sources beside its Wokwi chip.
+    option "keep-zig-source" display_name="Keep the Zig source of custom Wokwi chips." {
+        help "Copies the example's chip/ directory next to chip.json and chip.wasm."
+    }
+}

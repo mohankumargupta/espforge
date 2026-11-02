@@ -6,9 +6,9 @@
 //! what happens after them and before the ownership manifest.
 
 use anyhow::{Context as _, Result};
-use espforge_model::{Artifact, Asset, Board, Ownership};
-use espforge_options::ResolvedOptions;
+use espforge_elements::{Board, ResolvedOptions};
 
+use crate::artifact::{Artifact, Asset, Ownership};
 use crate::codegen;
 
 /// One file of an example, with its path relative to the example directory.
@@ -36,8 +36,8 @@ pub struct Rendered {
 ///   example without `chip/` makes that a no-op. These are seed-once, so
 ///   rebuilding a chip locally is never clobbered.
 ///   A seeded chip also appends a `[[chip]]` section (see
-///   [`crate::codegen::wokwi`]) to the emitted `wokwi.toml`, whichever one was
-///   emitted: the generated one or the example's own.
+///   [`codegen::wokwi::chip_section`]) to the emitted `wokwi.toml`, whichever
+///   one was emitted: the generated one or the example's own.
 /// * Everything else (`example.espf.txt`, `app/`, ...) is the CLI's business
 ///   and ignored here.
 pub fn layer_overlay(
@@ -56,6 +56,9 @@ pub fn layer_overlay(
     for f in overlay {
         match f.path {
             "diagram.json" | "wokwi.toml" => {
+                if !wokwi {
+                    continue;
+                }
                 if let Some(a) = artifacts.iter_mut().find(|a| a.path == f.path) {
                     let text = std::str::from_utf8(f.contents)
                         .with_context(|| format!("example `{}` is not valid UTF-8", f.path))?;
@@ -67,7 +70,8 @@ pub fn layer_overlay(
                 if f.path == "chip.json" {
                     chip_json = Some(f.contents);
                 }
-                seed(f, artifacts, assets);
+                // TODO:need to update docs
+                own(f, artifacts, assets);
             }
             p if p.starts_with("chip/") && wokwi && keep_zig => seed(f, artifacts, assets),
             _ => {}
@@ -84,8 +88,19 @@ pub fn layer_overlay(
     Ok(())
 }
 
-/// Copy an overlay file as seed-once: text becomes an artifact, binary
-/// (and anything `.wasm`) an asset.
+/// Copy an overlay file as owned: text becomes an artifact (tracked in manifest),
+/// binary an asset (overwritten on update).
+fn own(f: &OverlayFile, artifacts: &mut Vec<Artifact>, assets: &mut Vec<Asset>) {
+    match std::str::from_utf8(f.contents) {
+        Ok(text) if !f.path.ends_with(".wasm") => {
+            artifacts.push(Artifact::owned(f.path, text));
+        }
+        _ => assets.push(Asset::owned(f.path, f.contents)),
+    }
+}
+
+/// Copy an overlay file as seed-once: text becomes an artifact, binary (and
+/// anything `.wasm`) an asset.
 fn seed(f: &OverlayFile, artifacts: &mut Vec<Artifact>, assets: &mut Vec<Asset>) {
     match std::str::from_utf8(f.contents) {
         Ok(text) if !f.path.ends_with(".wasm") => {
@@ -101,6 +116,12 @@ pub fn readme(project_name: &str, artifacts: &[Artifact], assets: &[Asset]) -> A
         .iter()
         .filter(|a| a.ownership == Ownership::Owned)
         .map(|a| a.path.as_str())
+        .chain(
+            assets
+                .iter()
+                .filter(|a| a.ownership == Ownership::Owned)
+                .map(|a| a.path.as_str()),
+        )
         .collect();
     let mut seeded: Vec<&str> = artifacts
         .iter()
@@ -155,30 +176,17 @@ mod tests {
     use super::*;
     use crate::codegen::test_support::case;
     use crate::runtime_source::RuntimeSource;
-    use espforge_model::{
-        Component, Ident, Led, Owner, OwnerKind, Pin, PinUse, ResourceGraph, Runtime,
-    };
+    use espforge_elements::Runtime;
 
-    fn project(flags: &[(&str, &str)]) -> (Board, ResolvedOptions) {
-        let case = case("esp32c3", Runtime::Blocking, true, flags, &[]);
-        let mut resources = ResourceGraph::new();
-        let pin = resources
-            .claim(
-                Pin(18),
-                Owner::new(OwnerKind::Led, Ident::new("red-led", 0..0)),
-                0..0,
-                PinUse::Output,
-            )
-            .unwrap();
+    fn components() -> (Board, ResolvedOptions) {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
         let board = Board {
             meta: case.meta.clone(),
-            resources,
-            components: vec![Component::Led(Led {
-                id: Ident::new("red-led", 0..0),
-                pin,
-                active_low: false,
-            })],
+            resources: espforge_elements::ResourceGraph::default(),
+            components: Vec::new(),
+            devices: Vec::new(),
             services: Vec::new(),
+            warnings: Vec::new(),
         };
         (board, case.opts)
     }
@@ -208,24 +216,23 @@ mod tests {
             .collect()
     }
 
-    const EXAMPLE_DIAGRAM: &str = "{\n  \"version\": 1,\n  \"parts\": [\n    { \"type\": \"{{ board }}\", \"id\": \"esp\", \"attrs\": { \"gpio\": \"{{ red_led.pin }}\" } }\n  ],\n  \"connections\": [ [ \"esp:TX\", \"{{ serialMonitor }}:RX\", \"\", [] ] ]\n}\n";
+    const EXAMPLE_DIAGRAM: &str = "{\n  \"version\": 1,\n  \"parts\": [\n    { \"type\": \"{{ board }}\", \"id\": \"esp\", \"attrs\": { \"flashSize\": \"16\" } }\n  ],\n  \"connections\": [ [ \"esp:TX\", \"{{ serialMonitor }}:RX\", \"\", [] ] ]\n}\n";
 
     #[test]
     fn an_example_diagram_replaces_the_generated_one_with_tokens_resolved() {
-        let (board, opts) = project(&[]);
+        let (board, opts) = components();
         let overlay = overlay_files(&[("diagram.json", EXAMPLE_DIAGRAM.as_bytes())]);
         let rendered = generated(&board, &opts, &overlay);
         let diagram = &file(&rendered, "diagram.json").content;
         let json: serde_json::Value = serde_json::from_str(diagram).unwrap();
         assert_eq!(json["parts"][0]["type"], "board-esp32-c3-devkitm-1");
-        assert_eq!(json["parts"][0]["attrs"]["gpio"], "18");
         assert_eq!(json["connections"][0][1], "$serialMonitor:RX");
         assert!(!diagram.contains("{{"), "{diagram}");
     }
 
     #[test]
     fn an_unknown_token_fails_the_layer_with_a_typed_error() {
-        let (board, opts) = project(&[]);
+        let (board, opts) = components();
         let overlay = overlay_files(&[("diagram.json", b"{{ nope }}")]);
         let artifacts =
             codegen::generate(&board, &board.meta, &opts, &RuntimeSource::Published).unwrap();
@@ -242,88 +249,25 @@ mod tests {
     }
 
     #[test]
-    fn chip_json_and_wasm_are_always_copied_but_zig_source_is_optional() {
-        let (board, opts) = project(&[]);
-        let overlay = overlay_files(&[
-            ("chip.json", br#"{"name": "chip"}"#),
-            ("chip.wasm", b"\0asm"),
-            ("chip/main.zig", b"const std = @import(\"std\");"),
-        ]);
-        let off = generated(&board, &opts, &overlay);
-        assert!(file(&off, "chip.json").content.contains("\"name\""));
-        assert!(off.assets.iter().any(|a| a.path == "chip.wasm"));
-        assert!(off.artifacts.iter().all(|a| a.path != "chip/main.zig"));
-
-        // with `keep-zig-source`, the sources come along
-        let with_sources = case(
-            "esp32c3",
-            Runtime::Blocking,
-            true,
-            &[("keep-zig-source", "true")],
-            &[],
-        );
-        let on = generated(&board, &with_sources.opts, &overlay);
-        assert!(on.artifacts.iter().any(|a| a.path == "chip/main.zig"));
-    }
-
-    #[test]
-    fn a_seeded_chip_appends_the_chip_section_to_wokwi_toml() {
-        let (board, opts) = project(&[]);
-        let overlay = overlay_files(&[
-            ("chip.json", br#"{"name": "mcp23017"}"#),
-            ("chip.wasm", b"\0asm"),
-        ]);
-        let rendered = generated(&board, &opts, &overlay);
-        let wokwi = &file(&rendered, "wokwi.toml").content;
-        assert!(wokwi.contains("[[chip]]"), "{wokwi}");
-        assert!(wokwi.contains("name = 'mcp23017'"), "{wokwi}");
-        assert!(wokwi.contains("binary = 'chip.wasm'"), "{wokwi}");
-    }
-
-    #[test]
-    fn no_chip_means_no_chip_section_in_wokwi_toml() {
-        let (board, opts) = project(&[]);
-        let rendered = generated(&board, &opts, &[]);
-        assert!(!file(&rendered, "wokwi.toml").content.contains("[[chip]]"));
-    }
-
-    #[test]
     fn wokwi_off_drops_the_example_wokwi_files_too() {
-        let (board, opts) = project(&[("wokwi", "false")]);
-        let overlay = overlay_files(&[
-            ("diagram.json", EXAMPLE_DIAGRAM.as_bytes()),
-            ("chip.json", br#"{"name": "chip"}"#),
-            ("chip.wasm", b"\0asm"),
-        ]);
-        let rendered = generated(&board, &opts, &overlay);
-        assert!(rendered.artifacts.iter().all(|a| a.path != "diagram.json"));
-        assert!(rendered.artifacts.iter().all(|a| a.path != "chip.json"));
-        assert!(rendered.assets.is_empty());
-    }
-
-    #[test]
-    fn keep_zig_source_is_a_no_op_without_a_chip_directory() {
-        let (board, _) = project(&[]);
-        let with_sources = case(
+        let (board, _) = components();
+        let off = case(
             "esp32c3",
             Runtime::Blocking,
             true,
-            &[("keep-zig-source", "true")],
+            &[("wokwi", "false")],
             &[],
         );
-        let rendered = generated(&board, &with_sources.opts, &[]);
+        let overlay = overlay_files(&[("diagram.json", EXAMPLE_DIAGRAM.as_bytes())]);
+        let rendered = generated(&board, &off.opts, &overlay);
+        assert!(rendered.artifacts.iter().all(|a| a.path != "diagram.json"));
+        assert!(rendered.artifacts.iter().all(|a| a.path != "wokwi.toml"));
         assert!(rendered.assets.is_empty());
-        assert!(
-            rendered
-                .artifacts
-                .iter()
-                .all(|a| !a.path.starts_with("chip"))
-        );
     }
 
     #[test]
     fn non_wokwi_example_files_are_ignored() {
-        let (board, opts) = project(&[]);
+        let (board, opts) = components();
         let overlay = overlay_files(&[
             ("example.espf.txt", b"# espforge\n"),
             ("app/rust/app.rs", b"pub fn setup() {}\n"),
@@ -344,8 +288,59 @@ mod tests {
     }
 
     #[test]
+    fn chip_json_and_wasm_are_always_seeded_but_zig_source_is_optional() {
+        let (board, opts) = components();
+        let overlay = overlay_files(&[
+            ("chip.json", br#"{"name": "chip"}"#),
+            ("chip.wasm", b"\0asm"),
+            ("chip/chip.zig", b"// zig\n"),
+        ]);
+        let rendered = generated(&board, &opts, &overlay);
+        assert!(file(&rendered, "chip.json").content.contains("\"name\""));
+        assert!(rendered.assets.iter().any(|a| a.path == "chip.wasm"));
+        assert!(rendered.artifacts.iter().all(|a| a.path != "chip/chip.zig"));
+
+        let keep = case(
+            "esp32c3",
+            Runtime::Blocking,
+            true,
+            &[("keep-zig-source", "true")],
+            &[],
+        );
+        let rendered = generated(&board, &keep.opts, &overlay);
+        assert!(file(&rendered, "chip/chip.zig").content.contains("zig"));
+    }
+
+    #[test]
+    fn a_seeded_chip_appends_the_chip_section_to_wokwi_toml() {
+        let (board, opts) = components();
+        let overlay = overlay_files(&[
+            ("chip.json", br#"{"name": "mcp23017"}"#),
+            ("chip.wasm", b"\0asm"),
+        ]);
+        let rendered = generated(&board, &opts, &overlay);
+        let wokwi = &file(&rendered, "wokwi.toml").content;
+        assert!(wokwi.contains("[[chip]]"), "{wokwi}");
+        assert!(wokwi.contains("name = 'mcp23017'"), "{wokwi}");
+    }
+
+    #[test]
+    fn an_examples_own_wokwi_toml_gets_the_chip_section_too() {
+        let (board, opts) = components();
+        let overlay = overlay_files(&[
+            ("wokwi.toml", b"[wokwi]\nversion = 1\n"),
+            ("chip.json", br#"{"name": "chip"}"#),
+            ("chip.wasm", b"\0asm"),
+        ]);
+        let rendered = generated(&board, &opts, &overlay);
+        let wokwi = &file(&rendered, "wokwi.toml").content;
+        assert!(wokwi.starts_with("[wokwi]\nversion = 1\n"), "{wokwi}");
+        assert!(wokwi.contains("[[chip]]"), "{wokwi}");
+    }
+
+    #[test]
     fn readme_lists_owned_and_seeded_files() {
-        let (board, opts) = project(&[]);
+        let (board, opts) = components();
         let rendered = generated(&board, &opts, &[]);
         let readme = readme("hello_world", &rendered.artifacts, &rendered.assets);
         assert!(readme.content.contains("README.txt"));

@@ -1,22 +1,20 @@
 //! Example overlay placeholders: a fixed token set, not a template language.
 //!
 //! An example may ship its own `diagram.json` (and, in principle, its own
-//! `wokwi.toml`). Those files were the last thing the template engine did;
-//! this module accepts exactly the four forms the examples use and rejects
-//! anything else by name:
+//! `wokwi.toml`). This module accepts exactly the forms the examples use and
+//! rejects anything else by name:
 //!
 //! | token | value |
 //! |---|---|
 //! | `{{ board }}` | the Wokwi board id for the project's chip |
 //! | `{{ serialMonitor }}` | `$serialMonitor` |
-//! | `{{ <component>.pin }}` | the GPIO number of a led or button |
+//! | `{{ <component>.pin }}` | a component's GPIO number |
 //!
 //! A `{{ ... }}` that is not one of those is an [`OverlayError`], which the CLI
-//! reports as a user error rather than an internal one. The same applies to a
-//! `.pin` on a bus component, which has no single pin.
+//! reports as a user error rather than an internal one.
 
 use anyhow::Result;
-use espforge_model::{Board, Component};
+use espforge_elements::{Board, Lowered};
 use std::fmt;
 
 use super::chip::Chip;
@@ -81,10 +79,12 @@ fn resolve_token(token: &str, file: &str, board: &Board, chip: &Chip) -> Result<
         "serialMonitor" => return Ok(wokwi::SERIAL_MONITOR.to_string()),
         _ => {}
     }
-    let Some(name) = token.strip_suffix(".pin") else {
+    // `{{ <id>.<attr> }}`: find the component by either spelling of its id,
+    // then ask it for the attribute. No per-element `match` here.
+    let Some((name, attr)) = token.rsplit_once('.') else {
         return Err(OverlayError::unknown(file, token).into());
     };
-    let name = name.trim();
+    let (name, attr) = (name.trim(), attr.trim());
     let Some(component) = board
         .components
         .iter()
@@ -92,120 +92,46 @@ fn resolve_token(token: &str, file: &str, board: &Board, chip: &Chip) -> Result<
     else {
         return Err(OverlayError::unknown(file, token).into());
     };
-    match component {
-        Component::Led(led) => Ok(led.pin.pin().0.to_string()),
-        Component::Button(button) => Ok(button.pin.pin().0.to_string()),
-        Component::I2c(_) | Component::Spi(_) | Component::Uart(_) => Err(OverlayError {
-            file: file.to_string(),
-            message: format!(
-                "`{name}` is a bus component and has no single `.pin` \
-                 (supported: `{{{{ board }}}}`, `{{{{ serialMonitor }}}}`, \
-                 `{{{{ <component>.pin }}}}`)"
-            ),
-        }
-        .into()),
-    }
+    component
+        .overlay_attr(attr)
+        .ok_or_else(|| OverlayError::unknown(file, token).into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use espforge_model::{
-        Board, Bus, Button, Component, I2cComponent, Ident, Led, Owner, OwnerKind, Pin, PinUse,
-        ResourceGraph,
+    use espforge_elements::components::recipe::RecipeComponent;
+    use espforge_elements::{
+        Component, Console, Ident, Meta, Owner, OwnerKind, Pin, PinUse, Runtime,
     };
 
-    fn claim(
-        resources: &mut ResourceGraph,
-        pin: u8,
-        kind: OwnerKind,
-        id: &str,
-        need: PinUse,
-    ) -> espforge_model::ClaimedPin {
-        let claim = resources
-            .claim(Pin(pin), Owner::new(kind, Ident::new(id, 0..0)), 0..0, need)
-            .unwrap();
-        claim
-    }
-
-    /// A led, a button and an i2c bus: enough to exercise every token arm.
     fn board() -> Board {
-        let mut resources = ResourceGraph::new();
-        let led_pin = claim(
-            &mut resources,
-            18,
-            OwnerKind::Led,
-            "red-led",
-            PinUse::Output,
-        );
-        let button_pin = claim(&mut resources, 9, OwnerKind::Button, "btn", PinUse::Input);
-        let sda = claim(
-            &mut resources,
-            6,
-            OwnerKind::I2c,
-            "i2c0",
-            PinUse::Bidirectional,
-        );
-        let scl = claim(
-            &mut resources,
-            7,
-            OwnerKind::I2c,
-            "i2c0",
-            PinUse::Bidirectional,
-        );
-        let bus = resources.add_bus(Bus::I2c {
-            id: Ident::new("i2c0", 0..0),
-            peripheral: "I2C0".into(),
-            sda,
-            scl,
-            khz: 400,
-            used_by: None,
-        });
         Board {
-            meta: crate::codegen::test_support::meta("esp32c3"),
-            resources,
-            components: vec![
-                Component::Led(Led {
-                    id: Ident::new("red-led", 0..0),
-                    pin: led_pin,
-                    active_low: false,
-                }),
-                Component::Button(Button {
-                    id: Ident::new("btn", 0..0),
-                    pin: button_pin,
-                    pull_up: true,
-                }),
-                Component::I2c(I2cComponent {
-                    id: Ident::new("i2c0", 0..0),
-                    bus,
-                    address: Some(0x48),
-                }),
-            ],
+            meta: Meta {
+                name: "hello world".into(),
+                description: None,
+                chip: "esp32c3".into(),
+                runtime: Runtime::Blocking,
+                console: Console::Uart,
+            },
+            resources: espforge_elements::ResourceGraph::default(),
+            components: Vec::new(),
+            devices: Vec::new(),
             services: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 
     #[test]
-    fn the_four_example_tokens_resolve() {
-        let board = board();
+    fn the_two_built_in_tokens_resolve() {
         assert_eq!(
-            render("{{ board }}", "diagram.json", &board).unwrap(),
+            render("{{ board }}", "diagram.json", &board()).unwrap(),
             "board-esp32-c3-devkitm-1"
         );
         assert_eq!(
-            render("{{ serialMonitor }}", "diagram.json", &board).unwrap(),
+            render("{{ serialMonitor }}", "diagram.json", &board()).unwrap(),
             "$serialMonitor"
         );
-        assert_eq!(
-            render("esp:{{ red_led.pin }}", "diagram.json", &board).unwrap(),
-            "esp:18"
-        );
-        // the id as written works too
-        assert_eq!(
-            render("esp:{{ red-led.pin }}", "diagram.json", &board).unwrap(),
-            "esp:18"
-        );
-        assert_eq!(render("{{btn.pin}}", "diagram.json", &board).unwrap(), "9");
     }
 
     #[test]
@@ -233,17 +159,54 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_pin_on_a_bus_component_says_why_there_is_no_pin() {
-        let err = render("{{ i2c0.pin }}", "d.json", &board()).unwrap_err();
-        let overlay = err.downcast_ref::<OverlayError>().expect("typed error");
-        assert!(overlay.message.contains("no single `.pin`"), "{overlay}");
+    /// `blink`: one LED whose id is written `red-led`.
+    fn blink_board() -> Board {
+        let mut board = board();
+        board.meta.name = "blink".into();
+        let id = Ident::new("red-led", 0..0);
+        let pin = board
+            .resources
+            .claim(
+                Pin(18),
+                Owner::new(OwnerKind::Recipe("led"), id.clone()),
+                0..0,
+                PinUse::Output,
+            )
+            .expect("pin 18 is free");
+        board
+            .components
+            .push(Component::Recipe(RecipeComponent::new(
+                "led",
+                id,
+                pin,
+                vec![false],
+            )));
+        board
     }
 
     #[test]
-    fn an_unknown_component_attribute_is_an_overlay_error() {
-        let err = render("{{ red_led.sda }}", "d.json", &board()).unwrap_err();
-        assert!(err.downcast_ref::<OverlayError>().is_some());
+    fn a_component_pin_resolves_under_both_id_spellings() {
+        let board = blink_board();
+        assert_eq!(render("{{ red-led.pin }}", "d.json", &board).unwrap(), "18");
+        assert_eq!(render("{{ red_led.pin }}", "d.json", &board).unwrap(), "18");
+    }
+
+    #[test]
+    fn an_unsupported_component_attribute_is_an_unknown_token() {
+        let err = render("{{ red_led.color }}", "diagram.json", &blink_board()).unwrap_err();
+        let overlay = err.downcast_ref::<OverlayError>().expect("typed error");
+        assert!(overlay.message.contains("unknown placeholder"), "{overlay}");
+        assert!(
+            overlay.message.contains("{{ <component>.pin }}"),
+            "{overlay}"
+        );
+    }
+
+    #[test]
+    fn a_component_that_is_not_on_the_board_is_an_unknown_token() {
+        let err = render("{{ red_led.pin }}", "d.json", &board()).unwrap_err();
+        let overlay = err.downcast_ref::<OverlayError>().expect("typed error");
+        assert!(overlay.message.contains("unknown placeholder"), "{overlay}");
     }
 
     #[test]

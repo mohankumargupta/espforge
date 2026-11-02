@@ -1,0 +1,50 @@
+====================
+HELLO WORLD EXAMPLE
+====================
+
+# espforge
+  <project name="hello_world" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+  <console type="uart" />
+  <options defaults="true" />
+# peripherals
+
+# components
+
+# devices
+
+# services
+
+
+
+
+====================================================================
+ESPF FILE FORMAT
+
+1. comment block format: 
+    - preceded with line containing only one or more equal 
+      sign sigil
+    - followed one or more lines of comments
+      (raw text, anything goes) 
+    - closing line containing only one or more equal sign 
+      sigil. 
+
+   Comment blocks can only appear before sections, 
+   not inside sections.
+2. mandatory sections: espforge, peripherals, components, devices
+3. there is only one data type, 
+   that is string enclosed in double quotes.
+4. sections use the pound/hash sigil 
+5. a document contains sections, 
+   each section contains 0 or more elements
+6. an element is a restricted self closing xml element format.
+   - inline comments(//)at the end of self-closing elements only, not anywhere else
+   - element can span multiple lines, \ continuation not supported
+7. double quoted strings cannot span multiple lines
+8. single quotes can only appear inside double quotes
+9. you can reference elements throughout the document.
+====================================================================
+
+
+

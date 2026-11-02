@@ -1,0 +1,34 @@
+[package]
+name = "espforge-drivers"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+
+[dependencies]
+espforge-runtime = { workspace = true }
+embedded-graphics = { version = "0.8", optional = true }
+ssd1306 = { version = "0.9", default-features = false, features = ["graphics"], optional = true }
+sky-ili9341 = { version = "0.1.1", default-features = false, features = ["graphics"], optional = true }
+
+[features]
+default = []
+
+# The I2C SSD1306 OLED display driver (`Ssd1306Display`). Blocking only: the
+# display takes the bus component by value and draws synchronously.
+ssd1306 = ["dep:ssd1306", "dep:embedded-graphics"]
+
+# The SPI ILI9341 color TFT driver (`Ili9341Display`). Blocking only, for the
+# same reason.
+ili9341 = ["dep:sky-ili9341", "dep:embedded-graphics"]
+
+# The I2C SCD4x CO2/temperature/humidity sensor driver (`Scd4x`). Blocking
+# only: its commands are plain bus transactions.
+scd4x = []
+
+# Drivers only build for esp targets, so keep esp-hal invisible to host builds.
+[target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
+esp-hal = { version = "1", features = ["unstable"] }

@@ -1,0 +1,16 @@
+====================
+MINIMAL EXAMPLE
+====================
+
+# espforge
+  <project name="minimal" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+
+# components
+
+# devices
+
+# services

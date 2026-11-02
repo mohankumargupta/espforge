@@ -10,7 +10,7 @@
 //! decor above the key they belong to rather than dropped with the template.
 
 use anyhow::Result;
-use espforge_options::ResolvedOptions;
+use espforge_elements::ResolvedOptions;
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 use super::chip::Chip;
@@ -114,7 +114,7 @@ fn array(items: &[&str]) -> Array {
 mod tests {
     use super::*;
     use crate::codegen::test_support::{case, chip};
-    use espforge_model::Runtime;
+    use espforge_elements::Runtime;
     use toml_edit::DocumentMut;
 
     fn parse(text: &str) -> DocumentMut {

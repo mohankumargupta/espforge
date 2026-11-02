@@ -1,351 +1,349 @@
-//! Golden generated projects: one checked-in tree per (example, chip,
-//! runtime), compared byte for byte against what `espforge gen` produces
-//! today.
+//! The golden harness: every declared cell of every embedded example,
+//! generated through `espforge-core` in-process and compared byte for byte
+//! against `tests/golden/<slug>/`.
 //!
-//! This is the Phase 0 contract freeze from `extreme.md` §6.3/§7: generated
-//! project layout and ownership semantics are expected to survive the
-//! refactor. Today the first time a template change is compiled is a real
-//! user's `espforge build`; after this test, a change to the emitter shows up
-//! as a reviewed diff in `tests/golden/`.
+//! The matrix is discovered, not listed: `example.toml` beside each embedded
+//! example declares its chips and runtimes, and every declared cell must have
+//! a golden directory. A golden directory with no declared cell is an error
+//! too, so a renamed cell cannot leave a stale tree behind.
 //!
-//! Regenerate after a deliberate change:
-//!
-//! ```text
-//! UPDATE_GOLDENS=1 cargo test -p espforge --test golden_projects
-//! ```
-//!
-//! The byte comparison cannot prove the output *compiles*; that is
-//! `generated_projects_compile` below, which is `#[ignore]`d because it spawns
-//! cargo (minutes, network for the crates the runtime needs). CI runs it
-//! explicitly:
-//!
-//! ```text
-//! cargo test -p espforge --test golden_projects -- --ignored
-//! ```
+//! `UPDATE_GOLDENS=1` rewrites the golden trees from the generator; review the
+//! diff before committing it.
 
-use std::collections::BTreeMap;
-use std::fs;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
-const BIN: &str = env!("CARGO_BIN_EXE_espforge");
-
-/// Example × chip × runtime cells that are pinned as goldens.
-const MATRIX: &[Cell] = &[
-    Cell::new("01.Basics/helloworld", "esp32c3", "blocking"),
-    Cell::new("01.Basics/helloworld", "esp32c3", "embassy"),
-    Cell::new("01.Basics/helloworld", "esp32s3", "blocking"),
-    Cell::new("01.Basics/helloworld", "esp32s3", "embassy"),
-    Cell::new("01.Basics/blink", "esp32c3", "blocking"),
-    Cell::new("01.Basics/blink", "esp32c3", "embassy"),
-    Cell::new("01.Basics/blink", "esp32s3", "blocking"),
-    Cell::new("01.Basics/blink", "esp32s3", "embassy"),
-    Cell::new("02.Digital/button", "esp32c3", "blocking"),
-    Cell::new("02.Digital/button", "esp32c3", "embassy"),
-    Cell::new("02.Digital/button", "esp32s3", "blocking"),
-    Cell::new("02.Digital/button", "esp32s3", "embassy"),
-    // Bus coverage. The async examples pin the embassy runtime; the
-    // blocking ones pin `blocking`, so the goldens exercise both mains.
-    Cell::new("04.Communication/spi_example", "esp32c3", "blocking"),
-    Cell::new("04.Communication/spi_example", "esp32s3", "blocking"),
-    Cell::new("04.Communication/uart_example", "esp32c3", "blocking"),
-    Cell::new("04.Communication/uart_example", "esp32s3", "blocking"),
-    Cell::new("04.Communication/i2c_example", "esp32c3", "blocking"),
-    Cell::new("04.Communication/i2c_example", "esp32s3", "blocking"),
-    Cell::new("04.Communication/i2c_scanner", "esp32c3", "blocking"),
-    Cell::new("04.Communication/i2c_scanner", "esp32s3", "blocking"),
-    Cell::new("04.Communication/spi_example_async", "esp32c3", "embassy"),
-    Cell::new("04.Communication/spi_example_async", "esp32s3", "embassy"),
-    Cell::new("04.Communication/uart_example_async", "esp32c3", "embassy"),
-    Cell::new("04.Communication/uart_example_async", "esp32s3", "embassy"),
-    Cell::new("04.Communication/i2c_example_async", "esp32c3", "embassy"),
-    Cell::new("04.Communication/i2c_example_async", "esp32s3", "embassy"),
-    Cell::new("02.Digital/button_async", "esp32c3", "embassy"),
-    Cell::new("02.Digital/button_async", "esp32s3", "embassy"),
-    // The one service: `# services` reaches `main.rs` and `Cargo.toml`.
-    Cell::new("05.Networking/wifi_station", "esp32c3", "embassy"),
-    Cell::new("05.Networking/wifi_station", "esp32s3", "embassy"),
-];
-
-/// Cells compiled by `generated_projects_compile`: every example whose
-/// `app.rs` matches its runtime, on a RISC-V chip. That is every embedded
-/// example except the two display ones, whose `# devices` is not lowered yet.
-///
-/// The esp32s3 cells are deliberately not here: they need the `esp` Xtensa
-/// toolchain from espup, which a plain rustup install does not provide. They
-/// stay covered by the byte-exact goldens above; add them to this list once
-/// the CI job installs espup.
-///
-/// A blocking example cannot be forced onto embassy (its `app.rs` is
-/// blocking), and an async example cannot be forced onto blocking. The matrix
-/// pairs each example with the runtime its app is written for; the embassy
-/// fixture additionally covers the async path for a project with no example
-/// app.
-const COMPILE_MATRIX: &[Cell] = &[
-    Cell::new("01.Basics/helloworld", "esp32c3", "blocking"),
-    Cell::new("01.Basics/blink", "esp32c3", "blocking"),
-    Cell::new("02.Digital/button", "esp32c3", "blocking"),
-    Cell::new("04.Communication/spi_example", "esp32c3", "blocking"),
-    Cell::new("04.Communication/uart_example", "esp32c3", "blocking"),
-    Cell::new("04.Communication/i2c_example", "esp32c3", "blocking"),
-    Cell::new("04.Communication/i2c_scanner", "esp32c3", "blocking"),
-    Cell::new("02.Digital/button_async", "esp32c3", "embassy"),
-    Cell::new("04.Communication/i2c_example_async", "esp32c3", "embassy"),
-    Cell::new("04.Communication/spi_example_async", "esp32c3", "embassy"),
-    Cell::new("04.Communication/uart_example_async", "esp32c3", "embassy"),
-    Cell::new("05.Networking/wifi_station", "esp32c3", "embassy"),
-    Cell::fixture("embassy_app", "esp32c3", "embassy"),
-];
-
-/// Where a cell's ESPF spec and app logic come from.
-enum Source {
-    /// An embedded example, generated with `--example`.
-    Example(&'static str),
-    /// A local fixture under `tests/fixtures/`, with its own `app/rust/app.rs`.
-    Fixture(&'static str),
-}
+use espforge_core::answers::Overrides;
+use espforge_core::project::generate_with;
+use espforge_core::source::resolve_source;
+use espforge_elements::Runtime;
 
 struct Cell {
-    source: Source,
-    chip: &'static str,
-    runtime: &'static str,
+    category: String,
+    example: String,
+    chip: String,
+    runtime: Runtime,
+    slug: String,
 }
 
 impl Cell {
-    const fn new(example: &'static str, chip: &'static str, runtime: &'static str) -> Self {
-        Self {
-            source: Source::Example(example),
-            chip,
-            runtime,
-        }
-    }
-
-    const fn fixture(name: &'static str, chip: &'static str, runtime: &'static str) -> Self {
-        Self {
-            source: Source::Fixture(name),
-            chip,
-            runtime,
-        }
-    }
-
-    /// Directory name under `tests/golden/`, e.g. `01.Basics.helloworld.esp32c3.blocking`.
-    fn slug(&self) -> String {
-        let name = match &self.source {
-            Source::Example(example) => example.replace('/', "."),
-            Source::Fixture(name) => format!("fixture.{name}"),
-        };
-        format!("{}.{}.{}", name, self.chip, self.runtime)
+    fn example_path(&self) -> String {
+        format!("{}/{}", self.category, self.example)
     }
 }
 
-fn golden_dir() -> PathBuf {
+fn update_goldens() -> bool {
+    std::env::var_os("UPDATE_GOLDENS").is_some_and(|v| v != "0")
+}
+
+fn golden_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("golden")
 }
 
-fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-}
-
-/// Copy a fixture project (spec + app logic) into the scratch dir.
-fn copy_tree(from: &Path, to: &Path) {
-    fs::create_dir_all(to).unwrap_or_else(|e| panic!("create {}: {e}", to.display()));
-    for entry in fs::read_dir(from).unwrap_or_else(|e| panic!("read {}: {e}", from.display())) {
-        let path = entry.expect("read fixture entry").path();
-        let dest = to.join(path.file_name().expect("file name"));
-        if path.is_dir() {
-            copy_tree(&path, &dest);
-        } else {
-            fs::copy(&path, &dest).unwrap_or_else(|e| panic!("copy {}: {e}", path.display()));
-        }
+fn runtime_from(name: &str) -> Runtime {
+    match name {
+        "blocking" => Runtime::Blocking,
+        "embassy" => Runtime::Embassy,
+        other => panic!("example.toml names unknown runtime `{other}`"),
     }
 }
 
-/// Files of a generated project, keyed by `/`-separated relative path, sorted.
-/// Values are raw bytes: a Wokwi chip ships a `chip.wasm`.
-fn tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
-    fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
-        let mut entries: Vec<_> = fs::read_dir(dir)
-            .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
-            .map(|entry| entry.expect("read dir entry").path())
-            .collect();
-        entries.sort();
-        for path in entries {
-            if path.is_dir() {
-                walk(root, &path, out);
-            } else {
-                let rel = path
-                    .strip_prefix(root)
-                    .expect("path under root")
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                let bytes = fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-                out.insert(rel, bytes);
+/// Every declared cell, read from each example's own `example.toml`.
+fn declared_cells() -> Vec<Cell> {
+    let mut cells = Vec::new();
+    for category in espforge_examples::categories() {
+        for example in &category.examples {
+            let manifest = example
+                .files
+                .iter()
+                .find(|f| f.path == "example.toml")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "example {}/{} has no example.toml; the harness cannot know its cells",
+                        category.name, example.name
+                    )
+                });
+            let text = std::str::from_utf8(manifest.contents)
+                .unwrap_or_else(|_| panic!("{}/example.toml is not UTF-8", example.name));
+            let doc: toml::Value = toml::from_str(text)
+                .unwrap_or_else(|e| panic!("{}/example.toml: {e}", example.name));
+            let chips = doc
+                .get("chips")
+                .and_then(toml::Value::as_array)
+                .unwrap_or_else(|| panic!("{}/example.toml has no `chips`", example.name))
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .unwrap_or_else(|| {
+                            panic!("{}/example.toml chips must be strings", example.name)
+                        })
+                        .to_string()
+                })
+                .collect::<Vec<_>>();
+            let runtimes = doc
+                .get("runtimes")
+                .and_then(toml::Value::as_array)
+                .unwrap_or_else(|| panic!("{}/example.toml has no `runtimes`", example.name))
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .unwrap_or_else(|| {
+                            panic!("{}/example.toml runtimes must be strings", example.name)
+                        })
+                        .to_string()
+                })
+                .collect::<Vec<_>>();
+
+            for chip in chips {
+                for runtime in &runtimes {
+                    cells.push(Cell {
+                        category: category.name.clone(),
+                        example: example.name.clone(),
+                        chip: chip.clone(),
+                        runtime: runtime_from(runtime),
+                        slug: format!("{}.{}.{}.{}", category.name, example.name, chip, runtime),
+                    });
+                }
             }
         }
     }
-    let mut out = BTreeMap::new();
+    cells
+}
+
+fn runtime_name(runtime: Runtime) -> &'static str {
+    match runtime {
+        Runtime::Blocking => "blocking",
+        Runtime::Embassy => "embassy",
+    }
+}
+
+/// Generate one cell into `out`.
+fn generate_cell(cell: &Cell, out: &Path) {
+    let source =
+        resolve_source(None, Some(&cell.example_path()), Path::new(".")).unwrap_or_else(|e| {
+            panic!("resolving example {}: {e}", cell.example_path());
+        });
+    let overrides = Overrides {
+        chip: Some(cell.chip.clone()),
+        runtime: Some(cell.runtime),
+        ..Default::default()
+    };
+    generate_with(&source, out, &overrides, None)
+        .unwrap_or_else(|e| panic!("generating {}: {e:?}", cell.slug));
+}
+
+/// Every file under `root`, relative and sorted.
+fn tree(root: &Path) -> BTreeSet<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut BTreeSet<String>) {
+        let mut entries = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+            .collect::<std::io::Result<Vec<_>>>()
+            .unwrap();
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else {
+                out.insert(
+                    path.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+    }
+    let mut out = BTreeSet::new();
     walk(root, root, &mut out);
     out
 }
 
-/// Show a generated file in a diff: text as-is, binary by size.
-fn describe(bytes: &[u8]) -> String {
-    match std::str::from_utf8(bytes) {
-        Ok(text) => text.to_owned(),
-        Err(_) => format!("<{} bytes of binary data>\n", bytes.len()),
-    }
+fn read(path: &Path) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
-/// Generate one cell into `scratch` and return the file tree of `scratch/out`.
-fn generate(cell: &Cell, scratch: &Path, extra: &[&str]) -> BTreeMap<String, Vec<u8>> {
-    let mut cmd = Command::new(BIN);
-    match &cell.source {
-        Source::Example(example) => {
-            cmd.args(["gen", "--example", example, "--out", "out"]);
+/// A readable expected/actual diff for the first difference in a file.
+fn diff(path: &str, expected: &[u8], actual: &[u8]) -> String {
+    if let (Ok(expected), Ok(actual)) = (std::str::from_utf8(expected), std::str::from_utf8(actual))
+    {
+        let expected_lines: Vec<&str> = expected.lines().collect();
+        let actual_lines: Vec<&str> = actual.lines().collect();
+        let first = expected_lines
+            .iter()
+            .zip(&actual_lines)
+            .position(|(e, a)| e != a)
+            .unwrap_or_else(|| expected_lines.len().min(actual_lines.len()));
+        let start = first.saturating_sub(3);
+        let end = (first + 4).max(start + 1);
+        let mut out = format!("`{path}` differs at line {}:\n", first + 1);
+        out.push_str("  expected | actual\n");
+        for i in start..end {
+            let e = expected_lines.get(i).copied().unwrap_or("<missing line>");
+            let a = actual_lines.get(i).copied().unwrap_or("<missing line>");
+            let marker = if e != a { ">" } else { " " };
+            out.push_str(&format!("{marker} {:>5} | {e:<40} | {a}\n", i + 1));
         }
-        Source::Fixture(name) => {
-            copy_tree(&fixtures_dir().join(name), scratch);
-            cmd.args(["gen", "example.espf.txt", "--out", "out"]);
-        }
-    }
-    cmd.args(["--chip", cell.chip, "--runtime", cell.runtime])
-        .args(extra)
-        .current_dir(scratch)
-        .env("TERM", "dumb")
-        .env_remove("NO_COLOR")
-        .stdin(Stdio::null());
-    let out = cmd.output().expect("run espforge gen");
-    assert!(
-        out.status.success(),
-        "gen {} failed: \n{}{}",
-        cell.slug(),
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    tree(&scratch.join("out"))
-}
-
-#[test]
-fn golden_projects_are_unchanged() {
-    let root = golden_dir();
-    let update = std::env::var_os("UPDATE_GOLDENS").is_some_and(|v| v == "1");
-    let mut mismatches = Vec::new();
-
-    for cell in MATRIX {
-        let scratch = tempfile::tempdir().expect("create scratch dir");
-        let actual = generate(cell, scratch.path(), &[]);
-        let case_dir = root.join(cell.slug());
-
-        if update {
-            let _ = fs::remove_dir_all(&case_dir);
-            for (rel, body) in &actual {
-                let file = case_dir.join(rel);
-                fs::create_dir_all(file.parent().expect("parent")).expect("create dir");
-                fs::write(&file, body).expect("write golden");
-            }
-            continue;
-        }
-
-        let expected = match fs::read_dir(&case_dir) {
-            Ok(_) => tree(&case_dir),
-            Err(_) => {
-                mismatches.push(format!("{}: no golden tree", cell.slug()));
-                continue;
-            }
-        };
-
-        for (rel, body) in &expected {
-            match actual.get(rel) {
-                None => mismatches.push(format!("{}: generated project lost {rel}", cell.slug())),
-                Some(got) if got != body => mismatches.push(format!(
-                    "{}: {rel} changed\n--- expected ---\n{}--- actual ---\n{}",
-                    cell.slug(),
-                    describe(body),
-                    describe(got)
-                )),
-                Some(_) => {}
-            }
-        }
-        for rel in actual.keys() {
-            if !expected.contains_key(rel) {
-                mismatches.push(format!("{}: generated project gained {rel}", cell.slug()));
-            }
-        }
-    }
-
-    // A golden tree nobody generates any more is dead weight.
-    if let Ok(entries) = fs::read_dir(&root) {
-        let slugs: Vec<String> = MATRIX.iter().map(Cell::slug).collect();
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if entry.path().is_dir() && !slugs.contains(&name) {
-                mismatches.push(format!("{name}: golden tree without a matrix cell"));
-            }
-        }
-    }
-
-    if !mismatches.is_empty() {
-        panic!(
-            "{} golden difference(s). If the change is intended, run \
-             `UPDATE_GOLDENS=1 cargo test -p espforge --test golden_projects` and review \
-             the diff.\n\n{}",
-            mismatches.len(),
-            mismatches.join("\n")
-        );
-    }
-}
-
-/// Compile the generated project, not just compare its bytes. This is the
-/// invariant the repo never had: `espforge build` used to be the first compile
-/// of a template change.
-///
-/// `#[ignore]`d because it needs the network (crates.io) and minutes of cargo
-/// time. Run with `-- --ignored`, as CI does.
-#[test]
-#[ignore = "spawns cargo; run with -- --ignored"]
-fn generated_projects_compile() {
-    let runtime = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("workspace root")
-        .join("espforge-runtime");
-    // One shared target dir, so the cells reuse dependency builds.
-    let target_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("workspace root")
-        .join("target")
-        .join("golden-check");
-
-    let mut failures = Vec::new();
-    for cell in COMPILE_MATRIX {
-        let scratch = tempfile::tempdir().expect("create scratch dir");
-        let runtime_arg = runtime.to_string_lossy().into_owned();
-        generate(cell, scratch.path(), &["--runtime-path", &runtime_arg]);
-
-        let out = Command::new("cargo")
-            .args(["check", "--quiet"])
-            .current_dir(scratch.path().join("out"))
-            .env("CARGO_TARGET_DIR", &target_dir)
-            .output()
-            .expect("run cargo check");
-        if !out.status.success() {
-            failures.push(format!(
-                "{}: cargo check failed\n{}{}",
-                cell.slug(),
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
+        if expected.ends_with('\n') != actual.ends_with('\n') {
+            out.push_str(&format!(
+                "  (trailing newline: expected {}, actual {})\n",
+                expected.ends_with('\n'),
+                actual.ends_with('\n')
             ));
         }
+        out.push_str(&format!(
+            "  lengths: expected {} bytes, actual {} bytes\n",
+            expected.len(),
+            actual.len()
+        ));
+        return out;
+    }
+    format!(
+        "`{path}` differs (binary): expected {} bytes, actual {} bytes\n",
+        expected.len(),
+        actual.len()
+    )
+}
+
+/// Compare the generated tree with the golden tree; panic with the first
+/// difference and a readable diff.
+fn compare_tree(golden: &Path, actual: &Path) {
+    let expected_files = tree(golden);
+    let actual_files = tree(actual);
+
+    let missing: Vec<&String> = expected_files.difference(&actual_files).collect();
+    let extra: Vec<&String> = actual_files.difference(&expected_files).collect();
+    assert!(
+        missing.is_empty(),
+        "golden has files the generator does not write: {missing:?}\n  golden: {}\n  actual: {}",
+        golden.display(),
+        actual.display()
+    );
+    assert!(
+        extra.is_empty(),
+        "the generator writes files the golden does not have: {extra:?}\n  golden: {}\n  actual: {}",
+        golden.display(),
+        actual.display()
+    );
+
+    for path in &expected_files {
+        let expected = read(&golden.join(path));
+        let got = read(&actual.join(path));
+        if expected != got {
+            panic!(
+                "generated project is not byte-identical:\n{}",
+                diff(path, &expected, &got)
+            );
+        }
+    }
+}
+
+fn write_golden(from: &Path, to: &Path) {
+    if to.exists() {
+        std::fs::remove_dir_all(to).unwrap();
+    }
+    std::fs::create_dir_all(to).unwrap();
+    for path in tree(from) {
+        let target = to.join(&path);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::copy(from.join(&path), &target).unwrap();
+    }
+}
+
+#[test]
+fn every_declared_cell_is_byte_identical_to_its_golden() {
+    let cells = declared_cells();
+    assert!(!cells.is_empty(), "no golden cells are declared");
+
+    let update = update_goldens();
+    let mut declared = BTreeSet::new();
+    for cell in &cells {
+        declared.insert(cell.slug.clone());
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("project");
+        generate_cell(cell, &out);
+
+        // The 12 emitted artifacts plus `src/app.rs`, the copy of the ESPF
+        // source, and (for an example with a custom Wokwi chip) the seeded
+        // `chip.json` / `chip.wasm`.
+        const BASE_FILES: [&str; 14] = [
+            "build.rs",
+            "Cargo.toml",
+            ".cargo/config.toml",
+            ".cargo/esp-config.toml",
+            "diagram.json",
+            ".espforge/manifest.json",
+            ".espforge/source.espf.txt",
+            "README.txt",
+            "rust-toolchain.toml",
+            "src/app.rs",
+            "src/bin/main.rs",
+            "src/generated.rs",
+            "src/lib.rs",
+            "wokwi.toml",
+        ];
+        let files = tree(&out);
+        for path in BASE_FILES {
+            assert!(
+                files.contains(path),
+                "{}: missing `{path}` ({files:?})",
+                cell.slug
+            );
+        }
+        let extra: Vec<&String> = files
+            .iter()
+            .filter(|path| {
+                !BASE_FILES.contains(&path.as_str())
+                    && !matches!(path.as_str(), "chip.json" | "chip.wasm")
+            })
+            .collect();
+        assert!(
+            extra.is_empty(),
+            "{}: unexpected generated files {extra:?}",
+            cell.slug
+        );
+
+        let golden = golden_root().join(&cell.slug);
+        if update {
+            write_golden(&out, &golden);
+            eprintln!("updated {}", golden.display());
+        } else {
+            assert!(
+                golden.is_dir(),
+                "declared cell `{}` has no golden at {}; run with UPDATE_GOLDENS=1",
+                cell.slug,
+                golden.display()
+            );
+            compare_tree(&golden, &out);
+        }
     }
 
+    // A golden tree with no declared cell is an error, not silent coverage.
+    let root = golden_root();
+    if root.is_dir() {
+        for entry in std::fs::read_dir(&root).unwrap() {
+            let entry = entry.unwrap();
+            if !entry.path().is_dir() {
+                continue;
+            }
+            let slug = entry.file_name().to_string_lossy().into_owned();
+            assert!(
+                declared.contains(&slug),
+                "golden `{slug}` is not a declared cell; declare it in example.toml or delete the tree"
+            );
+        }
+    }
+
+    // The cell the slice is about, named here so its presence is explicit.
     assert!(
-        failures.is_empty(),
-        "{} of {} generated project(s) do not compile:\n\n{}",
-        failures.len(),
-        COMPILE_MATRIX.len(),
-        failures.join("\n")
+        declared.contains(&format!(
+            "01.Basics.helloworld.esp32c3.{}",
+            runtime_name(Runtime::Blocking)
+        )),
+        "the helloworld esp32c3/blocking cell must stay declared"
     );
 }

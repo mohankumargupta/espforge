@@ -1,0 +1,2 @@
+chips    = ["esp32c3", "esp32s3"]
+runtimes = ["blocking"]

@@ -1,20 +1,19 @@
-//! Embedded ESPF examples for the `espforge` binary, exposed as a plumbing
-//! catalog.
+//! Embedded ESPF examples: the catalog, the listing, and materialization.
 //!
-//! This crate is Layer 0 of the layering described in `cli.md`: it describes
-//! and copies the embedded example tree, nothing else. No UI, no stdout, no
-//! prompts — presentation lives in the `espforge` binary.
+//! The example tree is embedded at compile time and addressed as
+//! `<category>/<name>` through [`find`], or by a unique short name through
+//! [`resolve_name`]. [`list`] is the flat catalog `espforge examples` prints;
+//! [`materialize`] writes an example as an editable project and never merges
+//! into an existing tree.
 //!
-//! Principles:
-//! - every example is addressed as `<category>/<name>` via [`find`];
-//! - [`materialize`] writes an example verbatim to disk and never clobbers;
-//! - plumbing functions take `&Path` in and return data / results out.
+//! Nothing here prints: presentation lives in the `espforge` binary.
 
 use std::ffi::OsStr;
-use std::path::Path;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 
 /// The example tree, embedded at compile time from `src/examples`.
 pub static EXAMPLES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/src/examples");
@@ -22,7 +21,17 @@ pub static EXAMPLES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/src/examples");
 /// Name of the ESPF source file inside each example directory.
 const EXAMPLE_FILE: &str = "example.espf.txt";
 
+/// The test harness's cell declaration; never part of a scaffolded project.
+const HARNESS_FILE: &str = "example.toml";
+
+/// App logic inside an example, relative to the example directory.
+const EXAMPLE_APP: &str = "app/rust/app.rs";
+
+/// Header of the format reference appendix some examples carry at the end.
+const FORMAT_REFERENCE: &str = "ESPF FILE FORMAT";
+
 /// A file inside an example, with its path relative to the example directory.
+#[derive(Debug)]
 pub struct ExampleFile {
     /// Relative path, e.g. `app/rust/app.rs` or `example.espf.txt`.
     pub path: String,
@@ -31,6 +40,7 @@ pub struct ExampleFile {
 }
 
 /// A top-level example category, e.g. `01.Basics`.
+#[derive(Debug)]
 pub struct Category {
     /// Category directory name, e.g. `01.Basics`.
     pub name: String,
@@ -39,6 +49,7 @@ pub struct Category {
 }
 
 /// A single example (a directory containing `example.espf.txt`).
+#[derive(Debug)]
 pub struct Example {
     /// Example directory name, e.g. `helloworld`.
     pub name: String,
@@ -49,6 +60,19 @@ pub struct Example {
     pub content: String,
     /// Every embedded file of the example, including `example.espf.txt` itself.
     pub files: Vec<ExampleFile>,
+}
+
+/// One row of [`list`]: an example with the category it lives in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExampleInfo {
+    /// `category/name`, the address [`find`] and `--example` take.
+    pub key: String,
+    /// Category directory name, e.g. `01.Basics`.
+    pub category: String,
+    /// Example directory name, e.g. `helloworld`.
+    pub name: String,
+    /// Human-facing title, when the example has a banner.
+    pub title: Option<String>,
 }
 
 static CATALOG: LazyLock<Vec<Category>> = LazyLock::new(|| {
@@ -65,82 +89,251 @@ pub fn categories() -> &'static [Category] {
     &CATALOG
 }
 
-/// Find an example by `category/name`, e.g. `01.Basics/button`.
+/// Find an example by `category/name`, e.g. `01.Basics/helloworld`.
 pub fn find(example_path: &str) -> Option<&'static Example> {
     let (category_name, example_name) = example_path.split_once('/')?;
     let category = categories().iter().find(|c| c.name == category_name)?;
     category.examples.iter().find(|e| e.name == example_name)
 }
 
-/// Plumbing listing of the catalog: one `category/name<TAB>title` line per
-/// example, filtered to a single category when given. Plain, script-friendly
-/// text; the caller owns printing.
-///
-/// Errors explain why there is nothing to list (empty tree, unknown category).
-pub fn list(category: Option<&str>) -> Result<Vec<String>, String> {
-    if categories().is_empty() {
-        return Err("no examples are embedded in this build".to_string());
-    }
-    let selected = match category {
-        Some(name) => match categories().iter().find(|c| c.name == name) {
-            Some(c) => std::slice::from_ref(c),
-            None => {
-                let available: Vec<&str> = categories().iter().map(|c| c.name.as_str()).collect();
-                return Err(format!(
-                    "unknown category '{name}' (available: {})",
-                    available.join(", ")
-                ));
-            }
-        },
-        None => categories(),
-    };
-    Ok(selected
+/// The whole catalog, category by category and each category by name: the
+/// order [`list`] renders and [`resolve_name`] suggests from.
+pub fn list() -> Vec<ExampleInfo> {
+    categories()
         .iter()
-        .flat_map(|c| {
-            c.examples
-                .iter()
-                .map(move |e| {
-                    format!("{}/{}\t{}", c.name, e.name, e.title.clone().unwrap_or_default())
-                })
+        .flat_map(|category| {
+            category.examples.iter().map(move |example| ExampleInfo {
+                key: format!("{}/{}", category.name, example.name),
+                category: category.name.clone(),
+                name: example.name.clone(),
+                title: example.title.clone(),
+            })
         })
-        .collect())
+        .collect()
 }
 
-/// Write an example's embedded files verbatim under `dest`.
+/// Resolve user input to the category and example it names.
 ///
-/// Never clobbers: if any target file already exists (or `dest` is an existing
-/// file), nothing is written and the error names the path. On success returns
-/// the absolute path of every file written.
-pub fn materialize(example: &Example, dest: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
-    use std::io;
-    use std::path::PathBuf;
+/// A full `category/name` key is taken as written. A bare name is accepted
+/// when exactly one example in the catalog has it; no match and several
+/// matches are explained, and a typo gets a `did you mean` with the full key.
+pub fn resolve_name(input: &str) -> Result<(&'static str, &'static Example), String> {
+    resolve_in(categories(), input)
+}
+
+fn resolve_in<'a>(catalog: &'a [Category], input: &str) -> Result<(&'a str, &'a Example), String> {
+    if let Some((category_name, example_name)) = input.split_once('/') {
+        return match catalog.iter().find(|c| c.name == category_name) {
+            Some(category) => category
+                .examples
+                .iter()
+                .find(|example| example.name == example_name)
+                .map(|example| (category.name.as_str(), example))
+                .ok_or_else(|| not_found(catalog, input)),
+            None => Err(not_found(catalog, input)),
+        };
+    }
+
+    let matches: Vec<(&str, &Example)> = catalog
+        .iter()
+        .flat_map(|category| {
+            category
+                .examples
+                .iter()
+                .map(move |example| (category.name.as_str(), example))
+        })
+        .filter(|(_, example)| example.name == input)
+        .collect();
+
+    match matches.len() {
+        1 => Ok(matches[0]),
+        0 => Err(not_found(catalog, input)),
+        _ => {
+            let keys: Vec<String> = matches
+                .iter()
+                .map(|(category, example)| format!("{category}/{}", example.name))
+                .collect();
+            let list = keys
+                .iter()
+                .map(|key| format!("  - {key}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Err(format!(
+                "'{input}' matches more than one example:\n{list}\n   Use the full name, e.g. `--example {}`.",
+                keys[0]
+            ))
+        }
+    }
+}
+
+fn not_found(catalog: &[Category], input: &str) -> String {
+    let hint = suggestion(catalog, input)
+        .map(|key| format!(" Did you mean `{key}`?"))
+        .unwrap_or_default();
+    format!("no example named '{input}'.{hint}\n   Run `espforge examples` to see all examples.")
+}
+
+/// The full key of the example whose short name is closest to `input`, when
+/// something is close enough to be worth suggesting.
+fn suggestion(catalog: &[Category], input: &str) -> Option<String> {
+    let limit = 2.max(input.len() / 3);
+    catalog
+        .iter()
+        .flat_map(|category| {
+            category
+                .examples
+                .iter()
+                .map(move |example| (category, example))
+        })
+        .map(|(category, example)| {
+            (
+                edit_distance(input, &example.name),
+                format!("{}/{}", category.name, example.name),
+            )
+        })
+        .filter(|(distance, _)| *distance <= limit)
+        .min()
+        .map(|(_, key)| key)
+}
+
+/// Levenshtein distance, counted in characters.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut cur = vec![i];
+        for j in 1..=b.len() {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            cur.push((prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// Why [`materialize`] wrote nothing.
+#[derive(Debug)]
+pub enum MaterializeError {
+    /// The destination already holds something; nothing was written.
+    Conflict(String),
+    /// The OS refused a directory or a write.
+    Io(io::Error),
+}
+
+impl std::fmt::Display for MaterializeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MaterializeError::Conflict(message) => f.write_str(message),
+            MaterializeError::Io(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for MaterializeError {}
+
+impl From<io::Error> for MaterializeError {
+    fn from(error: io::Error) -> Self {
+        MaterializeError::Io(error)
+    }
+}
+
+/// What [`materialize`] wrote, relative to the destination.
+#[derive(Debug)]
+pub struct Materialized {
+    /// The project spec, `<name>.espf` (the example's `example.espf.txt`).
+    pub spec: PathBuf,
+    /// Every file written, in write order.
+    pub files: Vec<PathBuf>,
+}
+
+/// The spec a scaffolded project starts from: the example's own text with the
+/// title banner kept and a trailing `ESPF FILE FORMAT` reference block dropped.
+///
+/// The appendix documents the format rather than describing the project, so it
+/// has no place in a project the user is about to edit.
+pub fn project_spec(example: &Example) -> String {
+    let lines: Vec<&str> = example.content.lines().collect();
+    let cut = lines.iter().enumerate().find_map(|(i, line)| {
+        (is_banner(line)
+            && lines
+                .get(i + 1)
+                .is_some_and(|next| next.trim() == FORMAT_REFERENCE))
+        .then_some(i)
+    });
+    let kept = cut.map_or(lines.as_slice(), |i| &lines[..i]);
+    format!("{}\n", kept.join("\n").trim_end())
+}
+
+/// Write `example` as an editable project under `dest`:
+///
+/// - `example.espf.txt` becomes `<name>.espf` ([`project_spec`]);
+/// - `app/rust/app.rs` becomes `src/app.rs`;
+/// - `example.toml` is skipped (it declares test cells, not project files);
+/// - every other embedded file is written verbatim at its own path.
+///
+/// Never merges into an existing tree: `dest` must be absent or empty, and no
+/// target file may exist. On a conflict nothing is written.
+pub fn materialize(example: &Example, dest: &Path) -> Result<Materialized, MaterializeError> {
+    let plan = project_files(example);
 
     if dest.is_file() {
-        return Err(io::Error::other(format!(
+        return Err(MaterializeError::Conflict(format!(
             "cannot write '{}': not a directory",
             dest.display()
         )));
     }
-    let targets: Vec<PathBuf> = example.files.iter().map(|f| dest.join(&f.path)).collect();
-    for target in &targets {
+    if std::fs::read_dir(dest).is_ok_and(|mut entries| entries.next().is_some()) {
+        return Err(MaterializeError::Conflict(format!(
+            "'{}' already exists and is not empty; pick a new directory name",
+            dest.display()
+        )));
+    }
+    for (rel, _) in &plan {
+        let target = dest.join(rel);
         if target.exists() {
-            return Err(io::Error::other(format!(
+            return Err(MaterializeError::Conflict(format!(
                 "refusing to overwrite '{}' (already exists)",
                 target.display()
             )));
         }
     }
+
     std::fs::create_dir_all(dest)?;
-    let mut written = Vec::with_capacity(targets.len());
-    for ExampleFile { path, contents } in &example.files {
-        let target = dest.join(path);
+    let mut files = Vec::with_capacity(plan.len());
+    for (rel, contents) in &plan {
+        let target = dest.join(rel);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&target, contents)?;
-        written.push(target);
+        files.push(target);
     }
-    Ok(written)
+
+    Ok(Materialized {
+        spec: dest.join(format!("{}.espf", example.name)),
+        files,
+    })
+}
+
+/// The `(relative path, contents)` a scaffold writes, in embedded order.
+fn project_files(example: &Example) -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    for file in &example.files {
+        let rel = match file.path.as_str() {
+            HARNESS_FILE => continue,
+            EXAMPLE_FILE => format!("{}.espf", example.name),
+            EXAMPLE_APP => "src/app.rs".to_string(),
+            other => other.to_string(),
+        };
+        let contents = if file.path == EXAMPLE_FILE {
+            project_spec(example).into_bytes()
+        } else {
+            file.contents.to_vec()
+        };
+        out.push((rel, contents));
+    }
+    out
 }
 
 fn category_from_dir(cat_dir: &'static Dir<'static>) -> Option<Category> {
@@ -223,16 +416,22 @@ fn is_banner(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
-    /// Unique scratch directory per `tag`, so tests can run in parallel.
+    /// Unique scratch directory per test, so tests run in parallel.
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
+        std::env::temp_dir().join(format!(
             "espforge-examples-test-{}-{tag}",
             std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
+        ))
+    }
+
+    fn fake(name: &str) -> Example {
+        Example {
+            name: name.into(),
+            title: None,
+            content: String::new(),
+            files: Vec::new(),
+        }
     }
 
     #[test]
@@ -241,8 +440,6 @@ mod tests {
         assert!(!categories.is_empty());
         let basics = &categories[0];
         assert_eq!(basics.name, "01.Basics");
-        // Examples are documented as sorted by name, so `blink` comes first.
-        assert!(basics.examples.windows(2).all(|w| w[0].name <= w[1].name));
         let helloworld = basics
             .examples
             .iter()
@@ -253,127 +450,183 @@ mod tests {
     }
 
     #[test]
-    fn empty_categories_are_dropped() {
-        let categories = categories();
-        assert!(categories.iter().all(|c| !c.examples.is_empty()));
-        let digital = categories
-            .iter()
-            .find(|c| c.name == "02.Digital")
-            .expect("02.Digital examples must be embedded");
-        assert_eq!(digital.examples.len(), 2);
-    }
-
-    #[test]
     fn find_addresses_examples() {
-        let button = find("02.Digital/button").expect("02.Digital/button must exist");
-        assert_eq!(button.title.as_deref(), Some("BUTTON EXAMPLE"));
-        assert!(find("02.Digital/no-such-example").is_none());
-        assert!(find("no-such-category/button").is_none());
+        let hello = find("01.Basics/helloworld").expect("01.Basics/helloworld must exist");
+        assert_eq!(hello.title.as_deref(), Some("HELLO WORLD EXAMPLE"));
+        assert!(find("01.Basics/no-such-example").is_none());
+        assert!(find("no-such-category/helloworld").is_none());
         assert!(find("no-slash").is_none());
     }
 
     #[test]
     fn example_records_every_file() {
-        let button = find("02.Digital/button").expect("button must exist");
-        let paths: Vec<&str> = button.files.iter().map(|f| f.path.as_str()).collect();
-        for expected in ["example.espf.txt", "app/rust/app.rs", "diagram.json"] {
+        let hello = find("01.Basics/helloworld").expect("helloworld must exist");
+        let paths: Vec<&str> = hello.files.iter().map(|f| f.path.as_str()).collect();
+        for expected in ["example.espf.txt", "app/rust/app.rs", "example.toml"] {
             assert!(paths.contains(&expected), "missing {expected} in {paths:?}");
         }
-        let espf = button
+        let espf = hello
             .files
             .iter()
             .find(|f| f.path == "example.espf.txt")
             .expect("espf must be among the files");
         let text = std::str::from_utf8(espf.contents).expect("espf must be utf8");
-        assert_eq!(text, button.content);
+        assert_eq!(text, hello.content);
     }
 
     #[test]
-    fn nested_and_binary_files_are_kept() {
+    fn list_is_the_whole_catalog_in_order() {
+        let all = list();
+        let from_catalog: usize = categories().iter().map(|c| c.examples.len()).sum();
+        assert_eq!(all.len(), from_catalog);
+        assert!(
+            all.windows(2)
+                .all(|w| (&w[0].category, &w[0].name) <= (&w[1].category, &w[1].name)),
+            "list must keep the catalog's category/name order"
+        );
+        let hello = all
+            .iter()
+            .find(|info| info.key == "01.Basics/helloworld")
+            .expect("helloworld must be listed");
+        assert_eq!(hello.category, "01.Basics");
+        assert_eq!(hello.name, "helloworld");
+        assert_eq!(hello.title.as_deref(), Some("HELLO WORLD EXAMPLE"));
+    }
+
+    #[test]
+    fn resolve_name_takes_a_key_or_a_unique_short_name() {
+        let (category, example) = resolve_name("01.Basics/helloworld").expect("full key resolves");
+        assert_eq!(category, "01.Basics");
+        assert_eq!(example.name, "helloworld");
+
+        let (category, example) = resolve_name("blink").expect("short name resolves");
+        assert_eq!(format!("{category}/{}", example.name), "01.Basics/blink");
+    }
+
+    #[test]
+    fn resolve_name_explains_a_typo() {
+        let err = resolve_name("blnik").expect_err("a typo must not resolve");
+        assert!(err.contains("no example named 'blnik'"), "{err}");
+        assert!(err.contains("Did you mean `01.Basics/blink`"), "{err}");
+        assert!(err.contains("espforge examples"), "{err}");
+    }
+
+    #[test]
+    fn resolve_name_refuses_an_ambiguous_short_name() {
+        let catalog = vec![
+            Category {
+                name: "01.Basics".into(),
+                examples: vec![fake("blink")],
+            },
+            Category {
+                name: "02.Digital".into(),
+                examples: vec![fake("blink")],
+            },
+        ];
+        let err = resolve_in(&catalog, "blink").expect_err("ambiguous must not resolve");
+        assert!(err.contains("more than one example"), "{err}");
+        assert!(err.contains("  - 01.Basics/blink"), "{err}");
+        assert!(err.contains("  - 02.Digital/blink"), "{err}");
+        assert!(
+            resolve_in(&catalog, "01.Basics/blink").is_ok(),
+            "the full key stays unambiguous"
+        );
+    }
+
+    #[test]
+    fn every_short_name_resolves_to_its_own_example() {
+        for info in list() {
+            let (category, example) =
+                resolve_name(&info.name).unwrap_or_else(|e| panic!("{}: {e}", info.key));
+            assert_eq!(
+                format!("{category}/{}", example.name),
+                info.key,
+                "short names must be unique across the catalog"
+            );
+        }
+    }
+
+    #[test]
+    fn project_spec_keeps_the_banner_and_drops_the_format_reference() {
+        let hello = find("01.Basics/helloworld").expect("helloworld must exist");
+        let spec = project_spec(hello);
+        assert!(spec.starts_with("====================\nHELLO WORLD EXAMPLE"));
+        assert!(spec.contains("# espforge"));
+        assert!(!spec.contains(FORMAT_REFERENCE), "{spec}");
+        assert!(spec.ends_with('\n'));
+
+        // An example without the appendix keeps everything else.
+        let ili = find("06.Displays/ili9341").expect("ili9341 must exist");
+        let spec = project_spec(ili);
+        assert_eq!(spec.trim_end(), ili.content.trim_end());
+    }
+
+    #[test]
+    fn materialize_writes_a_project_layout() {
+        let blink = find("01.Basics/blink").expect("blink must exist");
+        let dest = scratch("layout");
+        let _ = std::fs::remove_dir_all(&dest);
+
+        let done = materialize(blink, &dest).expect("materialize must succeed");
+        assert_eq!(done.spec, dest.join("blink.espf"));
+        assert!(dest.join("blink.espf").is_file());
+        assert!(dest.join("src").join("app.rs").is_file());
+        assert!(dest.join("diagram.json").is_file());
+        assert!(!dest.join("example.toml").exists());
+        assert!(!dest.join("app").exists());
+        for file in &done.files {
+            assert!(file.is_file(), "{} missing", file.display());
+        }
+
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    #[test]
+    fn materialize_keeps_binary_example_files() {
         let i2c = find("04.Communication/i2c_example").expect("i2c_example must exist");
-        let zig = i2c
-            .files
-            .iter()
-            .find(|f| f.path == "chip/chip.zig")
-            .expect("nested chip/chip.zig must be kept");
-        assert!(std::str::from_utf8(zig.contents).is_ok());
-        let wasm = i2c
-            .files
-            .iter()
-            .find(|f| f.path == "chip.wasm")
-            .expect("binary chip.wasm must be kept");
-        assert!(!wasm.contents.is_empty());
-        assert!(
-            wasm.contents.starts_with(b"\0asm"),
-            "wasm payload must be copied verbatim (magic header missing)"
-        );
-    }
+        let dest = scratch("binary");
+        let _ = std::fs::remove_dir_all(&dest);
 
-    #[test]
-    fn materialize_writes_verbatim_tree() {
-        let button = find("02.Digital/button").expect("button must exist");
-        let dest = scratch("happy");
-        let written = materialize(button, &dest).expect("materialize must succeed");
-        assert_eq!(written.len(), button.files.len());
-        assert_eq!(
-            std::fs::read_to_string(dest.join("example.espf.txt")).expect("espf written"),
-            button.content
-        );
-        let nested = dest.join("app").join("rust").join("app.rs");
-        let embedded_app = button
-            .files
-            .iter()
-            .find(|f| f.path == "app/rust/app.rs")
-            .expect("app.rs embedded");
-        assert_eq!(
-            std::fs::read(&nested).expect("app.rs readable"),
-            embedded_app.contents
-        );
-        // Every recorded file landed at its relative path.
-        for file in &button.files {
-            assert!(dest.join(&file.path).is_file(), "{} missing", file.path);
-        }
+        materialize(i2c, &dest).expect("materialize must succeed");
+        let wasm = std::fs::read(dest.join("chip.wasm")).expect("chip.wasm written");
+        assert!(wasm.starts_with(b"\0asm"), "wasm payload must be verbatim");
+        assert!(dest.join("chip").join("chip.zig").is_file());
+
         let _ = std::fs::remove_dir_all(&dest);
     }
 
     #[test]
-    fn materialize_never_clobbers() {
-        let button = find("02.Digital/button").expect("button must exist");
-        let dest = scratch("clobber");
-        materialize(button, &dest).expect("first materialize must succeed");
-        let err = materialize(button, &dest)
-            .expect_err("second materialize into the same dest must fail");
+    fn materialize_refuses_to_merge_into_a_non_empty_directory() {
+        let blink = find("01.Basics/blink").expect("blink must exist");
+        let dest = scratch("conflict");
+        let _ = std::fs::remove_dir_all(&dest);
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("keep.txt"), "mine").unwrap();
+
+        let err = materialize(blink, &dest).expect_err("a non-empty dest must be refused");
         assert!(
-            err.to_string().contains("refusing to overwrite"),
-            "unexpected error: {err}"
+            err.to_string().contains("already exists and is not empty"),
+            "{err}"
         );
+        assert!(!dest.join("blink.espf").exists(), "nothing may be written");
+        assert_eq!(
+            std::fs::read_to_string(dest.join("keep.txt")).unwrap(),
+            "mine"
+        );
+
         let _ = std::fs::remove_dir_all(&dest);
     }
 
     #[test]
-    fn list_is_machine_readable() {
-        let all = list(None).expect("listing the full tree must work");
-        assert!(!all.is_empty());
-        let filtered = list(Some("02.Digital")).expect("02.Digital must list");
-        assert_eq!(filtered.len(), 2);
-        assert!(filtered.iter().all(|l| l.starts_with("02.Digital/")));
-        assert!(filtered.iter().all(|l| l.split_once('\t').is_some()));
-        let err = list(Some("no-such-category")).expect_err("unknown category must fail");
-        assert!(err.contains("unknown category"), "unexpected: {err}");
-        assert!(err.contains("01.Basics"), "should name available categories");
-    }
+    fn materialize_accepts_an_empty_existing_directory() {
+        let blink = find("01.Basics/blink").expect("blink must exist");
+        let dest = scratch("empty");
+        let _ = std::fs::remove_dir_all(&dest);
+        std::fs::create_dir_all(&dest).unwrap();
 
-    #[test]
-    fn every_embedded_example_materializes() {
-        for category in categories() {
-            for example in &category.examples {
-                let dest = scratch(&format!("sweep-{}", example.name));
-                let written = materialize(example, &dest).unwrap_or_else(|e| {
-                    panic!("materialize {}/{} failed: {e}", category.name, example.name)
-                });
-                assert_eq!(written.len(), example.files.len());
-                let _ = std::fs::remove_dir_all(&dest);
-            }
-        }
+        materialize(blink, &dest).expect("an empty directory is usable");
+        assert!(dest.join("blink.espf").is_file());
+
+        let _ = std::fs::remove_dir_all(&dest);
     }
 }

@@ -11,22 +11,23 @@ impl PeripheralRegistry {
 }
 /// Constructed components.
 pub struct Components {
-    pub i2c_tester: espforge_runtime::I2cBus<esp_hal::Blocking>,
+    pub i2c_tester: espforge_runtime::I2cDevice<esp_hal::Blocking>,
 }
 impl Components {
     pub fn new(registry: &mut PeripheralRegistry) -> Self {
+        // SAFETY: espforge checked that no other component uses this
+        // peripheral or GPIO6/GPIO7.
+        let i2c0_bus = espforge_runtime::I2cBus::build(
+                unsafe { registry.peripherals.I2C0.clone_unchecked() },
+                unsafe { registry.peripherals.GPIO6.clone_unchecked() },
+                unsafe { registry.peripherals.GPIO7.clone_unchecked() },
+                espforge_runtime::I2cConfig {
+                    frequency: esp_hal::time::Rate::from_khz(100),
+                },
+            )
+            .expect("I2C bus configuration failed");
         Self {
-            // SAFETY: espforge checked that no other component uses this
-            // peripheral or GPIO6/GPIO7.
-            i2c_tester: espforge_runtime::I2cBus::build(
-                    unsafe { registry.peripherals.I2C0.clone_unchecked() },
-                    unsafe { registry.peripherals.GPIO6.clone_unchecked() },
-                    unsafe { registry.peripherals.GPIO7.clone_unchecked() },
-                    espforge_runtime::I2cConfig {
-                        frequency: esp_hal::time::Rate::from_khz(100),
-                    },
-                )
-                .expect("I2C bus configuration failed"),
+            i2c_tester: espforge_runtime::I2cDevice::new(i2c0_bus, 66),
         }
     }
 }

@@ -10,7 +10,7 @@
 //! `chip`, which is the fallback).
 
 use anyhow::Result;
-use espforge_model::Meta;
+use espforge_elements::Meta;
 use toml_edit::{DocumentMut, Item, Table, value};
 
 use super::chip::Chip;
@@ -64,7 +64,7 @@ pub fn chip_section(chip_json: Option<&str>) -> String {
 mod tests {
     use super::*;
     use crate::codegen::test_support::{case, chip};
-    use espforge_model::Runtime;
+    use espforge_elements::Runtime;
 
     fn build_wokwi(meta: &Meta, chip_name: &str) -> String {
         build(meta, &chip(chip_name)).unwrap()
@@ -104,13 +104,12 @@ mod tests {
     }
 
     #[test]
-    fn the_section_takes_its_name_from_chip_json() {
+    fn the_chip_section_takes_its_name_from_chip_json() {
         let json = r#"{"name": "chip", "pins": ["SDA", "SCL"]}"#;
         assert_eq!(
             chip_section(Some(json)),
             "\n[[chip]]\nname = 'chip'\nbinary = 'chip.wasm'\n"
         );
-        // and a non-default name flows through
         assert!(chip_section(Some(r#"{"name": "mcp23017"}"#)).contains("name = 'mcp23017'"));
     }
 

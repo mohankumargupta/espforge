@@ -11,8 +11,8 @@
 //! were never emitted. They are not here either; inventing them would change
 //! the output.
 
-use espforge_model::Ownership;
-use espforge_options::ResolvedOptions;
+use crate::artifact::Ownership;
+use espforge_elements::ResolvedOptions;
 
 /// The backend that produces a planned file's content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,7 +122,7 @@ impl FilePlan {
 mod tests {
     use super::*;
     use crate::codegen::test_support::case;
-    use espforge_model::Runtime;
+    use espforge_elements::Runtime;
 
     fn options(defaults: bool, flags: &[(&str, &str)]) -> ResolvedOptions {
         case("esp32c3", Runtime::Blocking, defaults, flags, &[]).opts

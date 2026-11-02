@@ -10,33 +10,20 @@ impl PeripheralRegistry {
     }
 }
 /// Constructed components.
-pub struct Components {}
+pub struct Components {
+    pub home: espforge_runtime::WifiStation,
+}
 impl Components {
     pub fn new(registry: &mut PeripheralRegistry) -> Self {
-        Self {}
+        Self {
+            home: espforge_runtime::WifiStation::new(espforge_runtime::WifiConfig {
+                ssid: "Wokwi-GUEST",
+                password: "",
+            }),
+        }
     }
 }
 /// Constructed devices (none yet).
 pub struct Devices {}
 /// Constructed services.
-pub struct Services {
-    pub wifi: espforge_runtime::Wifi,
-}
-impl Services {
-    /// Starts the Wi-Fi station: it returns right away and connects in the
-    /// background. Call `wifi.wait_connected().await` to wait for an address.
-    pub fn new(
-        wifi: esp_hal::peripherals::WIFI<'static>,
-        spawner: &embassy_executor::Spawner,
-    ) -> Result<Self, espforge_runtime::WifiError> {
-        let wifi = espforge_runtime::Wifi::start(
-            spawner,
-            wifi,
-            espforge_runtime::WifiConfig {
-                ssid: "Wokwi-GUEST",
-                password: "",
-            },
-        )?;
-        Ok(Self { wifi })
-    }
-}
+pub struct Services {}

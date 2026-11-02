@@ -9,6 +9,8 @@ MACHINE-OWNED (do not edit; regenerated every build):
   - Cargo.toml
   - README.txt
   - build.rs
+  - chip.json
+  - chip.wasm
   - diagram.json
   - src/bin/main.rs
   - src/generated.rs
@@ -18,8 +20,6 @@ MACHINE-OWNED (do not edit; regenerated every build):
 SEEDED ONCE (written the first time, then yours; never overwritten):
   - .cargo/config.toml
   - .cargo/esp-config.toml
-  - chip.json
-  - chip.wasm
   - rust-toolchain.toml
 
 REGENERATE:

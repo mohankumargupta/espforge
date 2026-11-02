@@ -9,7 +9,8 @@ async fn transfer_task(ctx: &'static Context) {
     let logger = ctx.logger;
     let mut buffer = [0x00u8];
     let sent_byte = 0x03u8;
-    match i2c.write_read(0x42, &[sent_byte], &mut buffer).await {
+    // The address lives in `example.espf.txt`: this handle already knows it.
+    match i2c.write_read(&[sent_byte], &mut buffer).await {
         Ok(_) => {
             logger.info(format_args!("Sent {}", sent_byte));
             logger.info(format_args!("Received: {}", buffer[0]));

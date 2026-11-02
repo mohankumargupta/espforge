@@ -1,5 +1,0 @@
-$ espforge examples get 01.Basics/helloworld --out hw
-exit: 1
---- stdout ---
---- stderr ---
-❌ failed to copy '01.Basics/helloworld' into hw: refusing to overwrite 'hw/example.espf.txt' (already exists)

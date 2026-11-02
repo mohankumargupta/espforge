@@ -6,7 +6,7 @@
 //! built against.
 
 /// Version of `espforge-runtime` written into generated manifests.
-pub const RUNTIME_VERSION: &str = "0.6.0";
+pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone)]
 pub enum RuntimeSource {
@@ -23,6 +23,6 @@ mod tests {
 
     #[test]
     fn the_recorded_version_is_the_runtime_crate_version() {
-        assert_eq!(RUNTIME_VERSION, "0.6.0");
+        assert_eq!(RUNTIME_VERSION, env!("CARGO_PKG_VERSION"));
     }
 }

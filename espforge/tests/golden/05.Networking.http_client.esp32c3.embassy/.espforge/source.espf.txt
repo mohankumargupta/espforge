@@ -1,0 +1,23 @@
+====================
+HTTP CLIENT EXAMPLE
+
+Connects to Wi-Fi, then GETs http://httpbin.org/robots.txt every few seconds
+with the `<http_client>` service and logs the response body. The client is
+unencrypted HTTP/1.1 over the station's network stack.
+====================
+
+# espforge
+  <project name="http_client" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <wifi id="radio" />
+
+# components
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
+
+# devices
+
+# services
+  <http_client id="client" network="$home" />

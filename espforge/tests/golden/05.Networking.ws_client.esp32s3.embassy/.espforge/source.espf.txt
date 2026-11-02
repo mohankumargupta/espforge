@@ -1,0 +1,23 @@
+====================
+WEBSOCKET CLIENT EXAMPLE
+
+Connects to Wi-Fi, then opens a WebSocket session with the `<ws_client>`
+service and exchanges a text message. The client is unencrypted `ws://` over
+the station's network stack, framed per RFC 6455 by edge-ws.
+====================
+
+# espforge
+  <project name="ws_client" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <wifi id="radio" />
+
+# components
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
+
+# devices
+
+# services
+  <ws_client id="ws" network="$home" />

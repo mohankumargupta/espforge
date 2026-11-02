@@ -7,12 +7,12 @@
 //! * `a.b="x"`          -> `a: Object { b: Str("x") }`
 //! * `a+="x" a+="y"`    -> `a: Array(["x", "y"])`  (`+=` on *every* entry)
 //!
-//! Every error carries the byte span of the offending attribute key, so
-//! `diag::render_errors` can underline it. The raw `ParsedNode::attributes`
-//! list stays untouched for callers that scan it.
+//! Every error carries the byte span of the offending attribute key, and a
+//! typed code, so the renderer can underline it. The raw
+//! `ParsedNode::attributes` list stays untouched for callers that scan it.
 
 use crate::context::{AttrOp, ParsedNode, TagAttribute};
-use crate::diag::EspfError;
+use espforge_diagnostics::{Diagnostic, codes};
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::ops::Range;
@@ -20,7 +20,7 @@ use std::ops::Range;
 /// A value plus the byte span it came from in the source.
 ///
 /// Equality compares the value only, so two trees parsed from differently
-/// formatted text (e.g. before and after `writer`) compare equal.
+/// formatted text compare equal.
 #[derive(Debug, Clone)]
 pub struct Spanned<T> {
     pub value: T,
@@ -91,8 +91,9 @@ impl PartialEq for Object {
 }
 impl Eq for Object {}
 
-fn mismatch(key: &str, expected: &str, found: &Value) -> EspfError {
-    EspfError::at_span(
+fn mismatch(key: &str, expected: &str, found: &Value) -> Diagnostic {
+    Diagnostic::error(
+        codes::VALUE_WRONG_TYPE,
         found.span(),
         format!("`{key}` has the wrong type"),
         format!("expected {expected}, found {}", found.describe()),
@@ -112,7 +113,7 @@ impl Object {
     }
 
     /// `Ok(None)` when absent, `Err` (spanned) when present but not a string.
-    pub fn get_str(&self, key: &str) -> Result<Option<&Spanned<String>>, EspfError> {
+    pub fn get_str(&self, key: &str) -> Result<Option<&Spanned<String>>, Diagnostic> {
         match self.fields.get(key) {
             None => Ok(None),
             Some(Value::Str(s)) => Ok(Some(s)),
@@ -120,7 +121,7 @@ impl Object {
         }
     }
 
-    pub fn get_array(&self, key: &str) -> Result<Option<&[Spanned<String>]>, EspfError> {
+    pub fn get_array(&self, key: &str) -> Result<Option<&[Spanned<String>]>, Diagnostic> {
         match self.fields.get(key) {
             None => Ok(None),
             Some(Value::Array(items)) => Ok(Some(items.as_slice())),
@@ -128,7 +129,7 @@ impl Object {
         }
     }
 
-    pub fn get_object(&self, key: &str) -> Result<Option<&Object>, EspfError> {
+    pub fn get_object(&self, key: &str) -> Result<Option<&Object>, Diagnostic> {
         match self.fields.get(key) {
             None => Ok(None),
             Some(Value::Object(o)) => Ok(Some(o)),
@@ -137,7 +138,7 @@ impl Object {
     }
 
     /// `"true"` / `"false"` only.
-    pub fn get_bool(&self, key: &str) -> Result<Option<Spanned<bool>>, EspfError> {
+    pub fn get_bool(&self, key: &str) -> Result<Option<Spanned<bool>>, Diagnostic> {
         let Some(s) = self.get_str(key)? else {
             return Ok(None);
         };
@@ -150,7 +151,8 @@ impl Object {
                 value: false,
                 span: s.span.clone(),
             })),
-            other => Err(EspfError::at_span(
+            other => Err(Diagnostic::error(
+                codes::VALUE_NOT_BOOLEAN,
                 s.span.clone(),
                 format!("`{key}` is not a boolean"),
                 format!("\"{other}\" must be \"true\" or \"false\""),
@@ -158,7 +160,7 @@ impl Object {
         }
     }
 
-    pub fn get_u32(&self, key: &str) -> Result<Option<Spanned<u32>>, EspfError> {
+    pub fn get_u32(&self, key: &str) -> Result<Option<Spanned<u32>>, Diagnostic> {
         let Some(s) = self.get_str(key)? else {
             return Ok(None);
         };
@@ -167,7 +169,8 @@ impl Object {
                 value: v,
                 span: s.span.clone(),
             })),
-            Err(_) => Err(EspfError::at_span(
+            Err(_) => Err(Diagnostic::error(
+                codes::VALUE_NOT_NUMBER,
                 s.span.clone(),
                 format!("`{key}` is not a number"),
                 format!(
@@ -184,9 +187,10 @@ impl Object {
         &self,
         key: &str,
         anchor: &Range<usize>,
-    ) -> Result<&Spanned<String>, EspfError> {
+    ) -> Result<&Spanned<String>, Diagnostic> {
         self.get_str(key)?.ok_or_else(|| {
-            EspfError::at_span(
+            Diagnostic::error(
+                codes::VALUE_MISSING_ATTRIBUTE,
                 anchor.clone(),
                 format!("missing required attribute `{key}`"),
                 format!("add {key}=\"...\" to this element"),
@@ -197,7 +201,7 @@ impl Object {
 
 impl ParsedNode<'_> {
     /// Assemble this element's attributes into an [`Object`].
-    pub fn to_object(&self) -> Result<Object, Vec<EspfError>> {
+    pub fn to_object(&self) -> Result<Object, Vec<Diagnostic>> {
         assemble(self)
     }
 }
@@ -210,7 +214,7 @@ impl ParsedNode<'_> {
 ///   offending attribute.
 /// * A scalar and an object at the same path conflict (`a="1"` with `a.b="2"`).
 /// * Duplicate scalar keys are errors; duplicate array entries are legal.
-pub fn assemble(node: &ParsedNode) -> Result<Object, Vec<EspfError>> {
+pub fn assemble(node: &ParsedNode) -> Result<Object, Vec<Diagnostic>> {
     let mut errors = Vec::new();
     let mut root = Object::new(node.offset..node.offset + 1 + node.tag_name.len());
     for attr in &node.attributes {
@@ -225,14 +229,14 @@ pub fn assemble(node: &ParsedNode) -> Result<Object, Vec<EspfError>> {
     }
 }
 
-fn insert(root: &mut Object, attr: &TagAttribute) -> Result<(), EspfError> {
-    let key_span = attr.key_offset..attr.key_offset + attr.key.len();
+fn insert(root: &mut Object, attr: &TagAttribute) -> Result<(), Diagnostic> {
+    let key = attr.key_offset..attr.key_offset + attr.key.len();
     let val = Spanned {
         value: attr.val.to_string(),
         span: attr.val_offset..attr.val_offset + attr.val.len(),
     };
     let segs: Vec<&str> = attr.key.split('.').collect();
-    insert_at(root, &segs, attr, &key_span, val)
+    insert_at(root, &segs, attr, &key, val)
 }
 
 fn insert_at(
@@ -241,7 +245,7 @@ fn insert_at(
     attr: &TagAttribute,
     key_span: &Range<usize>,
     val: Spanned<String>,
-) -> Result<(), EspfError> {
+) -> Result<(), Diagnostic> {
     let (head, rest) = segs.split_first().expect("a key has at least one segment");
     if rest.is_empty() {
         return insert_leaf(obj, head, attr, key_span, val);
@@ -252,7 +256,8 @@ fn insert_at(
         .or_insert_with(|| Value::Object(Object::new(key_span.clone())));
     match entry {
         Value::Object(child) => insert_at(child, rest, attr, key_span, val),
-        other => Err(EspfError::at_span(
+        other => Err(Diagnostic::error(
+            codes::VALUE_KEY_KIND,
             key_span.clone(),
             format!("`{head}` is both a {} and an object", other.kind()),
             format!(
@@ -270,9 +275,15 @@ fn insert_leaf(
     attr: &TagAttribute,
     key_span: &Range<usize>,
     val: Spanned<String>,
-) -> Result<(), EspfError> {
-    let err =
-        |title: String, label: String| Err(EspfError::at_span(key_span.clone(), title, label));
+) -> Result<(), Diagnostic> {
+    let err = |message: String, label: String| {
+        Err(Diagnostic::error(
+            codes::VALUE_KEY_KIND,
+            key_span.clone(),
+            message,
+            label,
+        ))
+    };
     match obj.fields.entry(leaf.to_string()) {
         Entry::Vacant(v) => {
             v.insert(match attr.op {
@@ -323,7 +334,7 @@ mod tests {
     use super::*;
     use crate::parser::parse_espf_runtime;
 
-    fn assemble_first(src: &str) -> Result<Object, Vec<EspfError>> {
+    fn assemble_first(src: &str) -> Result<Object, Vec<Diagnostic>> {
         let sections = parse_espf_runtime(src);
         assemble(&sections["services"][0])
     }
@@ -397,9 +408,10 @@ mod tests {
         let src = "# services\n  <t a=\"1\" a=\"2\" />\n";
         let errs = assemble_first(src).unwrap_err();
         assert_eq!(errs.len(), 1, "{errs:?}");
-        assert!(errs[0].title.contains("duplicate key"));
-        assert_eq!(&src[errs[0].span.clone()], "a");
-        assert_eq!(errs[0].span.start, src.rfind("a=").unwrap());
+        assert_eq!(errs[0].code, codes::VALUE_KEY_KIND);
+        assert!(errs[0].message.contains("duplicate key"));
+        assert_eq!(&src[errs[0].primary.clone()], "a");
+        assert_eq!(errs[0].primary.start, src.rfind("a=").unwrap());
     }
 
     #[test]
@@ -407,9 +419,9 @@ mod tests {
         let src = "# services\n  <t a=\"1\" a+=\"2\" />\n";
         let errs = assemble_first(src).unwrap_err();
         assert_eq!(errs.len(), 1, "{errs:?}");
-        assert!(errs[0].title.contains("mixes"));
-        assert_eq!(errs[0].span.start, src.find("a+=").unwrap());
-        assert_eq!(&src[errs[0].span.clone()], "a");
+        assert!(errs[0].message.contains("mixes"));
+        assert_eq!(errs[0].primary.start, src.find("a+=").unwrap());
+        assert_eq!(&src[errs[0].primary.clone()], "a");
     }
 
     #[test]
@@ -417,8 +429,8 @@ mod tests {
         let src = "# services\n  <t a+=\"1\" a=\"2\" />\n";
         let errs = assemble_first(src).unwrap_err();
         assert_eq!(errs.len(), 1, "{errs:?}");
-        assert!(errs[0].title.contains("mixes"));
-        assert_eq!(errs[0].span.start, src.rfind("a=").unwrap());
+        assert!(errs[0].message.contains("mixes"));
+        assert_eq!(errs[0].primary.start, src.rfind("a=").unwrap());
     }
 
     #[test]
@@ -426,7 +438,7 @@ mod tests {
         let src = "# services\n  <t a=\"1\" a.b=\"2\" />\n";
         let errs = assemble_first(src).unwrap_err();
         assert_eq!(errs.len(), 1, "{errs:?}");
-        assert_eq!(&src[errs[0].span.clone()], "a.b");
+        assert_eq!(&src[errs[0].primary.clone()], "a.b");
     }
 
     #[test]
@@ -434,8 +446,8 @@ mod tests {
         let src = "# services\n  <t a.b=\"2\" a=\"1\" />\n";
         let errs = assemble_first(src).unwrap_err();
         assert_eq!(errs.len(), 1, "{errs:?}");
-        assert_eq!(errs[0].span.start, src.rfind("a=").unwrap());
-        assert_eq!(&src[errs[0].span.clone()], "a");
+        assert_eq!(errs[0].primary.start, src.rfind("a=").unwrap());
+        assert_eq!(&src[errs[0].primary.clone()], "a");
     }
 
     #[test]
@@ -443,7 +455,7 @@ mod tests {
         let src = "# services\n  <t a+=\"1\" a.b=\"2\" />\n";
         let errs = assemble_first(src).unwrap_err();
         assert_eq!(errs.len(), 1, "{errs:?}");
-        assert_eq!(&src[errs[0].span.clone()], "a.b");
+        assert_eq!(&src[errs[0].primary.clone()], "a.b");
     }
 
     #[test]
@@ -459,7 +471,8 @@ mod tests {
         let o = assemble_first(src).unwrap();
         // object / array used as a string
         let e = o.get_str("a").unwrap_err();
-        assert!(e.title.contains("wrong type"));
+        assert_eq!(e.code, codes::VALUE_WRONG_TYPE);
+        assert!(e.message.contains("wrong type"));
         assert!(o.get_str("l").is_err());
         // string used as object / array
         assert!(o.get_object("n").is_err());
@@ -468,9 +481,11 @@ mod tests {
         assert_eq!(o.get_u32("n").unwrap().unwrap().value, 12);
         assert!(o.get_bool("t").unwrap().unwrap().value);
         let e = o.get_bool("bad").unwrap_err();
-        assert_eq!(&src[e.span.clone()], "maybe");
+        assert_eq!(e.code, codes::VALUE_NOT_BOOLEAN);
+        assert_eq!(&src[e.primary.clone()], "maybe");
         let e = o.get_u32("big").unwrap_err();
-        assert_eq!(&src[e.span.clone()], "-1");
+        assert_eq!(e.code, codes::VALUE_NOT_NUMBER);
+        assert_eq!(&src[e.primary.clone()], "-1");
         // absent keys are Ok(None)
         assert!(o.get_str("nope").unwrap().is_none());
     }
@@ -480,8 +495,9 @@ mod tests {
         let src = "# services\n  <t a=\"1\" />\n";
         let o = assemble_first(src).unwrap();
         let e = o.require_str("name", &o.span).unwrap_err();
-        assert_eq!(&src[e.span.clone()], "<t");
-        assert!(e.title.contains("name"));
+        assert_eq!(e.code, codes::VALUE_MISSING_ATTRIBUTE);
+        assert_eq!(&src[e.primary.clone()], "<t");
+        assert!(e.message.contains("name"));
     }
 
     #[test]

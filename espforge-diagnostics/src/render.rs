@@ -151,7 +151,7 @@ mod tests {
     fn one_label_renders_one_snippet_group() {
         let start = SRC.find("<led id=\"other\"").unwrap();
         let d = Diagnostic::error(
-            codes::CONFLICT_PIN,
+            codes::CORE_UNKNOWN_ELEMENT,
             start..start + 4,
             "pin conflict",
             "GPIO18 is already claimed",
@@ -168,7 +168,7 @@ mod tests {
         let first = SRC.find("<gpio id=\"gpio18\"").unwrap();
         let second = SRC.find("<led id=\"other\"").unwrap();
         let d = Diagnostic::error(
-            codes::CONFLICT_PIN,
+            codes::CORE_UNKNOWN_ELEMENT,
             first..first + 5,
             "pin conflict",
             "<gpio id=\"gpio18\"> declares GPIO18 here",
@@ -187,8 +187,13 @@ mod tests {
     #[test]
     fn several_labels_on_one_line_share_a_snippet() {
         let src = "a <led> and <button> collide\n";
-        let d = Diagnostic::error(codes::CONFLICT_PIN, 2..7, "pin clash", "led uses GPIO9")
-            .with_label(12..20, "button also uses GPIO9");
+        let d = Diagnostic::error(
+            codes::CORE_UNKNOWN_ELEMENT,
+            2..7,
+            "pin clash",
+            "led uses GPIO9",
+        )
+        .with_label(12..20, "button also uses GPIO9");
         let out = to_human("x.espf", src, &[d]);
 
         assert_eq!(out.matches("error:").count(), 1, "{out}");
@@ -198,7 +203,7 @@ mod tests {
 
     #[test]
     fn help_renders_after_the_snippet() {
-        let d = Diagnostic::error(codes::UNCLASSIFIED, 0..1, "bad", "here")
+        let d = Diagnostic::error(codes::CORE_UNKNOWN_ELEMENT, 0..1, "bad", "here")
             .with_help("use another pin");
         let out = to_human("x.espf", "abc\n", &[d]);
         assert!(out.contains("help: use another pin"), "{out}");
@@ -222,7 +227,7 @@ mod tests {
 
     #[test]
     fn fixes_do_not_change_human_output() {
-        let d = Diagnostic::error(codes::UNCLASSIFIED, 0..3, "bad", "here").with_fix(Fix {
+        let d = Diagnostic::error(codes::CORE_UNKNOWN_ELEMENT, 0..3, "bad", "here").with_fix(Fix {
             title: "rename it".into(),
             edits: vec![Edit {
                 span: 0..3,

@@ -7,28 +7,87 @@ license.workspace = true
 keywords.workspace = true
 categories.workspace = true
 repository.workspace = true
-readme.workspace = true
 
 [dependencies]
 log = "0.4"
-# Blocking + async embedded-hal traits (the `i2c` component bridges esp-hal's
-# bus to them, so drivers and app code stay trait-generic).
+# Blocking + async embedded-hal traits (the bus components bridge esp-hal's
+# buses to them, so drivers and app code stay trait-generic).
 embedded-hal = "1.0"
 static_cell = "2.1"
 embassy-time = { version = "0.5", features = ["generic-queue-64"], optional = true }
 embassy-sync = { version = "0.7", optional = true }
 embedded-hal-async = { version = "1.0", optional = true }
 # Wi-Fi support (feature `wifi`). The generated project supplies the chip
-# features through feature unification, same as for esp-hal.
+# features through feature unification, the same way it does for esp-hal.
 embassy-executor = { version = "0.10", optional = true }
-embassy-net = { version = "0.9", features = ["tcp", "udp", "dhcpv4", "medium-ethernet"], optional = true }
+embassy-net = { version = "0.9", features = ["tcp", "udp", "dhcpv4", "dns", "medium-ethernet"], optional = true }
+# HTTP/1.1 client (`http-client`). `edge-http`'s `io` feature brings `edge-nal`
+# and the embassy bridge with it; both are named here so the versions are
+# pinned where the code that uses them lives.
+edge-http = { version = "0.8", default-features = false, features = ["io"], optional = true }
+# RFC 6455 WebSocket framing for the WebSocket clients (`ws-client`). Its
+# `io` feature is what adds the async frame read/write methods over
+# `embedded-io-async`.
+edge-ws = { version = "0.8", default-features = false, features = ["io"], optional = true }
+# The `Read`/`Write` traits edge-http and embedded-tls are generic over.
+embedded-io-async = { version = "0.7", optional = true }
+edge-nal = { version = "0.7", default-features = false, optional = true }
+edge-nal-embassy = { version = "0.9", default-features = false, features = ["tcp", "dns", "proto-ipv4", "medium-ethernet"], optional = true }
+# TLS 1.3 for the HTTPS client (`https-client`).
+embedded-tls = { version = "0.19", default-features = false, optional = true }
+# `embedded-tls` draws its RNG from `rand_core` 0.6; the wrapper in
+# `services/https_client.rs` implements it over `esp-hal`'s RNG.
+rand_core = { version = "0.6", default-features = false, optional = true }
+# SNTP client (`ntp`). Async-first and `no_std` by default: the socket and the
+# timestamp source are traits, which `services/ntp.rs` implements over
+# `embassy-net` and `embassy-time`.
+sntpc = { version = "0.11", default-features = false, optional = true }
 
 [features]
 # Selects the async `Delay` (yields via embassy_time) so the same
 # `ctx.delay.delay_ms(..)` call works in both runtimes.
 embassy = ["dep:embassy-time", "dep:embassy-sync", "dep:embedded-hal-async"]
-# Wi-Fi station driver (esp-radio + embassy-net). Needs the embassy runtime.
+
+# The Wi-Fi station driver (esp-radio + embassy-net). It implies `embassy`: the
+# generated main is async and the station spawns tasks onto the executor.
+#
+# Deliberately not implied by `embassy`, or every embassy project would pull in
+# the radio stack. The generated project asks for it with
+# `espforge-runtime = { features = ["embassy", "wifi"] }`.
 wifi = ["embassy", "dep:esp-radio", "dep:embassy-executor", "dep:embassy-net"]
+
+# The outgoing HTTP/1.1 client (`HttpClient`). It implies `wifi`: the only
+# network provider today is a Wi-Fi station's embassy-net stack.
+http-client = [
+    "wifi",
+    "dep:edge-http",
+    "dep:edge-nal",
+    "dep:edge-nal-embassy",
+    "dep:embedded-io-async",
+]
+
+# The TLS 1.3 HTTPS client (`HttpsClient`), which implies the plain one.
+https-client = ["http-client", "dep:embedded-tls", "dep:rand_core"]
+
+# The outgoing WebSocket client (`WsClient`), plain `ws://`. Like the HTTP
+# client it implies `wifi` (the only network provider today); `rand_core` is
+# for the handshake nonce and the per-frame client mask.
+ws-client = [
+    "wifi",
+    "dep:edge-ws",
+    "dep:edge-http",
+    "dep:edge-nal",
+    "dep:edge-nal-embassy",
+    "dep:embedded-io-async",
+    "dep:rand_core",
+]
+
+# The TLS 1.3 WebSocket client (`WssClient`), which implies the plain one.
+wss-client = ["ws-client", "dep:embedded-tls"]
+
+# The outgoing SNTP client (`NtpClient`). Like the other network services it
+# implies `wifi`: the only network provider today is a station's stack.
+ntp = ["wifi", "dep:sntpc"]
 
 # esp-hal only builds for esp targets, so keep it invisible to host builds.
 # The generated project supplies the chip feature.
@@ -37,3 +96,4 @@ esp-hal = { version = "1", features = ["unstable"] }
 # `requires-unstable` is how a library says it uses unstable esp-radio APIs;
 # the final binary enables `unstable` itself.
 esp-radio = { version = "1.0.0-beta.1", features = ["wifi", "requires-unstable"], optional = true }
+

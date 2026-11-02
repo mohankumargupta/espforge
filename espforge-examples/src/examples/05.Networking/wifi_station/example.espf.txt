@@ -1,5 +1,9 @@
 ====================
 WIFI STATION EXAMPLE
+
+Connects to an existing Wi-Fi network (an open one here, so it works in
+Wokwi), then prints the DHCP address the network handed out. The network stack
+this brings up is what the HTTP and HTTPS client services connect through.
 ====================
 
 # espforge
@@ -8,10 +12,11 @@ WIFI STATION EXAMPLE
   <runtime type="embassy" />
 
 # peripherals
+  <wifi id="radio" />
 
 # components
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
 
 # devices
 
 # services
-  <wifi id="wifi0" network1.ssid="Wokwi-GUEST" />

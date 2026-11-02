@@ -1,14 +1,10 @@
 //! Command-line overrides, as values rather than as clap arguments.
 //!
-//! The binary owns the flags (`AnswerArgs`, with its `--option NAME=VALUE`
-//! syntax and value-enum spellings); this crate owns what an override *means*:
-//! which values win, when a `note:` is owed, and what counts as an unknown
-//! chip or a malformed option. That split is why the library has no `clap`
-//! dependency — a second front-end (an LSP, a test) can fill [`Overrides`] in
-//! directly.
+//! The binary owns the flags; this crate owns what an override *means*: which
+//! values win, when a `note:` is owed, and what counts as an unknown chip or a
+//! malformed option. That split is why the library has no `clap` dependency.
 
-use espforge_model::{Console, Meta, Runtime};
-use espforge_options::{Answers, OptValue, Origin, Schema, chips};
+use espforge_elements::{Answers, Console, Meta, OptValue, Origin, Runtime, Schema, chips};
 
 /// What a user asked for on the command line. `None` means "whatever the file
 /// says"; an empty `options` list means no `--option` was given.
@@ -132,7 +128,7 @@ impl Overrides {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use espforge_options::embedded_schema;
+    use espforge_schema::schema;
 
     fn meta() -> Meta {
         Meta {
@@ -209,7 +205,7 @@ mod tests {
 
     #[test]
     fn option_flag_overrides_the_espf_with_a_note() {
-        let schema = embedded_schema();
+        let schema = schema();
         let mut answers = Answers::empty(0..0);
         answers.apply_flag(schema, "alloc", "true").unwrap();
         // pretend that came from the file
@@ -231,7 +227,7 @@ mod tests {
 
     #[test]
     fn bad_option_flags_are_errors() {
-        let schema = embedded_schema();
+        let schema = schema();
         let mut a = Answers::empty(0..0);
         let bad = |s: &str| Overrides {
             options: vec![s.into()],
@@ -262,7 +258,7 @@ mod tests {
             ..Default::default()
         };
         overrides
-            .apply_options(embedded_schema(), &mut a, &mut vec![])
+            .apply_options(schema(), &mut a, &mut vec![])
             .unwrap();
         assert!(!a.defaults);
     }

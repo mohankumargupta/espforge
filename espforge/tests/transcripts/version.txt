@@ -1,5 +1,0 @@
-$ espforge version
-exit: 0
---- stdout ---
-espforge   0.6.0
---- stderr ---

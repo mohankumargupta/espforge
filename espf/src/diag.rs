@@ -1,25 +1,10 @@
-//! Span-aware ESPF errors, and the migration adapter for rendering them.
+//! Span-aware ESPF diagnostics and the line helpers behind them.
 //!
-//! Every checkable stage of the pipeline (parser, meta validation, `$`
-//! dependency resolution) reports problems as one [`EspfError`] carrying a
-//! byte-offset span into the original source plus a title and label. Rendering
-//! moved to `espforge_diagnostics::to_human` in Phase 2 increment 1; this
-//! module keeps the constructors, the line helpers and [`render_errors`] as a
-//! thin adapter, so existing call sites migrate in increment 5:
-//!
-//! ```text
-//! error: unknown runtime "fome"
-//!   --> hello.espf:3:40
-//!    |
-//!  3 |   <runtime type="fome" />
-//!    |                          ^^ unknown runtime "fome" (expected "blocking" or "embassy")
-//! ```
-//!
-//! Colors are only emitted when stderr is a terminal; piped or captured
-//! output stays plain so it can be grepped or redirected safely. That decision
-//! now lives in the renderer.
+//! Every problem the parser and the value assembler can report is a
+//! [`Diagnostic`] built here with a code from `espforge_diagnostics::codes`.
+//! Rendering lives in `espforge_diagnostics::to_human`.
 
-use espforge_diagnostics::Diagnostic;
+use espforge_diagnostics::{Diagnostic, codes};
 use std::ops::Range;
 
 /// The underlying cause of a parser-junk line.
@@ -41,89 +26,22 @@ pub struct JunkSpan {
     pub kind: JunkKind,
 }
 
-/// A single located diagnostic: where it points, why, and a summary title.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EspfError {
-    /// Short summary shown on the `error:` line.
-    pub title: String,
-    /// Explanation rendered at the underline.
-    pub label: String,
-    /// Byte span into the original source the label points at. A zero-length
-    /// span underlines one character.
-    pub span: Range<usize>,
-}
-
-impl EspfError {
-    /// An error with an explicit byte span.
-    pub fn at_span(span: Range<usize>, title: impl Into<String>, label: impl Into<String>) -> Self {
-        Self {
-            title: title.into(),
-            label: label.into(),
-            span,
-        }
-    }
-
-    /// An error pointing at a parsed node's tag (`<tagname`).
-    pub fn at_node(
-        node: &crate::context::ParsedNode,
-        title: impl Into<String>,
-        label: impl Into<String>,
-    ) -> Self {
-        let start = node.offset;
-        Self {
-            title: title.into(),
-            label: label.into(),
-            span: start..start + 1 + node.tag_name.len(),
-        }
-    }
-
-    /// An error pointing at an attribute's value (`key="<value>"`).
-    pub fn at_attr(
-        attr: &crate::context::TagAttribute,
-        title: impl Into<String>,
-        label: impl Into<String>,
-    ) -> Self {
-        let start = attr.val_offset;
-        Self {
-            title: title.into(),
-            label: label.into(),
-            span: start..start + attr.val.len(),
-        }
-    }
-
-    /// An error pointing at an attribute's key (`<key>="value"`).
-    pub fn at_key(
-        attr: &crate::context::TagAttribute,
-        title: impl Into<String>,
-        label: impl Into<String>,
-    ) -> Self {
-        let start = attr.key_offset;
-        Self {
-            title: title.into(),
-            label: label.into(),
-            span: start..start + attr.key.len(),
-        }
-    }
-
-    /// This error in the one diagnostic model, for rendering and JSON.
-    ///
-    /// The stable code comes from the message table in
-    /// [`espforge_diagnostics::codes`]; the human renderer does not print it.
-    pub fn to_diagnostic(&self) -> Diagnostic {
-        Diagnostic::error(
-            espforge_diagnostics::for_message(&self.title),
-            self.span.clone(),
-            self.title.clone(),
-            self.label.clone(),
-        )
-    }
-}
-
-/// Byte span of the offending line's node, for errors that have no better
-/// anchor (e.g. a missing attribute on a node).
+/// A diagnostic pointing at a parsed node's tag (`<tagname`).
 pub fn node_span(node: &crate::context::ParsedNode) -> Range<usize> {
     let start = node.offset;
     start..start + 1 + node.tag_name.len()
+}
+
+/// A diagnostic pointing at an attribute's value (`key="<value>"`).
+pub fn attr_span(attr: &crate::context::TagAttribute) -> Range<usize> {
+    let start = attr.val_offset;
+    start..start + attr.val.len()
+}
+
+/// A diagnostic pointing at an attribute's key (`<key>="value"`).
+pub fn key_span(attr: &crate::context::TagAttribute) -> Range<usize> {
+    let start = attr.key_offset;
+    start..start + attr.key.len()
 }
 
 /// Line-start byte offsets of every line in `src` (0-indexed line numbers).
@@ -144,41 +62,32 @@ pub fn line_number_for_offset(src: &str, offset: usize) -> usize {
     line_start_offsets(src).partition_point(|&start| start <= offset)
 }
 
-/// Turn parser-junk spans into one [`EspfError`] per junk line, each with a
-/// cause-specific title and label.
-pub fn junk_errors(junk: &[JunkSpan]) -> Vec<EspfError> {
+/// Turn parser-junk spans into one [`Diagnostic`] per junk line, each with a
+/// cause-specific message and label.
+pub fn junk_diagnostics(junk: &[JunkSpan]) -> Vec<Diagnostic> {
     junk.iter()
         .map(|j| {
-            let (title, label) = match j.kind {
+            let (code, message, label) = match j.kind {
                 JunkKind::NodeLine => (
+                    codes::SYNTAX_NODE_LINE,
                     "malformed node line",
                     "expected a self-closing tag like <tag attr=\"v\" /> that fills a whole line (trailing `// comment` is allowed)",
                 ),
                 JunkKind::SectionHeader => (
+                    codes::SYNTAX_SECTION_HEADER,
                     "invalid section header",
                     "expected `# name` (one word after `#`)",
                 ),
             };
-            EspfError {
-                title: title.into(),
-                label: label.into(),
-                span: j.offset..j.offset,
-            }
+            Diagnostic::error(code, j.offset..j.offset, message, label)
         })
         .collect()
-}
-
-/// Render each error as its own snippet group through the one diagnostics
-/// renderer. `EspfError` is the migration shape: Phase 2 increment 5 replaces
-/// it with `Diagnostic` constructors at each call site.
-pub fn render_errors(file_path: &str, src: &str, errors: &[EspfError]) -> String {
-    let diagnostics: Vec<Diagnostic> = errors.iter().map(EspfError::to_diagnostic).collect();
-    espforge_diagnostics::to_human(file_path, src, &diagnostics)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use espforge_diagnostics::to_human;
 
     #[test]
     fn junk_line_renders_snippet() {
@@ -188,71 +97,27 @@ mod tests {
             line: 2,
             kind: JunkKind::NodeLine,
         }];
-        let errors = junk_errors(&junk);
-        let out = render_errors("bad.espf.txt", src, &errors);
+        let diagnostics = junk_diagnostics(&junk);
+        let out = to_human("bad.espf.txt", src, &diagnostics);
         eprintln!("{out}");
         assert!(out.contains("malformed node line"));
         assert!(out.contains("bad.espf.txt:2"));
+        assert_eq!(diagnostics[0].code, codes::SYNTAX_NODE_LINE);
     }
 
     #[test]
-    fn section_header_junk_gets_its_own_title() {
+    fn section_header_junk_gets_its_own_title_and_code() {
         let src = "hello world\n# peripherals\n";
         let junk = vec![JunkSpan {
             offset: 0,
             line: 1,
             kind: JunkKind::SectionHeader,
         }];
-        let errors = junk_errors(&junk);
-        let out = render_errors("bad.espf.txt", src, &errors);
+        let diagnostics = junk_diagnostics(&junk);
+        let out = to_human("bad.espf.txt", src, &diagnostics);
         assert!(out.contains("invalid section header"));
         assert!(out.contains("bad.espf.txt:1"));
-    }
-
-    #[test]
-    fn span_at_attr_points_at_the_value() {
-        let at = "# peripherals\n".len();
-        let attr = crate::context::TagAttribute {
-            key: "pin",
-            op: crate::context::AttrOp::Set,
-            key_offset: at + 19,
-            val: "notanumber",
-            val_offset: at + 22,
-        };
-        let e = EspfError::at_attr(
-            &attr,
-            "invalid pin number",
-            format!("`{}` is not a 0-255 number", attr.val),
-        );
-        let out = render_errors(
-            "x.espf",
-            "# peripherals\n  <gpio id=\"gpio4\" pin=\"notanumber\" />\n",
-            &[e],
-        );
-        eprintln!("{out}");
-        assert!(out.contains("invalid pin number"));
-        assert!(out.contains("notanumber"));
-    }
-
-    #[test]
-    fn each_error_is_its_own_group() {
-        let junk = vec![
-            JunkSpan {
-                offset: 0,
-                line: 1,
-                kind: JunkKind::SectionHeader,
-            },
-            JunkSpan {
-                offset: 5,
-                line: 1,
-                kind: JunkKind::NodeLine,
-            },
-        ];
-        let errors = junk_errors(&junk);
-        let src = "a b\n";
-        let out = render_errors("x", src, &errors);
-        // Two errors -> two `error:` titles.
-        assert_eq!(out.matches("error:").count(), 2);
+        assert_eq!(diagnostics[0].code, codes::SYNTAX_SECTION_HEADER);
     }
 
     #[test]

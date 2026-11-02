@@ -1,35 +1,39 @@
 //! `Cargo.toml`, built with `toml_edit`.
 //!
-//! This replaces `Cargo.toml.tmpl`. The conditional dependency blocks are
-//! ordinary Rust `if`s over [`ResolvedOptions`] instead of template guards, and
-//! the comments that carry information (why `profile.dev` is optimized, what
-//! `codegen-units = 1` buys, where to look for networking crates) are attached
-//! as `toml_edit` decor so they survive serialization.
+//! The conditional dependency blocks are ordinary Rust `if`s over
+//! [`ResolvedOptions`] instead of template guards, and the comments that carry
+//! information (why `profile.dev` is optimized, what `codegen-units = 1`
+//! buys) are attached as `toml_edit` decor so they survive serialization.
 //!
-//! Feature arrays keep the template's order. Cargo does not care, but the
-//! dual-run gate compares parsed values and `toml` compares arrays in order, so
-//! reproducing the order is what keeps that comparison meaningful.
+//! Feature arrays keep the template's order. Cargo does not care, but a golden
+//! diff does, so reproducing the order is what keeps byte identity meaningful.
 
 use anyhow::Result;
-use espforge_model::{Console, Meta, Runtime};
-use espforge_options::ResolvedOptions;
+use espforge_elements::{Board, Console, Meta, ResolvedOptions, Runtime};
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value, value};
 
 use super::chip::Chip;
 use crate::runtime_source::{RUNTIME_VERSION, RuntimeSource};
 
 /// The emitted `Cargo.toml`.
+///
+/// The board's `# services` name runtime features, not dependencies: a service
+/// recipe owns its feature, so a project only names the ones it declares. The
+/// dependency crates themselves (`edge-http`, `edge-ws`, `edge-nal-embassy`,
+/// `embedded-tls`, `sntpc`) stay in the runtime's own manifest, as the radio
+/// stack already does.
 pub fn manifest(
     meta: &Meta,
     opts: &ResolvedOptions,
     runtime: &RuntimeSource,
     chip: &Chip,
+    board: &Board,
 ) -> Result<String> {
     let name = meta.crate_name();
     let mut doc = DocumentMut::new();
     doc["package"] = package(meta, &name);
     doc["bin"] = Item::ArrayOfTables(bin(&name));
-    doc["dependencies"] = dependencies(meta, opts, runtime, chip);
+    doc["dependencies"] = dependencies(meta, opts, runtime, chip, board);
     doc["profile"] = profiles();
     Ok(doc.to_string())
 }
@@ -55,16 +59,26 @@ fn bin(name: &str) -> ArrayOfTables {
     bins
 }
 
-fn dependencies(meta: &Meta, opts: &ResolvedOptions, runtime: &RuntimeSource, chip: &Chip) -> Item {
+fn dependencies(
+    meta: &Meta,
+    opts: &ResolvedOptions,
+    runtime: &RuntimeSource,
+    chip: &Chip,
+    board: &Board,
+) -> Item {
     let embassy = meta.runtime == Runtime::Embassy;
-    let wifi = opts.is_on("wifi");
-    let ble = opts.is_on("ble-trouble");
     let alloc = opts.is_on("alloc");
-    let radio = wifi || ble;
+    // `<wifi>` in `# peripherals` turns the derived `wifi` option on; the radio
+    // stack is what that option means. BLE arrives with its own element.
+    let wifi = opts.is_on("wifi");
+    let radio = wifi;
     let chip_name = chip.name.as_str();
 
     let mut deps = Table::new();
-    deps["espforge-runtime"] = Item::Value(runtime_dependency(runtime, embassy, wifi));
+    deps["espforge-runtime"] = Item::Value(runtime_dependency(runtime, embassy, wifi, board));
+    if let Some(drivers) = drivers_dependency(runtime, board) {
+        deps["espforge-drivers"] = Item::Value(drivers);
+    }
     deps["static_cell"] = value("2.1.1");
     deps["critical-section"] = value("1.2.0");
     deps["log"] = value("0.4.27");
@@ -92,7 +106,7 @@ fn dependencies(meta: &Meta, opts: &ResolvedOptions, runtime: &RuntimeSource, ch
         deps["esp-rtos"] = Item::Value(dep("0.4.0", &features));
     }
 
-    deps["esp-bootloader-esp-idf"] = Item::Value(dep("0.6.0", &["log-04", chip_name]));
+    deps["esp-bootloader-esp-idf"] = Item::Value(dep("0.7.0", &["log-04", chip_name]));
     deps["esp-println"] = Item::Value(dep_without_defaults(
         "0.18.0",
         &[chip_name, console(meta), "log-04"],
@@ -140,28 +154,25 @@ fn dependencies(meta: &Meta, opts: &ResolvedOptions, runtime: &RuntimeSource, ch
         if wifi {
             features.push("wifi");
         }
-        if ble {
-            features.push("ble");
-        }
-        if wifi && ble {
-            features.push("coex");
-        }
         if alloc {
             features.push("esp-alloc");
         }
         features.push("unstable");
         features.push("log-04");
         deps["esp-radio"] = Item::Value(dep("1.0.0-beta.1", &features));
-        if ble {
-            deps["trouble-host"] = Item::Value(dep("0.7.0", &["gatt"]));
-            deps["bt-hci"] = value("0.9.0");
-        }
     }
 
     if embassy {
         deps["embassy-executor"] = Item::Value(dep("0.10.0", &["log"]));
         deps["embassy-time"] = Item::Value(dep("0.5.0", &["log"]));
         deps["embassy-sync"] = value("0.8.0");
+    }
+
+    // A display is drawn on with `embedded-graphics` from `app.rs`; the
+    // drivers themselves arrive through `espforge-drivers` above. The need is
+    // the driver's own, declared in its recipe, so a sensor adds nothing here.
+    if board.driver_deps().contains(&"embedded-graphics") {
+        deps["embedded-graphics"] = value("0.8.1");
     }
     Item::Table(deps)
 }
@@ -203,18 +214,67 @@ fn profiles() -> Item {
 }
 
 /// `espforge-runtime = { path?, version, features? }`.
-fn runtime_dependency(source: &RuntimeSource, embassy: bool, wifi: bool) -> Value {
+///
+/// `wifi` implies `embassy` (the schema's `requires`), so the Wi-Fi feature
+/// list carries both, in that order. Each service names its own feature, in
+/// declaration order: adding a service never edits this function.
+fn runtime_dependency(
+    source: &RuntimeSource,
+    embassy: bool,
+    wifi: bool,
+    board: &Board,
+) -> Value {
     let mut table = InlineTable::new();
     if let RuntimeSource::Path(path) = source {
         table.insert("path", Value::from(path.replace('\\', "/")));
     }
     table.insert("version", Value::from(RUNTIME_VERSION));
+
+    let service_features = board.service_features();
+    let mut features: Vec<&str> = Vec::new();
+    if embassy || wifi || !service_features.is_empty() {
+        features.push("embassy");
+    }
     if wifi {
-        table.insert("features", Value::Array(array(&["embassy", "wifi"])));
-    } else if embassy {
-        table.insert("features", Value::Array(array(&["embassy"])));
+        features.push("wifi");
+    }
+    for feature in service_features {
+        if !features.contains(&feature) {
+            features.push(feature);
+        }
+    }
+
+    if !features.is_empty() {
+        table.insert("features", Value::Array(array(&features)));
     }
     Value::InlineTable(table)
+}
+
+/// `espforge-drivers = { path?, version, features }`, or `None` when the board
+/// declares no device.
+///
+/// The features are the devices' own: adding a driver never edits this file.
+/// A local `espforge-runtime` path implies a local `espforge-drivers` beside
+/// it, which is the workspace layout and what `--runtime-path` builds expect.
+fn drivers_dependency(source: &RuntimeSource, board: &Board) -> Option<Value> {
+    let features = board.driver_features();
+    if features.is_empty() {
+        return None;
+    }
+    let mut table = InlineTable::new();
+    if let RuntimeSource::Path(path) = source {
+        let path = std::path::Path::new(path)
+            .parent()
+            .map(|parent| parent.join("espforge-drivers"))
+            .unwrap_or_else(|| std::path::PathBuf::from("espforge-drivers"));
+        table.insert(
+            "path",
+            Value::from(path.to_string_lossy().replace('\\', "/")),
+        );
+    }
+    table.insert("version", Value::from(RUNTIME_VERSION));
+    table.insert("features", Value::Array(array(&features)));
+    Some(Value::InlineTable(table))
 }
 
 /// `{ version = "...", features = [...] }`.
@@ -252,18 +312,35 @@ fn console(meta: &Meta) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codegen::test_support::{case, chip};
-    use espforge_model::Runtime;
+    use crate::codegen::test_support::{board, case, chip, device, service};
 
     fn cargo(defaults: bool, flags: &[(&str, &str)], runtime: Runtime) -> String {
+        cargo_with(defaults, flags, runtime, &board())
+    }
+
+    fn cargo_with(
+        defaults: bool,
+        flags: &[(&str, &str)],
+        runtime: Runtime,
+        board: &Board,
+    ) -> String {
         let case = case("esp32c3", runtime, defaults, flags, &[]);
         manifest(
             &case.meta,
             &case.opts,
             &RuntimeSource::Published,
             &chip("esp32c3"),
+            board,
         )
         .unwrap()
+    }
+
+    /// A board with one service, as its recipe would lower it: the manifest
+    /// only reads the runtime feature.
+    fn with_service(feature: &'static str) -> Board {
+        let mut board = board();
+        board.services = vec![service(feature, feature, None)];
+        board
     }
 
     fn parse(text: &str) -> toml_edit::DocumentMut {
@@ -281,12 +358,12 @@ mod tests {
     }
 
     #[test]
-    fn the_blocking_project_has_no_async_or_radio_dependencies() {
+    fn the_blocking_project_has_no_async_dependencies() {
         let doc = parse(&cargo(true, &[], Runtime::Blocking));
         let deps = doc["dependencies"].as_table().unwrap();
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ version = \"0.6.0\" }"
+            "{ version = \"0.7.0\" }"
         );
         assert!(deps.get("embassy-executor").is_none());
         assert!(deps.get("esp-rtos").is_none());
@@ -311,57 +388,50 @@ mod tests {
         assert!(doc["dependencies"].get("embassy-sync").is_some());
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ version = \"0.6.0\", features = [\"embassy\"] }"
+            "{ version = \"0.7.0\", features = [\"embassy\"] }"
         );
+        // Embassy alone does not drag in the radio stack; `<wifi>` does.
+        for name in ["esp-radio", "embassy-net", "smoltcp", "embedded-io"] {
+            assert!(doc["dependencies"].get(name).is_none(), "{name}");
+        }
     }
 
+    /// The legacy `wifi_station` golden: the only description we have of what
+    /// a working Wi-Fi project's manifest contains. `legacy/` is the oracle
+    /// until phase 7 retires it, and this test retires with it.
+    fn legacy_wifi_station() -> toml_edit::DocumentMut {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../legacy/espforge/tests/golden/",
+            "05.Networking.wifi_station.esp32c3.embassy/Cargo.toml"
+        );
+        parse(
+            &std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("reading the oracle {path}: {e}")),
+        )
+    }
+
+    /// A `<wifi>` radio must produce the golden's dependency table verbatim:
+    /// every line of it is load-bearing (the `esp-radio` feature on
+    /// `esp-rtos`, the `edge-net` comment, the long `smoltcp` feature list),
+    /// and `toml_edit` renders it without a diff if we get it right.
     #[test]
-    fn wifi_brings_the_networking_stack() {
-        let case = case("esp32c3", Runtime::Embassy, true, &[], &["wifi"]);
+    fn wifi_brings_the_radio_stack_verbatim() {
+        let radio = case("esp32c3", Runtime::Embassy, true, &[], &["wifi"]);
         let doc = parse(
             &manifest(
-                &case.meta,
-                &case.opts,
+                &radio.meta,
+                &radio.opts,
                 &RuntimeSource::Published,
                 &chip("esp32c3"),
+                &board(),
             )
             .unwrap(),
         );
         assert_eq!(
-            features(&doc, "esp-radio"),
-            vec!["esp32c3", "wifi", "esp-alloc", "unstable", "log-04"]
+            doc["dependencies"].to_string(),
+            legacy_wifi_station()["dependencies"].to_string()
         );
-        assert!(doc["dependencies"].get("smoltcp").is_some());
-        assert_eq!(
-            features(&doc, "embassy-net"),
-            vec!["tcp", "udp", "dhcpv4", "medium-ethernet", "log"]
-        );
-    }
-
-    #[test]
-    fn ble_only_adds_trouble_and_keeps_coex_off() {
-        let case = case(
-            "esp32c3",
-            Runtime::Embassy,
-            true,
-            &[("ble-trouble", "true")],
-            &[],
-        );
-        let doc = parse(
-            &manifest(
-                &case.meta,
-                &case.opts,
-                &RuntimeSource::Published,
-                &chip("esp32c3"),
-            )
-            .unwrap(),
-        );
-        assert!(doc["dependencies"].get("trouble-host").is_some());
-        assert_eq!(
-            features(&doc, "esp-radio"),
-            vec!["esp32c3", "ble", "esp-alloc", "unstable", "log-04"]
-        );
-        assert!(doc["dependencies"].get("embassy-net").is_none());
     }
 
     #[test]
@@ -373,13 +443,14 @@ mod tests {
                 &case.opts,
                 &RuntimeSource::Path("..\\rt".into()),
                 &chip("esp32s3"),
+                &board(),
             )
             .unwrap(),
         );
         assert_eq!(doc["package"]["description"].as_str(), Some("demo"));
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ path = \"../rt\", version = \"0.6.0\" }"
+            "{ path = \"../rt\", version = \"0.7.0\" }"
         );
         // with defaults off, neither alloc nor unstable-hal is implied
         assert!(doc["dependencies"].get("esp-alloc").is_none());
@@ -398,6 +469,198 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("opt-level = \"s\""), "{text}");
+    }
+
+    /// A client service is a runtime *feature*: the project names it, and the
+    /// runtime's own manifest owns the `edge-*`/`embedded-tls` crates (the same
+    /// split the Wi-Fi radio stack uses).
+    #[test]
+    fn an_http_client_asks_the_runtime_for_the_feature() {
+        let doc = parse(&cargo_with(
+            true,
+            &[],
+            Runtime::Embassy,
+            &with_service("http-client"),
+        ));
+        assert_eq!(
+            dependency(&doc, "espforge-runtime"),
+            "{ version = \"0.7.0\", features = [\"embassy\", \"http-client\"] }"
+        );
+        // Nothing extra lands in the project's own manifest.
+        for name in ["edge-http", "edge-net", "embedded-tls"] {
+            assert!(doc["dependencies"].get(name).is_none(), "{name}");
+        }
+    }
+
+    #[test]
+    fn an_https_client_implies_the_http_feature_in_the_runtime() {
+        let doc = parse(&cargo_with(
+            true,
+            &[],
+            Runtime::Embassy,
+            &with_service("https-client"),
+        ));
+        assert_eq!(
+            dependency(&doc, "espforge-runtime"),
+            "{ version = \"0.7.0\", features = [\"embassy\", \"https-client\"] }"
+        );
+    }
+
+    /// A WebSocket client is a runtime feature too, and `wss` implies the
+    /// plain `ws` one (the runtime's own feature graph).
+    #[test]
+    fn a_ws_client_asks_the_runtime_for_the_feature() {
+        let doc = parse(&cargo_with(
+            true,
+            &[],
+            Runtime::Embassy,
+            &with_service("ws-client"),
+        ));
+        assert_eq!(
+            dependency(&doc, "espforge-runtime"),
+            "{ version = \"0.7.0\", features = [\"embassy\", \"ws-client\"] }"
+        );
+        for name in ["edge-ws", "edge-http", "embedded-tls"] {
+            assert!(doc["dependencies"].get(name).is_none(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_wss_client_implies_the_ws_feature_in_the_runtime() {
+        let doc = parse(&cargo_with(
+            true,
+            &[],
+            Runtime::Embassy,
+            &with_service("wss-client"),
+        ));
+        assert_eq!(
+            dependency(&doc, "espforge-runtime"),
+            "{ version = \"0.7.0\", features = [\"embassy\", \"wss-client\"] }"
+        );
+    }
+
+    /// The SNTP client is a runtime feature as well, and it does not bring
+    /// the HTTP or TLS crates with it.
+    #[test]
+    fn an_ntp_client_asks_the_runtime_for_the_feature() {
+        let doc = parse(&cargo_with(
+            true,
+            &[],
+            Runtime::Embassy,
+            &with_service("ntp"),
+        ));
+        assert_eq!(
+            dependency(&doc, "espforge-runtime"),
+            "{ version = \"0.7.0\", features = [\"embassy\", \"ntp\"] }"
+        );
+        for name in ["sntpc", "edge-http", "edge-ws", "embedded-tls"] {
+            assert!(doc["dependencies"].get(name).is_none(), "{name}");
+        }
+    }
+
+    /// A device pulls `espforge-drivers` with just its feature. The runtime no
+    /// longer carries the drivers, and the vendor crates stay in the drivers
+    /// manifest rather than appearing in the generated project.
+    ///
+    /// The feature list is the board's, in declaration order: adding a driver
+    /// never edits this backend.
+    #[test]
+    fn a_display_asks_the_drivers_crate_for_its_feature() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let with = |features: &[&'static str]| {
+            let mut board = board();
+            board.devices = features
+                .iter()
+                .map(|feature| device(feature, &["embedded-graphics"]))
+                .collect();
+            parse(
+                &manifest(
+                    &case.meta,
+                    &case.opts,
+                    &RuntimeSource::Published,
+                    &chip("esp32c3"),
+                    &board,
+                )
+                .unwrap(),
+            )
+        };
+        for (features, expected) in [
+            (
+                &["ssd1306"][..],
+                "{ version = \"0.7.0\", features = [\"ssd1306\"] }",
+            ),
+            (
+                &["ili9341"][..],
+                "{ version = \"0.7.0\", features = [\"ili9341\"] }",
+            ),
+            (
+                &["ssd1306", "ili9341"][..],
+                "{ version = \"0.7.0\", features = [\"ssd1306\", \"ili9341\"] }",
+            ),
+        ] {
+            let doc = with(features);
+            assert_eq!(
+                dependency(&doc, "espforge-runtime"),
+                "{ version = \"0.7.0\" }"
+            );
+            assert_eq!(dependency(&doc, "espforge-drivers"), expected);
+            assert_eq!(dependency(&doc, "embedded-graphics"), "\"0.8.1\"");
+            for name in ["ssd1306", "display-interface", "sky-ili9341"] {
+                assert!(doc["dependencies"].get(name).is_none(), "{name}");
+            }
+        }
+
+        // A project with no device names neither.
+        let doc = parse(&cargo(true, &[], Runtime::Blocking));
+        assert!(doc["dependencies"].get("espforge-drivers").is_none());
+        assert!(doc["dependencies"].get("embedded-graphics").is_none());
+    }
+
+    /// A device whose recipe names no dependency does not pull
+    /// `embedded-graphics`: the sensor project names its driver feature only.
+    #[test]
+    fn a_sensor_project_has_no_graphics_crate() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = board();
+        board.devices = vec![device("scd4x", &[])];
+        let doc = parse(
+            &manifest(
+                &case.meta,
+                &case.opts,
+                &RuntimeSource::Published,
+                &chip("esp32c3"),
+                &board,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            dependency(&doc, "espforge-drivers"),
+            "{ version = \"0.7.0\", features = [\"scd4x\"] }"
+        );
+        assert!(doc["dependencies"].get("embedded-graphics").is_none());
+    }
+
+    /// A local runtime checkout implies the drivers crate beside it, so
+    /// `--runtime-path` projects build against this workspace too.
+    #[test]
+    fn a_local_runtime_path_implies_a_sibling_drivers_path() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = board();
+        board.devices = vec![device("ssd1306", &["embedded-graphics"])];
+        let doc = parse(
+            &manifest(
+                &case.meta,
+                &case.opts,
+                &RuntimeSource::Path("/work/espforge-runtime".into()),
+                &chip("esp32c3"),
+                &board,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            dependency(&doc, "espforge-drivers"),
+            "{ path = \"/work/espforge-drivers\", version = \"0.7.0\", features = [\"ssd1306\"] }"
+        );
     }
 
     fn features(doc: &toml_edit::DocumentMut, dep: &str) -> Vec<String> {

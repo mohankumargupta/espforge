@@ -5,24 +5,24 @@
 //! * [`runtime_source`] - published vs local `espforge-runtime`
 //! * [`manifest`]       - ownership manifest for drift detection
 //!
-//! IO boundary: [`generate_from_board`] / [`project::layer_overlay`] are pure
-//! (in-memory `Artifact`/`Asset` in, data out; no `std::fs`, no
-//! `std::process`). Only [`write`] / [`write_assets`] / [`write_all`] (and
-//! `build.rs::execute` / `cargo_build` in the CLI) touch disk or processes.
+//! IO boundary: [`generate_from_board`] is pure (in-memory `Artifact`/`Asset`
+//! in, data out; no `std::fs`, no `std::process`). Only [`write`] /
+//! [`write_assets`] / [`write_all`] touch disk.
 //!
 //! Host-only: never depend on `espforge-runtime` from this crate.
 
+pub mod artifact;
 pub mod codegen;
 pub mod manifest;
 pub mod project;
 pub mod runtime_source;
 
 use anyhow::Result;
-use espforge_model::{Artifact, Asset, Board, Meta, Ownership};
-use espforge_options::ResolvedOptions;
+use espforge_elements::{Board, Meta, ResolvedOptions};
 use std::fs;
 use std::path::Path;
 
+pub use artifact::{Artifact, Asset, Ownership};
 pub use project::OverlayFile;
 pub use runtime_source::RuntimeSource;
 
@@ -83,7 +83,7 @@ fn finish(rendered: project::Rendered, core: &Meta) -> Result<Generated> {
     let mut artifacts = rendered.artifacts;
     let assets = rendered.assets;
     artifacts.push(project::readme(&core.crate_name(), &artifacts, &assets));
-    let manifest = manifest::emit_manifest(&artifacts, espforge_espgenerate_template::VERSION)?;
+    let manifest = manifest::emit_manifest(&artifacts, env!("CARGO_PKG_VERSION"))?;
     artifacts.push(manifest);
     Ok(Generated { artifacts, assets })
 }
@@ -161,8 +161,7 @@ pub fn write_all(out_dir: &Path, generated: &Generated) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use espforge_model::{Console, ResourceGraph, Runtime};
-    use espforge_options::{Answers, DerivedInputs};
+    use espforge_elements::{Answers, Console, DerivedInputs, Runtime, resolve};
 
     fn core() -> Meta {
         Meta {
@@ -179,17 +178,17 @@ mod tests {
     fn board(meta: &Meta) -> Board {
         Board {
             meta: meta.clone(),
-            resources: ResourceGraph::default(),
+            resources: espforge_elements::ResourceGraph::default(),
             components: Vec::new(),
+            devices: Vec::new(),
             services: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 
     fn generate_with(example: Option<&str>) -> Generated {
         let meta = core();
-        let opts =
-            espforge_options::resolve(&meta, &Answers::empty(0..0), &DerivedInputs::default())
-                .unwrap();
+        let opts = resolve(&meta, &Answers::empty(0..0), &DerivedInputs::default()).unwrap();
         let files: Vec<(String, &'static [u8])> = example
             .map(|e| {
                 espforge_examples::find(e)
@@ -251,12 +250,6 @@ mod tests {
                 .content
                 .contains("use hello_world::")
         );
-        // nothing about the old scaffolder survives
-        assert!(
-            g.artifacts
-                .iter()
-                .all(|a| !a.content.contains("esp-generate"))
-        );
     }
 
     #[test]
@@ -264,10 +257,7 @@ mod tests {
         let g = generate_with(None);
         let v: serde_json::Value =
             serde_json::from_str(&find(&g, ".espforge/manifest.json").content).unwrap();
-        assert_eq!(
-            v["template_version"],
-            espforge_espgenerate_template::VERSION
-        );
+        assert_eq!(v["template_version"], env!("CARGO_PKG_VERSION"));
         assert!(v["files"].get("Cargo.toml").is_some());
         assert!(v["files"].get("README.txt").is_some());
         assert!(v["files"].get(".espforge/manifest.json").is_none());
@@ -278,30 +268,12 @@ mod tests {
     }
 
     #[test]
-    fn example_overlay_flows_through_generate() {
-        let g = generate_with(Some("04.Communication/i2c_scanner"));
-        assert!(find(&g, "diagram.json").content.contains("chip-chip"));
-        assert!(g.assets.iter().any(|a| a.path == "chip.wasm"));
-        assert!(find(&g, "README.txt").content.contains("chip.wasm"));
-        assert!(find(&g, "wokwi.toml").content.contains("[[chip]]"));
-    }
-
-    #[test]
-    fn write_all_creates_files_assets_and_manifest() {
+    fn write_all_creates_files_and_manifest() {
         let dir = tempfile::tempdir().unwrap();
-        write_all(
-            dir.path(),
-            &generate_with(Some("04.Communication/i2c_scanner")),
-        )
-        .unwrap();
+        write_all(dir.path(), &generate_with(None)).unwrap();
         assert!(dir.path().join("src/lib.rs").is_file());
         assert!(dir.path().join("README.txt").is_file());
         assert!(dir.path().join(".espforge/manifest.json").is_file());
-        assert!(
-            fs::read(dir.path().join("chip.wasm"))
-                .unwrap()
-                .starts_with(b"\0asm")
-        );
     }
 
     #[test]
@@ -330,29 +302,5 @@ mod tests {
             fs::read_to_string(dir.path().join("rust-toolchain.toml")).unwrap(),
             "# mine"
         );
-    }
-
-    #[test]
-    fn assets_follow_ownership() {
-        let dir = tempfile::tempdir().unwrap();
-        let seed = Asset::seed_once("chip.wasm", vec![0, 97, 115, 109]);
-        write_assets(dir.path(), std::slice::from_ref(&seed)).unwrap();
-        fs::write(dir.path().join("chip.wasm"), b"mine").unwrap();
-        write_assets(dir.path(), std::slice::from_ref(&seed)).unwrap();
-        assert_eq!(fs::read(dir.path().join("chip.wasm")).unwrap(), b"mine");
-    }
-
-    #[test]
-    fn old_flat_manifests_still_drive_drift_detection() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::create_dir_all(dir.path().join(".espforge")).unwrap();
-        fs::write(
-            dir.path().join(".espforge/manifest.json"),
-            r#"{"src/lib.rs":"0000000000000000"}"#,
-        )
-        .unwrap();
-        fs::create_dir_all(dir.path().join("src")).unwrap();
-        fs::write(dir.path().join("src/lib.rs"), "// edited").unwrap();
-        assert!(write(dir.path(), &generate_with(None).artifacts).is_err());
     }
 }

@@ -4,32 +4,17 @@ version.workspace = true
 edition.workspace = true
 description.workspace = true
 license.workspace = true
-keywords.workspace = true 
+keywords.workspace = true
 categories.workspace = true
 repository.workspace = true
-readme.workspace = true
 
 [dependencies]
 espforge-core = { workspace = true }
-espforge-options = { workspace = true }
-# Only for its VERSION constant (`espforge version`).
-espforge-espgenerate-template = { workspace = true }
-anyhow = "1"
 espforge-diagnostics = { workspace = true }
-serde_json = { workspace = true }
-espforge-model = { workspace = true }
-clap = { version = "4", features = ["derive"] }
-# Chip metadata (supported chips, their Rust target triples) used by doctor.
-esp-metadata-generated = { version = "0.5.3", features = ["build-script"] }
-cliclack = "0.5.6"
+espforge-elements = { workspace = true }
 espforge_examples = { workspace = true }
+clap = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
-# `tests/codegen_equiv.rs` parses the golden trees through the comparators.
-espforge-emit = { workspace = true }
-# Only a test: the `espf` catalog must cover every driver tag.
-espforge-bindings = { workspace = true }
-
-[build-dependencies]
-cargo_metadata = "0.19"
+tempfile = { workspace = true }
+toml = { workspace = true }

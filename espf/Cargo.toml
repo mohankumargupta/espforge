@@ -7,14 +7,7 @@ license.workspace = true
 keywords.workspace = true
 categories.workspace = true
 repository.workspace = true
-readme.workspace = true
-
-[lib]
-path = "src/lib.rs"
 
 [dependencies]
-# Use the same versions your current prototype already builds with.
 winnow = { workspace = true }
-# The one diagnostic model; `diag` is a thin adapter over it while the
-# pipeline moves to `Diagnostic` in Phase 2.
 espforge-diagnostics = { workspace = true }

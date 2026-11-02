@@ -1,16 +1,8 @@
 //! One diagnostic model for the whole pipeline.
 //!
-//! Before this crate there were five error conventions: `espf::diag::EspfError`
-//! (a title, one label, one span), `String` returns in the element wrappers,
-//! `Invalid::{Spans, Message}` in the CLI, `anyhow` at the boundaries and bare
-//! exit codes. A problem could be a sentence with no location, a snippet with
-//! no code, or a `❌` line from a library module.
-//!
-//! This crate is the destination of extreme.md §3.4: one [`Diagnostic`] with a
-//! stable code, a severity, a primary span, any number of labels, optional
-//! help and machine-applicable fixes. Renderers live here too, so the CLI
-//! prints and the library never does: [`to_human`] reproduces today's snippet
-//! output exactly, [`to_json`] is what CI and editors consume.
+//! A [`Diagnostic`] carries a stable code, a severity, a primary span, any
+//! number of labels, optional help and machine-applicable fixes. The human
+//! renderer lives here too, so the CLI prints and the library never does.
 //!
 //! # Codes
 //!
@@ -23,28 +15,19 @@
 //! | `E02xx` | `# espforge` core and meta |
 //! | `E03xx` | options and their answers |
 //! | `E04xx` | `$` graph resolution |
-//! | `E05xx` | peripherals (`<gpio>`, `<i2c>`, `<spi>`, `<uart>`) |
-//! | `E06xx` | components (`<led>`, `<button>`, `<*_component>`) |
+//! | `E05xx` | peripherals |
+//! | `E06xx` | components |
 //! | `E07xx` | ownership and conflicts |
 //! | `E08xx` | services and driver routing |
-//! | `W0xxx` | warnings |
 //!
-//! `E0999` is the sentinel for a message missing from the table; it is a bug
-//! if it reaches output, and the JSON contract test rejects it.
-//!
-//! Every diagnostic carries a code. The table lives in [`codes`], one entry
-//! per message, so a stage cannot invent a number another stage already uses.
-//! The human renderer ignores the code; [`to_json`] is where it is a contract.
+//! Every diagnostic carries a code from the moment it is constructed. There is
+//! no way to build one without it, and no title-to-code table.
 
 use std::ops::Range;
 
 pub mod codes;
-pub mod json;
 pub mod render;
 
-pub use codes::for_message;
-
-pub use json::to_json;
 pub use render::to_human;
 
 /// A byte range into the original source.
@@ -75,8 +58,8 @@ impl Severity {
 /// A stable diagnostic code (`E0701`).
 ///
 /// The format is `E`/`W` plus four digits; the ranges are documented on the
-/// crate. Codes are a public contract once they reach [`to_json`], so never
-/// reuse one for a different message.
+/// crate. Codes are a public contract once emitted, so never reuse one for a
+/// different message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DiagCode(&'static str);
 
@@ -124,7 +107,7 @@ pub struct Diagnostic {
     /// Stable code for this message (see [`codes`]).
     pub code: DiagCode,
     pub severity: Severity,
-    /// Short summary on the `error:` line (today's `EspfError::title`).
+    /// Short summary on the `error:` line.
     pub message: String,
     /// Where the diagnostic points.
     pub primary: Span,
@@ -203,10 +186,10 @@ mod tests {
 
     #[test]
     fn a_diagnostic_has_one_primary_label() {
-        let d = Diagnostic::error(codes::GPIO_INVALID_PIN, 4..8, "bad pin", "no GPIO99")
+        let d = Diagnostic::error(codes::CORE_UNKNOWN_ELEMENT, 4..8, "bad", "no such thing")
             .with_label(20..24, "declared here");
         assert_eq!(d.severity, Severity::Error);
-        assert_eq!(d.primary_label().unwrap().text, "no GPIO99");
+        assert_eq!(d.primary_label().unwrap().text, "no such thing");
         assert_eq!(d.labels.len(), 2);
     }
 

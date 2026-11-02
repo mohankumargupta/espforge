@@ -1,10 +1,8 @@
 pub mod answers;
 pub mod build;
 pub mod check;
-pub mod doctor;
-pub mod espf;
 pub mod examples;
-pub mod format;
+pub mod failure;
+pub mod generate;
 pub mod new;
 pub mod report;
-pub mod version;
