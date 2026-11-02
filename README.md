@@ -1,8 +1,8 @@
 # Espforge
 
-A scaffolding++ tool, stsrt with a .espf and simple src/app.rs,
-generates a esp32 no_std esp-hal based rust project with boilerplate
-taken care for you.
+A scaffolding++ tool: start with a `.espf` file and a simple `src/app.rs`, and it
+generates an esp32 `no_std` esp-hal based rust project with the boilerplate taken
+care of for you.
 
 ## Features
 - instead of esphome style yaml, use a custom format that combines markdown headers
@@ -10,8 +10,8 @@ taken care for you.
 - Pre-built components and devices that sit on top of esphal https://github.com/esp-rs/esp-hal
 - Supports both bare-metal blocking execution and async execution using the embassy framework.
 - Wokwi integration and working examples
-- code generated for examples in espforge-examples-generated for your perusal(coming soon;
-- Project samples (coming soon)
+- `espforge new` scaffolds an editable project from the embedded examples
+- `espforge gen` writes the project without compiling it
 
 ## Essence of espforge - blink example
 
@@ -59,16 +59,27 @@ when you run
 ```sh
 espforge check blink.espf
 espforge build blink.espf
-cd build
-cargo build
 ```
 
-then you should have a blinking led on gpio 18. 
+then you should have a blinking led on gpio 18. `espforge build` writes the
+project to `build/` (change it with `--out`) and compiles it.
 
 If you want to see the examples in this repo in action, click [here](https://github.com/mohankumargupta/espforge_wokwi)
 
 ## Prerequisites
 **Rust**: [Install Rust](https://rustup.rs/)
+
+Then install the target for your chip:
+
+```shell
+# esp32c2, esp32c3
+rustup target add riscv32imc-unknown-none-elf
+# esp32c6, esp32h2
+rustup target add riscv32imac-unknown-none-elf
+```
+
+Xtensa chips (`esp32`, `esp32s3`) use the `esp` toolchain instead, installed with
+[espup](https://github.com/esp-rs/espup).
 
 ## Install espforge
 
@@ -77,40 +88,36 @@ cargo install cargo-binstall
 cargo binstall espforge
 # alternatively: cargo install espforge
 ```
+
 ## Verify install
 
 ```shell
-espforge doctor
-```
-
-It will recommend toolchains to install such as 
-
-```shell
-# c2,c3
-rustup target add riscv32imc-unknown-none-elf
-# c6,h2
-rustup target add riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf
-# p4
-rustup target add riscv32imafc-unknown-none-elf
+espforge --version
+espforge examples
 ```
 
 ## Examples
 
-Run `espforge examples` to use as starting point, from interactive to noninteractive versions
+`espforge examples` lists the embedded examples. `espforge new` copies one into a
+directory as an editable project:
 
 ```sh
-espforge examples categories
-espforge examples list 01.Basics
-espforge examples get 01.Basics/blink --out blink
+espforge examples
+espforge new 01.Basics/blink my-app
+cd my-app
+espforge build
 ```
+
+A short name such as `blink` works too when it is unique. The table below is what
+`espforge examples` lists:
 
 | Category | Examples |
 |---|---|
-| `01.Basics` | `helloworld`, `blink` |
+| `01.Basics` | `blink`, `blink_async`, `helloworld`, `minimal` |
 | `02.Digital` | `button`, `button_async` |
 | `04.Communication` | `i2c_example`, `i2c_example_async`, `i2c_scanner`, `spi_example`, `spi_example_async`, `uart_example`, `uart_example_async` |
-| `05.Networking` | `wifi_station` |
-| `06.Displays` | `ili9341_example`, `ssd1306_example` |
+| `05.Networking` | `http_client`, `https_client`, `ntp`, `wifi_station`, `ws_client`, `wss_client` |
+| `06.Displays` | `ili9341`, `ssd1306` |
 
 
 ## License
@@ -123,4 +130,3 @@ MIT
 -  esphome
 -  zephyr
 -  circuitpython
-
