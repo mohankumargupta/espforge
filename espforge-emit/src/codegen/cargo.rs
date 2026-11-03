@@ -106,7 +106,7 @@ fn dependencies(
         deps["esp-rtos"] = Item::Value(dep("0.4.0", &features));
     }
 
-    deps["esp-bootloader-esp-idf"] = Item::Value(dep("0.7.0", &["log-04", chip_name]));
+    deps["esp-bootloader-esp-idf"] = Item::Value(dep("0.6.0", &["log-04", chip_name]));
     deps["esp-println"] = Item::Value(dep_without_defaults(
         "0.18.0",
         &[chip_name, console(meta), "log-04"],

@@ -15,7 +15,7 @@ static_cell = "2.1.1"
 critical-section = "1.2.0"
 log = "0.4.27"
 esp-hal = { version = "~1.2.2", features = ["esp32s3", "unstable", "log-04"] }
-esp-bootloader-esp-idf = { version = "0.7.0", features = ["log-04", "esp32s3"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["log-04", "esp32s3"] }
 esp-println = { version = "0.18.0", default-features = false, features = ["esp32s3", "uart", "log-04"] }
 esp-backtrace = { version = "0.20.0", features = ["esp32s3", "panic-handler", "println"] }
 esp-alloc = { version = "0.11.0", features = ["esp32s3"] }

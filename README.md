@@ -10,8 +10,6 @@ care of for you.
 - Pre-built components and devices that sit on top of esphal https://github.com/esp-rs/esp-hal
 - Supports both bare-metal blocking execution and async execution using the embassy framework.
 - Wokwi integration and working examples
-- `espforge new` scaffolds an editable project from the embedded examples
-- `espforge gen` writes the project without compiling it
 
 ## Essence of espforge - blink example
 
@@ -57,29 +55,16 @@ pub fn forever(ctx: &mut Context) {
 when you run
 
 ```sh
-espforge check blink.espf
 espforge build blink.espf
 ```
 
-then you should have a blinking led on gpio 18. `espforge build` writes the
+then you should have an esp32 no_std rust project ready to upload. `espforge build` writes the
 project to `build/` (change it with `--out`) and compiles it.
 
 If you want to see the examples in this repo in action, click [here](https://github.com/mohankumargupta/espforge_wokwi)
 
 ## Prerequisites
 **Rust**: [Install Rust](https://rustup.rs/)
-
-Then install the target for your chip:
-
-```shell
-# esp32c2, esp32c3
-rustup target add riscv32imc-unknown-none-elf
-# esp32c6, esp32h2
-rustup target add riscv32imac-unknown-none-elf
-```
-
-Xtensa chips (`esp32`, `esp32s3`) use the `esp` toolchain instead, installed with
-[espup](https://github.com/esp-rs/espup).
 
 ## Install espforge
 
@@ -92,9 +77,19 @@ cargo binstall espforge
 ## Verify install
 
 ```shell
+espforge
 espforge --version
-espforge examples
 ```
+
+## Run espforge doctor
+
+```
+espforge doctor
+```
+
+Depending on the targets you want, you will either install
+additional toolchain into standard rust, or if you want xtensa based
+ones you will be asked to use espup install.
 
 ## Examples
 

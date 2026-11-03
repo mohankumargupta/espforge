@@ -40,3 +40,7 @@ list-examples:
     @find espforge-examples/src/examples -maxdepth 3 -name "example.espf.txt" 2>/dev/null \
         | sed -E 's|espforge-examples/src/examples/(.*)/example\.espf\.txt|  - \1|' \
         | sort
+
+cratesio:
+    cargo ws publish --from-git  --no-verify --allow-dirty --publish-interval 120
+
