@@ -9,8 +9,8 @@ name = "ssd1306"
 path = "./src/bin/main.rs"
 
 [dependencies]
-espforge-runtime = { version = "0.7.0" }
-espforge-drivers = { version = "0.7.0", features = ["ssd1306"] }
+espforge-runtime = { version = "0.7.1" }
+espforge-drivers = { version = "0.7.1", features = ["ssd1306"] }
 static_cell = "2.1.1"
 critical-section = "1.2.0"
 log = "0.4.27"

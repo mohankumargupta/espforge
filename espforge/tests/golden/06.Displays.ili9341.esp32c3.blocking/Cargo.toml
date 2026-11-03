@@ -9,8 +9,8 @@ name = "ili9341"
 path = "./src/bin/main.rs"
 
 [dependencies]
-espforge-runtime = { version = "0.7.0" }
-espforge-drivers = { version = "0.7.0", features = ["ili9341"] }
+espforge-runtime = { version = "0.7.1" }
+espforge-drivers = { version = "0.7.1", features = ["ili9341"] }
 static_cell = "2.1.1"
 critical-section = "1.2.0"
 log = "0.4.27"

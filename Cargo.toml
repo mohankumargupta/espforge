@@ -15,7 +15,7 @@ members = [
 exclude = ["legacy"]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 license = "MIT"
 description = "a scaffolding++ tool for creating esp32 no_std esphal without the hassle"
@@ -46,16 +46,16 @@ linkme = "0.3.37"
 
 # Workspace crates, so members declare them with `{ workspace = true }`
 # instead of repeating a relative path.
-espf = { path = "espf", version = "0.7.0" }
-espforge-core = { path = "espforge-core", version = "0.7.0" }
-espforge-diagnostics = { path = "espforge-diagnostics", version = "0.7.0" }
-espforge-drivers = { path = "espforge-drivers", version = "0.7.0" }
-espforge-elements = { path = "espforge-elements", version = "0.7.0" }
-espforge-emit = { path = "espforge-emit", version = "0.7.0" }
+espf = { path = "espf", version = "0.7.1" }
+espforge-core = { path = "espforge-core", version = "0.7.1" }
+espforge-diagnostics = { path = "espforge-diagnostics", version = "0.7.1" }
+espforge-drivers = { path = "espforge-drivers", version = "0.7.1" }
+espforge-elements = { path = "espforge-elements", version = "0.7.1" }
+espforge-emit = { path = "espforge-emit", version = "0.7.1" }
 # The package keeps its underscore name, so the dependency key matches it.
-espforge_examples = { path = "espforge-examples", version = "0.7.0" }
-espforge-runtime = { path = "espforge-runtime", version = "0.7.0" }
-espforge-schema = { path = "espforge-schema", version = "0.7.0" }
+espforge_examples = { path = "espforge-examples", version = "0.7.1" }
+espforge-runtime = { path = "espforge-runtime", version = "0.7.1" }
+espforge-schema = { path = "espforge-schema", version = "0.7.1" }
 
 # The profile that 'dist' will build with
 [profile.dist]
