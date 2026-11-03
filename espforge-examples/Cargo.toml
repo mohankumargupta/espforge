@@ -10,3 +10,5 @@ repository.workspace = true
 
 [dependencies]
 include_dir = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }

@@ -58,12 +58,7 @@ impl Overrides {
             meta.name = n.clone();
         }
         if let Some(c) = &self.chip {
-            if !chips::is_supported_chip(c) {
-                return Err(format!(
-                    "unknown chip \"{c}\" for --chip (expected one of: {})",
-                    chips::supported_chips().join(", ")
-                ));
-            }
+            chips::check_chip(c)?;
             if *c != meta.chip {
                 notes.push(format!(
                     "note: --chip {c} overrides <chip type=\"{}\" />",

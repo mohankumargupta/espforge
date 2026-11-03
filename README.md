@@ -98,13 +98,21 @@ directory as an editable project:
 
 ```sh
 espforge examples
-espforge new 01.Basics/blink my-app
+
+# asks for the example, the chip and the directory:
+espforge new
+
+# or says it up front:
+espforge new --example blink --chip esp32s3 --dir my-app
+
 cd my-app
 espforge build
 ```
 
-A short name such as `blink` works too when it is unique. The table below is what
-`espforge examples` lists:
+A short name such as `blink` works too when it is unique. `--chip` defaults to the
+chip the example is built for (each example declares its chips in `example.toml`);
+another chip is allowed, and `new` says so when that chip has not been built for
+that example. The table below is what `espforge examples` lists:
 
 | Category | Examples |
 |---|---|

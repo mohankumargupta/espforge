@@ -2,12 +2,13 @@
 //! no opinion about how a terminal should look.
 //!
 //! [`source`] finds the spec and the files beside it, [`answers`] applies
-//! command-line overrides, [`pipeline`] validates, and [`project`] turns a
-//! validated spec into the files on disk. Nothing here prints or exits; the
-//! `espforge` binary keeps the argument parsing, the rendering and the exit
-//! codes.
+//! command-line overrides, [`spec`] edits a spec's own `<chip>` for a scaffold,
+//! [`pipeline`] validates, and [`project`] turns a validated spec into the
+//! files on disk. Nothing here prints or exits; the `espforge` binary keeps the
+//! argument parsing, the rendering and the exit codes.
 
 pub mod answers;
 pub mod pipeline;
 pub mod project;
 pub mod source;
+pub mod spec;

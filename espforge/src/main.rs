@@ -31,10 +31,13 @@ enum Commands {
     /// Create a project from an embedded example.
     ///
     /// The example may be a short name (`blink`) or a full key
-    /// (`01.Basics/blink`). The directory must be absent or empty.
+    /// (`01.Basics/blink`). Without flags, a terminal is asked for the example,
+    /// the chip and the directory; with them, nothing blocks. The directory
+    /// must be absent or empty, and `--chip` defaults to the chip the example
+    /// is built for.
     #[command(
         name = "new",
-        after_help = "Examples:\n  espforge new blink my-app\n  espforge new 01.Basics/blink my-app"
+        after_help = "Examples:\n  espforge new\n  espforge new --example blink --dir my-app\n  espforge new -e blink -c esp32s3 -d my-app"
     )]
     New(commands::new::NewArgs),
 
@@ -127,16 +130,36 @@ mod tests {
     }
 
     #[test]
-    fn new_takes_an_example_and_a_directory() {
-        let cli = Cli::try_parse_from(["espforge", "new", "blink", "my-app"]).unwrap();
+    fn new_takes_flags_and_an_empty_invocation() {
+        let cli = Cli::try_parse_from([
+            "espforge",
+            "new",
+            "--example",
+            "blink",
+            "--dir",
+            "my-app",
+            "--chip",
+            "esp32s3",
+        ])
+        .unwrap();
         match cli.command {
             Some(Commands::New(args)) => {
-                assert_eq!(args.example, "blink");
-                assert_eq!(args.dir, PathBuf::from("my-app"));
+                assert_eq!(args.example.as_deref(), Some("blink"));
+                assert_eq!(args.dir, Some(PathBuf::from("my-app")));
+                assert_eq!(args.chip.as_deref(), Some("esp32s3"));
             }
             other => panic!("expected `new`, got {other:?}"),
         }
-        assert!(Cli::try_parse_from(["espforge", "new", "blink"]).is_err());
+
+        // The short forms the help advertises.
+        let cli = Cli::try_parse_from([
+            "espforge", "new", "-e", "blink", "-c", "esp32c3", "-d", "app",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command, Some(Commands::New(_))));
+
+        // Bare `new` parses: the wizard fills in what is missing.
+        assert!(Cli::try_parse_from(["espforge", "new"]).is_ok());
     }
 
     #[test]

@@ -9,6 +9,7 @@ categories.workspace = true
 repository.workspace = true
 
 [dependencies]
+cliclack = { workspace = true }
 espforge-core = { workspace = true }
 espforge-diagnostics = { workspace = true }
 espforge-elements = { workspace = true }

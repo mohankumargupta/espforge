@@ -61,7 +61,7 @@ pub fn discover_in_dir(dir: &Path) -> Result<Source, String> {
     match found.len() {
         1 => from_file(&found[0]),
         0 => Err(format!(
-            "no .espf or .espf.txt file found in '{}'\n   Give a FILE or --example <example>, or run `espforge new <example> <dir>` to start a project.",
+            "no .espf or .espf.txt file found in '{}'\n   Give a FILE or --example <example>, or run `espforge new` to start a project.",
             dir.display()
         )),
         _ => {

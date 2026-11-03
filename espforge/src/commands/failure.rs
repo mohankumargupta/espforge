@@ -2,8 +2,9 @@
 //! reported, and the exit code it earns.
 //!
 //! Exit codes: 0 success, 1 the user's input is at fault (already explained),
-//! 2 an internal or IO failure. Deciding this from typed failures keeps every
-//! command from inventing its own policy.
+//! 2 an internal or IO failure. Backing out of a prompt is a success: nothing
+//! was written and nothing went wrong. Deciding this from typed failures keeps
+//! every command from inventing its own policy.
 
 use std::process::ExitCode;
 
@@ -17,6 +18,8 @@ use super::report;
 pub enum Failure {
     /// The user's input is at fault; the report is already printed.
     User,
+    /// The user backed out of a prompt: nothing was written, nothing is wrong.
+    Cancelled,
     /// Something broke inside espforge or the OS, with its full chain.
     Internal(String),
 }
@@ -43,7 +46,7 @@ pub fn failed(error: ProjectError, source: &Source) -> Failure {
 /// The exit code a command earns: 0, 1 or 2.
 pub fn exit_code(result: Result<(), Failure>) -> ExitCode {
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) | Err(Failure::Cancelled) => ExitCode::SUCCESS,
         Err(Failure::User) => ExitCode::from(1),
         Err(Failure::Internal(message)) => {
             eprintln!("❌ {message}");

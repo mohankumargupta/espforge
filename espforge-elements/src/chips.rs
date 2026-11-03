@@ -29,6 +29,50 @@ pub fn is_supported_chip(name: &str) -> bool {
     chip_config(name).is_some()
 }
 
+/// Why `name` cannot be the target of a project, or nothing when it can.
+///
+/// `--chip` and the `new` prompt both ask here, so a chip that
+/// `esp-metadata-generated` knows but espforge has no template or Wokwi board
+/// for ([`NOT_YET_SUPPORTED`]) is refused with that reason instead of being
+/// accepted and discovered much later, by `build`.
+pub fn check_chip(name: &str) -> Result<(), String> {
+    if NOT_YET_SUPPORTED.contains(&name) {
+        return Err(format!(
+            "chip \"{name}\" is known to esp-metadata but not supported by espforge yet (expected one of: {})",
+            offered_chips().join(", ")
+        ));
+    }
+    if !is_supported_chip(name) {
+        return Err(format!(
+            "unknown chip \"{name}\" for --chip (expected one of: {})",
+            supported_chips().join(", ")
+        ));
+    }
+    Ok(())
+}
+
+/// A one-line summary of a chip, for prompts; `None` for a chip espforge has
+/// no blurb for yet.
+///
+/// NOTE: hand-kept, like [`has_usb_serial_jtag`]. This function is the only
+/// place to change, and `every_offered_chip_has_a_description` keeps it in
+/// step with the chips actually offered.
+pub fn description(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "esp32" => "Xtensa dual-core, Wi-Fi + Bluetooth Classic/BLE",
+        "esp32c2" => "RISC-V single-core, Wi-Fi 4 + BLE 5 (entry-level)",
+        "esp32c3" => "RISC-V single-core, Wi-Fi 4 + BLE 5",
+        "esp32c5" => "RISC-V single-core, dual-band Wi-Fi 6 + BLE 5 + 802.15.4",
+        "esp32c6" => "RISC-V single-core, Wi-Fi 6 + BLE 5 + 802.15.4",
+        "esp32c61" => "RISC-V single-core, Wi-Fi 6 + BLE 5 + 802.15.4",
+        "esp32h2" => "RISC-V single-core, BLE 5 + 802.15.4 (no Wi-Fi)",
+        "esp32s2" => "Xtensa single-core, Wi-Fi 4, USB-OTG",
+        "esp32s3" => "Xtensa dual-core, Wi-Fi 4 + BLE 5, USB-OTG",
+        "esp32s31" => "RISC-V dual-core, Wi-Fi 6 + BLE 5.4 + 802.15.4 + Ethernet",
+        _ => return None,
+    })
+}
+
 /// Whether the chip has the Wi-Fi radio block.
 ///
 /// The answer is a symbol in `esp-metadata`'s per-chip data (`soc_has_wifi`),
@@ -72,5 +116,28 @@ mod tests {
         assert!(!has_wifi("nonesuch"));
         assert!(!is_supported_chip("nonesuch"));
         assert!(is_supported_chip("esp32c3"));
+    }
+
+    #[test]
+    fn an_unknown_chip_is_refused_by_name() {
+        let err = check_chip("nonesuch").unwrap_err();
+        assert!(err.contains("unknown chip \"nonesuch\""), "{err}");
+        assert!(check_chip("esp32c3").is_ok());
+    }
+
+    #[test]
+    fn a_recognised_chip_espforge_cannot_build_is_refused_for_that_reason() {
+        let err = check_chip(NOT_YET_SUPPORTED[0]).unwrap_err();
+        assert!(err.contains("not supported by espforge yet"), "{err}");
+        assert!(!err.contains("unknown chip"), "{err}");
+    }
+
+    #[test]
+    fn every_offered_chip_has_a_description() {
+        let missing: Vec<&str> = offered_chips()
+            .into_iter()
+            .filter(|chip| description(chip).is_none())
+            .collect();
+        assert!(missing.is_empty(), "no description for {missing:?}");
     }
 }

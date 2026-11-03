@@ -39,6 +39,7 @@ proc-macro2 = "=1.0.107"
 prettyplease = "=0.3.0"
 toml = "=1.1.8"
 clap = { version = "4", features = ["derive"] }
+cliclack = "0.5.7"
 include_dir = { version = "0.7.4", features = ["glob"] }
 esp-metadata-generated = { version = "0.5.3", features = ["build-script"] }
 tempfile = "3"

@@ -6,6 +6,9 @@
 //! [`materialize`] writes an example as an editable project and never merges
 //! into an existing tree.
 //!
+//! Each example also declares the chips and runtimes it is built for in its
+//! `example.toml`; [`Example::chips`] is what `espforge new` preselects.
+//!
 //! Nothing here prints: presentation lives in the `espforge` binary.
 
 use std::ffi::OsStr;
@@ -14,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use include_dir::{Dir, include_dir};
+use serde::Deserialize;
 
 /// The example tree, embedded at compile time from `src/examples`.
 pub static EXAMPLES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/src/examples");
@@ -56,6 +60,11 @@ pub struct Example {
     /// Human-facing title taken from the banner at the top of the example
     /// file, when one is present (e.g. `HELLO WORLD EXAMPLE`).
     pub title: Option<String>,
+    /// Chips the example is built and tested for, from `example.toml`, in
+    /// declared order. Empty when the example carries no harness manifest.
+    pub chips: Vec<String>,
+    /// Runtimes the example supports, from `example.toml`, in declared order.
+    pub runtimes: Vec<String>,
     /// Full contents of the example's `example.espf.txt`.
     pub content: String,
     /// Every embedded file of the example, including `example.espf.txt` itself.
@@ -275,7 +284,20 @@ pub fn project_spec(example: &Example) -> String {
 /// Never merges into an existing tree: `dest` must be absent or empty, and no
 /// target file may exist. On a conflict nothing is written.
 pub fn materialize(example: &Example, dest: &Path) -> Result<Materialized, MaterializeError> {
-    let plan = project_files(example);
+    materialize_spec(example, dest, &project_spec(example))
+}
+
+/// [`materialize`] with `spec` as the project's `.espf` instead of the
+/// example's own text.
+///
+/// The binary uses this for `--chip`, which has to change one attribute before
+/// the spec is written; everything else about the scaffold is unchanged.
+pub fn materialize_spec(
+    example: &Example,
+    dest: &Path,
+    spec: &str,
+) -> Result<Materialized, MaterializeError> {
+    let plan = project_files(example, spec);
 
     if dest.is_file() {
         return Err(MaterializeError::Conflict(format!(
@@ -317,7 +339,8 @@ pub fn materialize(example: &Example, dest: &Path) -> Result<Materialized, Mater
 }
 
 /// The `(relative path, contents)` a scaffold writes, in embedded order.
-fn project_files(example: &Example) -> Vec<(String, Vec<u8>)> {
+/// `spec` supplies the project's `.espf` in place of the example's own text.
+fn project_files(example: &Example, spec: &str) -> Vec<(String, Vec<u8>)> {
     let mut out = Vec::new();
     for file in &example.files {
         let rel = match file.path.as_str() {
@@ -327,7 +350,7 @@ fn project_files(example: &Example) -> Vec<(String, Vec<u8>)> {
             other => other.to_string(),
         };
         let contents = if file.path == EXAMPLE_FILE {
-            project_spec(example).into_bytes()
+            spec.as_bytes().to_vec()
         } else {
             file.contents.to_vec()
         };
@@ -350,14 +373,39 @@ fn example_from_dir(ex_dir: &'static Dir<'static>) -> Option<Example> {
         .find(|f| f.path().file_name() == Some(OsStr::new(EXAMPLE_FILE)))?;
     let content = espf.contents_utf8()?.to_string();
     let title = extract_title(&content);
+    let harness = harness_manifest(ex_dir);
     let mut files = Vec::new();
     collect_files(ex_dir, String::new(), &mut files);
     Some(Example {
         name: path_segment(ex_dir.path()),
         title,
+        chips: harness.chips,
+        runtimes: harness.runtimes,
         content,
         files,
     })
+}
+
+/// The axes an example declares in `example.toml`: the chips and runtimes its
+/// harness builds it for.
+///
+/// Defaulted rather than required, so an example without the file still joins
+/// the catalogue instead of disappearing from `espforge examples`.
+#[derive(Debug, Default, Deserialize)]
+struct Harness {
+    #[serde(default)]
+    chips: Vec<String>,
+    #[serde(default)]
+    runtimes: Vec<String>,
+}
+
+fn harness_manifest(ex_dir: &'static Dir<'static>) -> Harness {
+    ex_dir
+        .files()
+        .find(|f| f.path().file_name() == Some(OsStr::new(HARNESS_FILE)))
+        .and_then(|f| f.contents_utf8())
+        .and_then(|text| toml::from_str(text).ok())
+        .unwrap_or_default()
 }
 
 /// Recursively collect an example's files with paths relative to the example
@@ -429,6 +477,8 @@ mod tests {
         Example {
             name: name.into(),
             title: None,
+            chips: Vec::new(),
+            runtimes: Vec::new(),
             content: String::new(),
             files: Vec::new(),
         }
@@ -613,6 +663,36 @@ mod tests {
             std::fs::read_to_string(dest.join("keep.txt")).unwrap(),
             "mine"
         );
+
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    #[test]
+    fn examples_declare_the_axes_they_are_built_for() {
+        let blink = find("01.Basics/blink").expect("blink must exist");
+        assert_eq!(blink.chips, ["esp32c3", "esp32s3"]);
+        assert!(
+            blink.runtimes.iter().any(|r| r == "blocking"),
+            "{:?}",
+            blink.runtimes
+        );
+
+        // The async example is embassy-only: the runtime axis is not decoration.
+        let async_blink = find("01.Basics/blink_async").expect("blink_async must exist");
+        assert_eq!(async_blink.runtimes, ["embassy"]);
+    }
+
+    #[test]
+    fn materialize_spec_writes_the_spec_it_is_given() {
+        let blink = find("01.Basics/blink").expect("blink must exist");
+        let dest = scratch("given-spec");
+        let _ = std::fs::remove_dir_all(&dest);
+
+        let spec = "# espforge\n  <chip type=\"esp32s3\" />\n";
+        let done = materialize_spec(blink, &dest, spec).expect("materialize must succeed");
+        assert_eq!(done.spec, dest.join("blink.espf"));
+        assert_eq!(std::fs::read_to_string(&done.spec).unwrap(), spec);
+        assert!(dest.join("src").join("app.rs").is_file());
 
         let _ = std::fs::remove_dir_all(&dest);
     }
