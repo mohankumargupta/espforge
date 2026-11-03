@@ -1,6 +1,7 @@
 pub mod answers;
 pub mod build;
 pub mod check;
+pub mod doctor;
 pub mod examples;
 pub mod failure;
 pub mod generate;

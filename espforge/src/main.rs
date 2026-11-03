@@ -63,6 +63,10 @@ enum Commands {
         after_help = "Examples:\n  espforge build\n  espforge build --release\n  espforge build --chip esp32s3"
     )]
     Build(commands::build::BuildArgs),
+
+    /// Check environment and toolchain readiness for ESP32 development.
+    #[command(name = "doctor", after_help = "Example:\n  espforge doctor")]
+    Doctor,
 }
 
 fn main() -> ExitCode {
@@ -72,6 +76,7 @@ fn main() -> ExitCode {
         Some(Commands::Check(args)) => commands::check::run(args),
         Some(Commands::Gen(args)) => commands::generate::run(args),
         Some(Commands::Build(args)) => commands::build::run(args),
+        Some(Commands::Doctor) => commands::doctor::run(),
         // No subcommand given: show help instead of erroring.
         None => {
             Cli::command()
@@ -92,7 +97,15 @@ mod tests {
     fn the_subcommands_are_the_workflow() {
         let cmd = Cli::command();
         let names: Vec<&str> = cmd.get_subcommands().map(|c| c.get_name()).collect();
-        assert_eq!(names, ["examples", "new", "check", "gen", "build"]);
+        assert_eq!(
+            names,
+            ["examples", "new", "check", "gen", "build", "doctor"]
+        );
+    }
+
+    #[test]
+    fn doctor_subcommand_parses() {
+        assert!(Cli::try_parse_from(["espforge", "doctor"]).is_ok());
     }
 
     #[test]
