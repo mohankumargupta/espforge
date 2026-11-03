@@ -1,6 +1,6 @@
 {
   "files": {
-    "Cargo.toml": "dd7b480cfe42c88f",
+    "Cargo.toml": "cce517fe6edddb4c",
     "README.txt": "4955d6dc248cb268",
     "build.rs": "82f37776fdcc61fd",
     "diagram.json": "6cc36d9deb8b9b31",
@@ -9,5 +9,5 @@
     "src/lib.rs": "c8dada7d0a25f037",
     "wokwi.toml": "4bb2f0f5d4b51376"
   },
-  "template_version": "0.7.1"
+  "template_version": "0.7.2"
 }

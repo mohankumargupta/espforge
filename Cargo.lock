@@ -1336,7 +1336,7 @@ dependencies = [
 
 [[package]]
 name = "espf"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "espforge-diagnostics",
  "winnow 0.7.15",
@@ -1344,7 +1344,7 @@ dependencies = [
 
 [[package]]
 name = "espforge"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "clap",
  "cliclack",
@@ -1358,7 +1358,7 @@ dependencies = [
 
 [[package]]
 name = "espforge-core"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "espf",
@@ -1372,14 +1372,14 @@ dependencies = [
 
 [[package]]
 name = "espforge-diagnostics"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "annotate-snippets",
 ]
 
 [[package]]
 name = "espforge-drivers"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "embedded-graphics",
  "esp-hal",
@@ -1390,7 +1390,7 @@ dependencies = [
 
 [[package]]
 name = "espforge-elements"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "esp-metadata-generated",
  "espf",
@@ -1404,7 +1404,7 @@ dependencies = [
 
 [[package]]
 name = "espforge-emit"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "esp-metadata-generated",
@@ -1424,7 +1424,7 @@ dependencies = [
 
 [[package]]
 name = "espforge-runtime"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "edge-http",
  "edge-nal",
@@ -1448,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "espforge-schema"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "espf",
  "espforge-diagnostics",
@@ -1457,7 +1457,7 @@ dependencies = [
 
 [[package]]
 name = "espforge_examples"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "include_dir",
  "serde",

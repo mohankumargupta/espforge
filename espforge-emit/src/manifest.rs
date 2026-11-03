@@ -3,7 +3,7 @@
 //! `.espforge/manifest.json`:
 //!
 //! ```json
-//! { "template_version": "0.7.1", "files": { "Cargo.toml": "<fnv1a>", ... } }
+//! { "template_version": "0.7.2", "files": { "Cargo.toml": "<fnv1a>", ... } }
 //! ```
 //!
 //! `files` maps each `Owned` file to a checksum of what espforge wrote.
