@@ -10,9 +10,9 @@ use espf::diag::node_span;
 use espforge_diagnostics::{Diagnostic, codes};
 
 use crate::element::{Element, LowerCx};
-use crate::schema::schema;
 use crate::model::{Board, Bus, Component, GpioDecl, Meta};
 use crate::registry;
+use crate::schema::schema;
 
 /// Lower the hardware sections onto `meta`, in rank order.
 ///

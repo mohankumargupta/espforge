@@ -24,8 +24,8 @@ use quote::{format_ident, quote};
 
 use crate::attrs::{self, Issue};
 use crate::element::{Element, EmitCx, LowerCx, Lowered, Reported, is_rust_ident};
-use crate::schema::schema;
 use crate::model::{Board, ClaimedPin, Component, Direction, Ident, Owner, OwnerKind, Pin, PinUse};
+use crate::schema::schema;
 
 /// The interpreter for one schema element that declares a `recipe`.
 pub struct RecipeElement {

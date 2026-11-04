@@ -99,23 +99,24 @@ directory as an editable project:
 ```sh
 espforge examples
 
-# asks for the example, the chip and the directory:
+# asks for the category, the example, the chip and the directory:
 espforge new
 
-# the same wizard, explained step by step:
-espforge interactive
+# or answer all three up front and it never prompts:
+espforge new --example blink --chip esp32c3 --dir blink
 
-# or says it up front:
-espforge new --example blink --chip esp32s3 --dir my-app
-
-cd my-app
+cd blink
 espforge build
 ```
 
-A short name such as `blink` works too when it is unique. `--chip` defaults to the
-chip the example is built for (each example declares its chips in `example.toml`);
+`new` with no flags needs an interactive terminal. Give all of `--example`,
+`--chip` and `--dir` and it runs without one; missing any of the three is a
+usage error and prints the command's usage. The chip is preselected to the one
+the example is built for (each example declares its chips in `example.toml`);
 another chip is allowed, and `new` says so when that chip has not been built for
-that example. The table below is what `espforge examples` lists:
+that example. A blank directory answer means a directory named after the example.
+For scripted generation, use `espforge gen --example <example> --out <dir>`. The
+table below is what `espforge examples` lists:
 
 | Category | Examples |
 |---|---|

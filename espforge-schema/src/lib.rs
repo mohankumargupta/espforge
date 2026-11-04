@@ -1166,7 +1166,11 @@ fn parse_device_recipe(
     let mut deps: Vec<String> = Vec::new();
     for child in children(node) {
         if child.name().value() == "deps" {
-            deps.extend(positional_strings(child, errors).into_iter().map(|(dep, _)| dep));
+            deps.extend(
+                positional_strings(child, errors)
+                    .into_iter()
+                    .map(|(dep, _)| dep),
+            );
         }
     }
 
@@ -1680,7 +1684,10 @@ fn parse_service_recipe(
         {
             errors.push(err(
                 attr.span.clone(),
-                format!("`{tag}.{}` has no `field` or `arg` in `service_recipe`", attr.name),
+                format!(
+                    "`{tag}.{}` has no `field` or `arg` in `service_recipe`",
+                    attr.name
+                ),
                 "a service recipe names every attribute except `id` and its `network`",
             ));
         }
@@ -1753,7 +1760,10 @@ fn parse_service_field(
     for child in children(node) {
         errors.push(err(
             node_range(child),
-            format!("unknown node `{}` in `field` `{name}`", child.name().value()),
+            format!(
+                "unknown node `{}` in `field` `{name}`",
+                child.name().value()
+            ),
             "a `field` is a name plus `as=`, `min=`, `range=` and `non_empty=` properties",
         ));
     }
@@ -1784,7 +1794,11 @@ fn prop_u32(node: &KdlNode, key: &str, errors: &mut Vec<SchemaError>) -> Option<
             ));
             None
         }
-        None => match entry.value().as_string().and_then(|text| text.parse::<u32>().ok()) {
+        None => match entry
+            .value()
+            .as_string()
+            .and_then(|text| text.parse::<u32>().ok())
+        {
             Some(value) => Some(value),
             None => {
                 errors.push(err(
@@ -1821,12 +1835,19 @@ fn positional_u32(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<u32> 
         Some(value) => {
             errors.push(err(
                 entry_range(entry),
-                format!("`{}` must be an unsigned 32-bit number", node.name().value()),
+                format!(
+                    "`{}` must be an unsigned 32-bit number",
+                    node.name().value()
+                ),
                 format!("`{value}` is out of range"),
             ));
             None
         }
-        None => match entry.value().as_string().and_then(|text| text.parse::<u32>().ok()) {
+        None => match entry
+            .value()
+            .as_string()
+            .and_then(|text| text.parse::<u32>().ok())
+        {
             Some(value) => Some(value),
             None => {
                 errors.push(err(

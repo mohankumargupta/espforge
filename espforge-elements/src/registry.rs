@@ -320,7 +320,8 @@ mod tests {
     #[test]
     fn the_device_door_reaches_every_recipe_driver() {
         for tag in ["ssd1306", "ili9341", "scd4x"] {
-            let registered = element(tag).unwrap_or_else(|| panic!("`<{tag}>` has an implementation"));
+            let registered =
+                element(tag).unwrap_or_else(|| panic!("`<{tag}>` has an implementation"));
             assert_eq!(registered.tag(), tag);
             assert!(
                 device_recipes().iter().any(|recipe| recipe.tag() == tag),
@@ -355,7 +356,13 @@ mod tests {
     /// Rust file, in schema order after the device recipes.
     #[test]
     fn the_service_door_reaches_every_recipe_service() {
-        for tag in ["http_client", "https_client", "ws_client", "wss_client", "ntp"] {
+        for tag in [
+            "http_client",
+            "https_client",
+            "ws_client",
+            "wss_client",
+            "ntp",
+        ] {
             let registered =
                 element(tag).unwrap_or_else(|| panic!("`<{tag}>` has an implementation"));
             assert_eq!(registered.tag(), tag);

@@ -24,9 +24,7 @@ use crate::devices::{
 };
 use crate::element::{Element, LowerCx, Reported, is_rust_ident};
 use crate::generated;
-use crate::model::{
-    ClaimedPin, Device, Direction, Owner, OwnerKind, Pin, PinUse, Runtime,
-};
+use crate::model::{ClaimedPin, Device, Direction, Owner, OwnerKind, Pin, PinUse, Runtime};
 
 /// The interpreter for one schema element that declares a `device_recipe`.
 pub struct DeviceRecipeElement {
@@ -94,7 +92,12 @@ impl Element for DeviceRecipeElement {
             .find(|component| component.id().raw == component_name)
         else {
             return Err(unknown_component(
-                cx, node, tag, &id, bus_attr, &recipe.expect,
+                cx,
+                node,
+                tag,
+                &id,
+                bus_attr,
+                &recipe.expect,
             ));
         };
         // The ids are the same text from different nodes, so their spans
@@ -104,7 +107,12 @@ impl Element for DeviceRecipeElement {
         let component_address = component.address();
         if component_tag != recipe.expect {
             return Err(unknown_component(
-                cx, node, tag, &id, bus_attr, &recipe.expect,
+                cx,
+                node,
+                tag,
+                &id,
+                bus_attr,
+                &recipe.expect,
             ));
         }
 
@@ -181,7 +189,14 @@ impl Element for DeviceRecipeElement {
             let wanted = direction(arg.direction);
             if let Some(found) = gpio.direction.filter(|found| *found != wanted) {
                 return Err(wrong_direction(
-                    cx, node, tag, &id, &arg.name, &gpio.id.raw, wanted, found,
+                    cx,
+                    node,
+                    tag,
+                    &id,
+                    &arg.name,
+                    &gpio.id.raw,
+                    wanted,
+                    found,
                 ));
             }
             let need = match wanted {
@@ -343,7 +358,10 @@ mod tests {
     #[test]
     fn a_type_placeholder_takes_its_argument_value() {
         let names = [arg("size"), arg("rotation")];
-        let values = ["espforge_drivers::Oled128x64".to_string(), "Rotate90".to_string()];
+        let values = [
+            "espforge_drivers::Oled128x64".to_string(),
+            "Rotate90".to_string(),
+        ];
         assert_eq!(
             fill("espforge_drivers::Ssd1306Display<{size}>", &names, &values),
             "espforge_drivers::Ssd1306Display<espforge_drivers::Oled128x64>"

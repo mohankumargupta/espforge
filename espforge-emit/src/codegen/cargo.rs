@@ -218,12 +218,7 @@ fn profiles() -> Item {
 /// `wifi` implies `embassy` (the schema's `requires`), so the Wi-Fi feature
 /// list carries both, in that order. Each service names its own feature, in
 /// declaration order: adding a service never edits this function.
-fn runtime_dependency(
-    source: &RuntimeSource,
-    embassy: bool,
-    wifi: bool,
-    board: &Board,
-) -> Value {
+fn runtime_dependency(source: &RuntimeSource, embassy: bool, wifi: bool, board: &Board) -> Value {
     let mut table = InlineTable::new();
     if let RuntimeSource::Path(path) = source {
         table.insert("path", Value::from(path.replace('\\', "/")));

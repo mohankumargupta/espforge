@@ -1,9 +1,11 @@
 //! `espforge new`: an embedded example as an editable project.
 //!
-//! There are three ways in — flags for scripts, a wizard when the terminal
-//! allows it, and `interactive`, the same wizard after a short explanation —
-//! and all of them resolve to the same [`Plan`] and go through the same write,
-//! so no entry can drift from another.
+//! Two ways in: all three flags (`--example`, `--chip`, `--dir`) run straight
+//! through without a terminal, and no flags asks one question at a time —
+//! category, example, chip, directory — after a short sentence saying what is
+//! coming. Both resolve to one [`Plan`] that a single `write` materializes, so
+//! the entries cannot drift. A partial set of flags never reaches this module:
+//! clap rejects it and prints the usage.
 //!
 //! Resolving a name and writing the tree belong to `espforge_examples`; editing
 //! the spec's chip belongs to `espforge_core`; this module only asks, in the
@@ -21,55 +23,71 @@ use espforge_examples::{
 };
 
 use super::failure::{Failure, exit_code, user};
-use super::report;
 
-/// The chip a scaffold gets when neither a flag nor the example says.
+/// The chip a scaffold gets when the example names none.
 const DEFAULT_CHIP: &str = "esp32c3";
 
 /// Set this to keep `espforge new` from ever blocking on a prompt.
 const NO_PROMPT: &str = "ESPFORGE_NO_PROMPT";
 
-/// What `espforge interactive` says before its first question: the point of
-/// the subcommand is to explain the shape of what is coming.
-const INTERACTIVE_CONTEXT: &str = "As a starting point for your espforge project, start with an example, and build from there.\n\nFirst pick an example category, then an example.";
+/// What `espforge new` says before its first question: the point of the
+/// subcommand is to explain the shape of what is coming.
+const START: &str = "As a starting point for your espforge project, start with an example, and build from there.\n\nFirst pick an example category, then an example.";
 
+/// The answers that skip the wizard. All three or none: clap's `requires_all`
+/// refuses a partial set with the command's usage, so a script cannot silently
+/// fall back to asking.
 #[derive(Args, Debug, Clone, Default)]
 pub struct NewArgs {
-    /// Example to scaffold: a short name (`blink`) or category key (`01.Basics/blink`)
-    #[arg(short, long, value_name = "EXAMPLE")]
+    /// Example to start from (category/name, or a short name like blink)
+    #[arg(long, value_name = "EXAMPLE", requires_all = ["chip", "dir"])]
     pub example: Option<String>,
-    /// Target chip, e.g. esp32c3, esp32s3 (default: the example's own chip)
-    #[arg(short, long, value_name = "CHIP")]
+    /// Target chip, e.g. esp32c3
+    #[arg(long, value_name = "CHIP", requires_all = ["example", "dir"])]
     pub chip: Option<String>,
-    /// New directory for the project (must be absent or empty)
-    #[arg(short, long, value_name = "DIR")]
+    /// Project directory (must be absent or empty)
+    #[arg(short, long, value_name = "DIR", requires_all = ["example", "chip"])]
     pub dir: Option<PathBuf>,
 }
 
-/// Whether `new` may ask the terminal for what a flag did not supply.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    /// Ask, but only when both ends are terminals and the user has not opted out.
-    Auto,
-    /// Never ask: a missing flag is an error. Tests and scripts.
-    Never,
+impl NewArgs {
+    /// Whether every answer came from the command line, so nothing is asked.
+    fn flagged(&self) -> bool {
+        self.example.is_some() && self.chip.is_some() && self.dir.is_some()
+    }
 }
 
-impl Mode {
-    /// The mode this terminal allows: two terminals and no opt-out, or
-    /// [`Mode::Never`].
-    fn for_terminal() -> Mode {
-        let terminal = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-        if terminal && !opted_out() {
-            Mode::Auto
-        } else {
-            Mode::Never
-        }
+pub fn run(args: NewArgs) -> ExitCode {
+    exit_code(execute(&args))
+}
+
+/// The only entry: flags when all three were given, the terminal otherwise.
+fn execute(args: &NewArgs) -> Result<(), Failure> {
+    if args.flagged() {
+        let plan = flagged_plan(args)?;
+        let done = write(&plan)?;
+        return report_new(&done, &plan, false);
     }
 
-    fn prompts(self) -> bool {
-        matches!(self, Mode::Auto)
+    if !prompts() {
+        return Err(user(
+            "`espforge new` asks its questions on a terminal; \
+             run it from an interactive shell, or pass --example, --chip and --dir",
+        ));
     }
+
+    cliclack::intro("espforge new").map_err(|_| cancelled())?;
+    cliclack::note("Getting started", START).map_err(|_| cancelled())?;
+
+    let plan = prompted_plan()?;
+    let done = write(&plan)?;
+    report_new(&done, &plan, true)
+}
+
+/// Whether `new` may ask the terminal: both ends are terminals and
+/// `ESPFORGE_NO_PROMPT` is not set.
+fn prompts() -> bool {
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal() && !opted_out()
 }
 
 /// `ESPFORGE_NO_PROMPT` set to anything but an explicit off value.
@@ -81,36 +99,6 @@ fn opted_out() -> bool {
         .is_some_and(|value| !matches!(value.to_str(), Some("") | Some("0") | Some("false")))
 }
 
-pub fn run(args: NewArgs) -> ExitCode {
-    exit_code(execute(&args))
-}
-
-/// The standard entry point: asks the terminal when it can, never otherwise.
-pub fn execute(args: &NewArgs) -> Result<(), Failure> {
-    execute_with(args, Mode::for_terminal())
-}
-
-/// `espforge interactive`: bare `new`'s wizard, introduced by a sentence
-/// explaining what the questions are for. No flags to know.
-pub fn run_interactive() -> ExitCode {
-    exit_code(interactive())
-}
-
-fn interactive() -> Result<(), Failure> {
-    if !Mode::for_terminal().prompts() {
-        return Err(user(
-            "`espforge interactive` needs a terminal with prompts enabled; \
-             run `espforge new --example <EXAMPLE> --dir <DIR>` instead",
-        ));
-    }
-    cliclack::intro("espforge interactive").map_err(|_| cancelled())?;
-    cliclack::note("Getting started", INTERACTIVE_CONTEXT).map_err(|_| cancelled())?;
-
-    let plan = plan(&NewArgs::default(), true)?;
-    let done = write(&plan)?;
-    report_new(&done, &plan, true)
-}
-
 /// Everything `new` decided before writing anything.
 #[derive(Debug)]
 struct Plan {
@@ -119,58 +107,32 @@ struct Plan {
     dir: PathBuf,
 }
 
-/// `execute` with prompting decided by the caller instead of the environment.
-///
-/// Every test goes through `Mode::Never`: nothing here may wait for a key, and
-/// whether the test runner happens to own a terminal must not change results.
-pub fn execute_with(args: &NewArgs, mode: Mode) -> Result<(), Failure> {
-    // The wizard is the whole flow or none of it: with all three flags there is
-    // nothing to ask, so the output stays plain text.
-    let complete = args.example.is_some() && args.chip.is_some() && args.dir.is_some();
-    let wizard = mode.prompts() && !complete;
-    if wizard {
-        cliclack::intro("espforge new").map_err(|_| cancelled())?;
-    }
-
-    let plan = plan(args, wizard)?;
-    let done = write(&plan)?;
-    report_new(&done, &plan, wizard)?;
-    Ok(())
-}
-
-fn plan(args: &NewArgs, wizard: bool) -> Result<Plan, Failure> {
-    let example = match &args.example {
-        Some(name) => resolve(name)?,
-        None if wizard => prompt_example()?,
-        None => return Err(missing("--example <EXAMPLE>")),
-    };
-
-    let chip = match &args.chip {
-        Some(name) => {
-            chips::check_chip(name).map_err(user)?;
-            name.clone()
-        }
-        None if wizard => prompt_chip(example)?,
-        None => default_chip(example),
-    };
-
-    let dir = match &args.dir {
-        Some(dir) => dir.clone(),
-        None if wizard => prompt_dir()?,
-        None => return Err(missing("--dir <DIR>")),
-    };
+fn prompted_plan() -> Result<Plan, Failure> {
+    let example = prompt_example()?;
+    let chip = prompt_chip(example)?;
+    let dir = prompt_dir(example)?;
 
     Ok(Plan { example, chip, dir })
 }
 
-fn resolve(name: &str) -> Result<&'static Example, Failure> {
-    resolve_name(name).map(|(_, example)| example).map_err(user)
-}
+/// The plan the three flags spell out. `flagged` already proved they are all
+/// here, so a missing one is a bug in the caller rather than in the user.
+fn flagged_plan(args: &NewArgs) -> Result<Plan, Failure> {
+    let input = args
+        .example
+        .as_deref()
+        .ok_or_else(|| Failure::Internal("`new` ran with flags but no --example".into()))?;
+    let (_, example) = resolve_name(input).map_err(user)?;
+    let chip = args
+        .chip
+        .clone()
+        .ok_or_else(|| Failure::Internal("`new` ran with flags but no --chip".into()))?;
+    let dir = args
+        .dir
+        .clone()
+        .ok_or_else(|| Failure::Internal("`new` ran with flags but no --dir".into()))?;
 
-fn missing(flag: &str) -> Failure {
-    user(format!(
-        "missing required flag `{flag}` (run `espforge new` in a terminal to be asked)"
-    ))
+    Ok(Plan { example, chip, dir })
 }
 
 /// The chip a scaffold gets when nothing was chosen: what the example is built
@@ -265,11 +227,13 @@ fn chip_choices(example: &Example) -> Vec<String> {
     choices
 }
 
-/// Ask where the project goes. The field starts blank; a blank answer means
-/// the current directory, so pressing Enter is always a valid answer.
-fn prompt_dir() -> Result<PathBuf, Failure> {
+/// Ask where the project goes. The field starts blank; a blank answer means a
+/// directory named after the example, so pressing Enter is always a valid
+/// answer.
+fn prompt_dir(example: &Example) -> Result<PathBuf, Failure> {
+    let placeholder = format!("leave blank for '{}'", example.name);
     let dir: String = cliclack::input("Project directory")
-        .placeholder("leave blank for the current directory")
+        .placeholder(&placeholder)
         .required(false)
         .validate(|input: &String| {
             let input = input.trim();
@@ -283,14 +247,15 @@ fn prompt_dir() -> Result<PathBuf, Failure> {
         })
         .interact()
         .map_err(|_| cancelled())?;
-    Ok(destination(&dir))
+    Ok(destination(&dir, example))
 }
 
-/// The directory a typed answer names: blank is the current directory.
-fn destination(input: &str) -> PathBuf {
+/// The directory a typed answer names: blank is a directory named after the
+/// example.
+fn destination(input: &str, example: &Example) -> PathBuf {
     let input = input.trim();
     if input.is_empty() {
-        PathBuf::from(".")
+        PathBuf::from(&example.name)
     } else {
         PathBuf::from(input)
     }
@@ -312,6 +277,8 @@ fn directory_problem(dir: &Path) -> Option<&'static str> {
 
 /// Write the plan's tree, with the chosen chip written into the spec.
 fn write(plan: &Plan) -> Result<Materialized, Failure> {
+    chips::check_chip(&plan.chip).map_err(user)?;
+
     let base = project_spec(plan.example);
     let spec = spec::spec_with_chip(&base, &plan.chip).map_err(|error| {
         Failure::Internal(format!(
@@ -336,47 +303,45 @@ fn report_new(done: &Materialized, plan: &Plan, wizard: bool) -> Result<(), Fail
     let unbuilt =
         !plan.example.chips.is_empty() && !plan.example.chips.iter().any(|chip| chip == &plan.chip);
 
-    if wizard {
+    if !wizard {
         if unbuilt {
-            cliclack::note(
-                "Not verified",
-                format!(
-                    "{} is not built for this example (built for: {})",
-                    plan.chip,
-                    plan.example.chips.join(", ")
-                ),
-            )
-            .map_err(|_| cancelled())?;
+            println!(
+                "note: {} is not built for this example (built for: {})",
+                plan.chip,
+                plan.example.chips.join(", ")
+            );
         }
-        cliclack::note(
-            "Next steps",
-            format!("cd {}\nespforge build", plan.dir.display()),
-        )
-        .map_err(|_| cancelled())?;
-        cliclack::outro(format!(
-            "Created '{spec_name}' ({}) in {}",
-            plan.chip,
-            plan.dir.display()
-        ))
-        .map_err(|_| cancelled())?;
-    } else {
         println!(
             "new: created '{spec_name}' ({}) in {}",
             plan.chip,
             plan.dir.display()
         );
-        if unbuilt {
-            report::notes(&[format!(
-                "note: {} is not built for this example (built for: {})",
+        println!("  next: cd {} && espforge build", plan.dir.display());
+        return Ok(());
+    }
+
+    if unbuilt {
+        cliclack::note(
+            "Not verified",
+            format!(
+                "{} is not built for this example (built for: {})",
                 plan.chip,
                 plan.example.chips.join(", ")
-            )]);
-        }
-        println!();
-        println!("Next steps:");
-        println!("  cd {}", plan.dir.display());
-        println!("  espforge build");
+            ),
+        )
+        .map_err(|_| cancelled())?;
     }
+    cliclack::note(
+        "Next steps",
+        format!("cd {}\nespforge build", plan.dir.display()),
+    )
+    .map_err(|_| cancelled())?;
+    cliclack::outro(format!(
+        "Created '{spec_name}' ({}) in {}",
+        plan.chip,
+        plan.dir.display()
+    ))
+    .map_err(|_| cancelled())?;
     Ok(())
 }
 
@@ -392,28 +357,79 @@ mod tests {
 
     use espforge_core::project;
     use espforge_core::source::resolve_source;
-    use espforge_examples::find;
+    use espforge_examples::{find, resolve_name};
 
     use super::*;
 
-    fn args(example: &str, dir: &Path) -> NewArgs {
+    /// A plan with the answers a test would have typed: no prompting involved.
+    fn planned(example: &str, chip: Option<&str>, dir: &Path) -> Result<Plan, Failure> {
+        let (_, example) = resolve_name(example).map_err(user)?;
+        Ok(Plan {
+            example,
+            chip: chip.map_or_else(|| default_chip(example), str::to_string),
+            dir: dir.to_path_buf(),
+        })
+    }
+
+    fn scaffold(example: &str, chip: Option<&str>, dir: &Path) -> Result<(), Failure> {
+        write(&planned(example, chip, dir)?).map(|_| ())
+    }
+
+    /// The flags a non-interactive run gets: all three, always.
+    fn flags(example: &str, chip: &str, dir: &Path) -> NewArgs {
         NewArgs {
             example: Some(example.into()),
+            chip: Some(chip.into()),
             dir: Some(dir.to_path_buf()),
-            chip: None,
         }
     }
 
-    /// No test may prompt: `Mode::Never` is the whole point of the split.
-    fn never(args: &NewArgs) -> Result<(), Failure> {
-        execute_with(args, Mode::Never)
+    #[test]
+    fn the_three_flags_build_the_plan_without_asking() {
+        let plan = flagged_plan(&flags("blink", "esp32s3", Path::new("my-app"))).unwrap();
+        assert_eq!(plan.example.name, "blink");
+        assert_eq!(plan.chip, "esp32s3");
+        assert_eq!(plan.dir, PathBuf::from("my-app"));
+    }
+
+    #[test]
+    fn a_flagged_run_scaffolds_without_a_terminal() {
+        let scratch = tempfile::tempdir().unwrap();
+        let dir = scratch.path().join("flagged");
+        execute(&flags("01.Basics/helloworld", "esp32c6", &dir)).unwrap();
+
+        assert!(dir.join("helloworld.espf").is_file());
+        let spec = std::fs::read_to_string(dir.join("helloworld.espf")).unwrap();
+        assert!(spec.contains("<chip type=\"esp32c6\" />"), "{spec}");
+    }
+
+    #[test]
+    fn a_flagged_unknown_example_is_a_user_error() {
+        let scratch = tempfile::tempdir().unwrap();
+        let dir = scratch.path().join("typo");
+        assert!(matches!(
+            execute(&flags("blinkk", "esp32c3", &dir)),
+            Err(Failure::User)
+        ));
+        assert!(!dir.exists(), "nothing may be written");
+    }
+
+    #[test]
+    fn a_flagged_unknown_chip_is_a_user_error() {
+        let scratch = tempfile::tempdir().unwrap();
+        let dir = scratch.path().join("bad-chip");
+        assert!(matches!(
+            execute(&flags("blink", "esp99", &dir)),
+            Err(Failure::User)
+        ));
+        assert!(!dir.exists(), "nothing may be written");
     }
 
     #[test]
     fn scaffolds_a_project_that_generates() {
         let scratch = tempfile::tempdir().unwrap();
         let dir = scratch.path().join("my-app");
-        never(&args("blink", &dir)).unwrap();
+        scaffold("blink", None, &dir).unwrap();
 
         assert!(dir.join("blink.espf").is_file());
         assert!(dir.join("src").join("app.rs").is_file());
@@ -446,9 +462,7 @@ mod tests {
     fn scaffolds_with_an_explicit_chip_and_still_checks_clean() {
         let scratch = tempfile::tempdir().unwrap();
         let dir = scratch.path().join("s3-app");
-        let mut args = args("blink", &dir);
-        args.chip = Some("esp32s3".into());
-        never(&args).unwrap();
+        scaffold("blink", Some("esp32s3"), &dir).unwrap();
 
         let spec = std::fs::read_to_string(dir.join("blink.espf")).unwrap();
         assert!(spec.contains("<chip type=\"esp32s3\" />"), "{spec}");
@@ -474,9 +488,7 @@ mod tests {
     fn a_chip_the_example_is_not_built_for_still_scaffolds() {
         let scratch = tempfile::tempdir().unwrap();
         let dir = scratch.path().join("c6-app");
-        let mut args = args("blink", &dir);
-        args.chip = Some("esp32c6".into());
-        never(&args).unwrap();
+        scaffold("blink", Some("esp32c6"), &dir).unwrap();
 
         let spec = std::fs::read_to_string(dir.join("blink.espf")).unwrap();
         assert!(spec.contains("<chip type=\"esp32c6\" />"), "{spec}");
@@ -486,9 +498,10 @@ mod tests {
     fn an_unknown_chip_is_a_user_error() {
         let scratch = tempfile::tempdir().unwrap();
         let dir = scratch.path().join("bad-chip");
-        let mut args = args("blink", &dir);
-        args.chip = Some("esp99".into());
-        assert!(matches!(never(&args), Err(Failure::User)));
+        assert!(matches!(
+            scaffold("blink", Some("esp99"), &dir),
+            Err(Failure::User)
+        ));
         assert!(!dir.exists(), "nothing may be written");
     }
 
@@ -496,9 +509,10 @@ mod tests {
     fn a_chip_espforge_cannot_build_yet_is_a_user_error() {
         let scratch = tempfile::tempdir().unwrap();
         let dir = scratch.path().join("p4-app");
-        let mut args = args("blink", &dir);
-        args.chip = Some(chips::NOT_YET_SUPPORTED[0].into());
-        assert!(matches!(never(&args), Err(Failure::User)));
+        assert!(matches!(
+            scaffold("blink", Some(chips::NOT_YET_SUPPORTED[0]), &dir),
+            Err(Failure::User)
+        ));
         assert!(!dir.exists(), "nothing may be written");
     }
 
@@ -506,7 +520,7 @@ mod tests {
     fn the_scaffolded_project_passes_check() {
         let scratch = tempfile::tempdir().unwrap();
         let dir = scratch.path().join("my-app");
-        never(&args("blink", &dir)).unwrap();
+        scaffold("blink", None, &dir).unwrap();
 
         let checked = crate::commands::check::execute(&crate::commands::check::CheckArgs {
             file: Some(dir.join("blink.espf")),
@@ -519,7 +533,7 @@ mod tests {
     fn a_full_category_key_scaffolds_too() {
         let scratch = tempfile::tempdir().unwrap();
         let dir = scratch.path().join("hello");
-        never(&args("01.Basics/helloworld", &dir)).unwrap();
+        scaffold("01.Basics/helloworld", None, &dir).unwrap();
         assert!(dir.join("helloworld.espf").is_file());
     }
 
@@ -530,7 +544,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("keep.txt"), "mine").unwrap();
 
-        assert!(matches!(never(&args("blink", &dir)), Err(Failure::User)));
+        assert!(matches!(scaffold("blink", None, &dir), Err(Failure::User)));
         assert!(!dir.join("blink.espf").exists(), "nothing may be written");
     }
 
@@ -538,41 +552,22 @@ mod tests {
     fn an_unknown_example_is_a_user_error() {
         let scratch = tempfile::tempdir().unwrap();
         let dir = scratch.path().join("typo");
-        assert!(matches!(never(&args("blinkk", &dir)), Err(Failure::User)));
+        assert!(matches!(scaffold("blinkk", None, &dir), Err(Failure::User)));
         assert!(!dir.exists());
     }
 
     #[test]
-    fn missing_flags_without_a_terminal_are_user_errors() {
-        assert!(matches!(never(&NewArgs::default()), Err(Failure::User)));
-
-        // A partial plan names what it still needs instead of guessing.
-        let scratch = tempfile::tempdir().unwrap();
-        let partial = NewArgs {
-            example: Some("blink".into()),
-            ..Default::default()
-        };
-        assert!(matches!(never(&partial), Err(Failure::User)));
-        assert!(!scratch.path().join("blink").exists());
+    fn an_empty_directory_answer_means_the_example_name() {
+        let blink = find("01.Basics/blink").expect("blink must exist");
+        assert_eq!(destination("", blink), PathBuf::from("blink"));
+        assert_eq!(destination("   ", blink), PathBuf::from("blink"));
+        assert_eq!(destination("my-app", blink), PathBuf::from("my-app"));
     }
 
     #[test]
-    fn an_empty_directory_answer_means_the_current_directory() {
-        assert_eq!(destination(""), PathBuf::from("."));
-        assert_eq!(destination("   "), PathBuf::from("."));
-        assert_eq!(destination("my-app"), PathBuf::from("my-app"));
-    }
-
-    #[test]
-    fn interactive_explains_the_questions_before_asking_them() {
-        assert!(
-            INTERACTIVE_CONTEXT.contains("start with an example"),
-            "{INTERACTIVE_CONTEXT}"
-        );
-        assert!(
-            INTERACTIVE_CONTEXT.contains("category"),
-            "{INTERACTIVE_CONTEXT}"
-        );
+    fn new_explains_the_questions_before_asking_them() {
+        assert!(START.contains("start with an example"), "{START}");
+        assert!(START.contains("category"), "{START}");
     }
 
     #[test]

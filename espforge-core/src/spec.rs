@@ -1,4 +1,4 @@
-//! Editing a spec's own `<chip>`: what `espforge new --chip` writes.
+//! Editing a spec's own `<chip>`: what `espforge new` writes.
 //!
 //! A scaffold starts from an example's text, so overriding the chip has to
 //! change one attribute value and leave every other byte — banner, comments,

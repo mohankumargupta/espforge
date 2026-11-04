@@ -6,8 +6,8 @@
 //! internal or IO failure.
 //!
 //! The commands follow one workflow: `examples` (what is available) ->
-//! `new`/`interactive` (start a project) -> `check` (validate it) -> `gen`
-//! (write the crate) -> `build` (write it and compile).
+//! `new` (start a project, with flags or one question at a time) -> `check`
+//! (validate it) -> `gen` (write the crate) -> `build` (write it and compile).
 
 mod commands;
 
@@ -28,26 +28,18 @@ enum Commands {
     #[command(name = "examples", after_help = "Example:\n  espforge examples")]
     Examples,
 
-    /// Create a project from an embedded example.
+    /// Start a project from an embedded example.
     ///
-    /// The example may be a short name (`blink`) or a full key
-    /// (`01.Basics/blink`). Without flags, a terminal is asked for the example,
-    /// the chip and the directory; with them, nothing blocks. The directory
-    /// must be absent or empty, and `--chip` defaults to the chip the example
-    /// is built for.
+    /// With no flags it explains what it is about to ask, then asks for the
+    /// category, the example, the chip and the directory. Give all three of
+    /// `--example`, `--chip` and `--dir` to run without a terminal; a partial
+    /// set is a usage error. The chip is preselected to the one the example is
+    /// built for, and the directory must be absent or empty.
     #[command(
         name = "new",
-        after_help = "Examples:\n  espforge new\n  espforge new --example blink --dir my-app\n  espforge new -e blink -c esp32s3 -d my-app"
+        after_help = "Examples:\n  espforge new\n  espforge new --example blink --chip esp32s3 --dir blink"
     )]
     New(commands::new::NewArgs),
-
-    /// Start from an example, one question at a time.
-    ///
-    /// The friendly way in: it explains what it is about to ask, then asks for
-    /// the category, the example, the chip and the directory. Same result as
-    /// `espforge new`.
-    #[command(name = "interactive", after_help = "Example:\n  espforge interactive")]
-    Interactive,
 
     /// Validate a project without writing anything.
     ///
@@ -55,7 +47,7 @@ enum Commands {
     /// generate a crate: `espforge build` verifies the generated project.
     #[command(
         name = "check",
-        after_help = "Examples:\n  espforge check\n  espforge check my-app\n  espforge check --example blink --chip esp32s3"
+        after_help = "Examples:\n  espforge check\n  espforge check blink\n  espforge check --example blink --chip esp32s3"
     )]
     Check(commands::check::CheckArgs),
 
@@ -84,7 +76,6 @@ fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Commands::Examples) => commands::examples::run(),
         Some(Commands::New(args)) => commands::new::run(args),
-        Some(Commands::Interactive) => commands::new::run_interactive(),
         Some(Commands::Check(args)) => commands::check::run(args),
         Some(Commands::Gen(args)) => commands::generate::run(args),
         Some(Commands::Build(args)) => commands::build::run(args),
@@ -111,21 +102,13 @@ mod tests {
         let names: Vec<&str> = cmd.get_subcommands().map(|c| c.get_name()).collect();
         assert_eq!(
             names,
-            [
-                "examples",
-                "new",
-                "interactive",
-                "check",
-                "gen",
-                "build",
-                "doctor"
-            ]
+            ["examples", "new", "check", "gen", "build", "doctor"]
         );
     }
 
     #[test]
-    fn interactive_subcommand_parses() {
-        assert!(Cli::try_parse_from(["espforge", "interactive"]).is_ok());
+    fn new_subcommand_parses() {
+        assert!(Cli::try_parse_from(["espforge", "new"]).is_ok());
     }
 
     #[test]
@@ -152,36 +135,54 @@ mod tests {
     }
 
     #[test]
-    fn new_takes_flags_and_an_empty_invocation() {
+    fn new_takes_all_three_flags_for_a_non_interactive_run() {
         let cli = Cli::try_parse_from([
             "espforge",
             "new",
             "--example",
             "blink",
-            "--dir",
-            "my-app",
             "--chip",
             "esp32s3",
+            "-d",
+            "my-app",
         ])
         .unwrap();
         match cli.command {
             Some(Commands::New(args)) => {
                 assert_eq!(args.example.as_deref(), Some("blink"));
-                assert_eq!(args.dir, Some(PathBuf::from("my-app")));
                 assert_eq!(args.chip.as_deref(), Some("esp32s3"));
+                assert_eq!(args.dir, Some(PathBuf::from("my-app")));
             }
             other => panic!("expected `new`, got {other:?}"),
         }
+    }
 
-        // The short forms the help advertises.
-        let cli = Cli::try_parse_from([
-            "espforge", "new", "-e", "blink", "-c", "esp32c3", "-d", "app",
-        ])
-        .unwrap();
-        assert!(matches!(cli.command, Some(Commands::New(_))));
-
-        // Bare `new` parses: the wizard fills in what is missing.
+    #[test]
+    fn new_without_flags_still_asks() {
         assert!(Cli::try_parse_from(["espforge", "new"]).is_ok());
+    }
+
+    #[test]
+    fn new_with_missing_flags_is_a_usage_error() {
+        let partial = [
+            vec!["espforge", "new", "--example", "blink"],
+            vec!["espforge", "new", "--chip", "esp32c3"],
+            vec!["espforge", "new", "--dir", "my-app"],
+            vec!["espforge", "new", "--example", "blink", "--chip", "esp32c3"],
+        ];
+        for args in partial {
+            let err = match Cli::try_parse_from(args) {
+                Ok(_) => panic!("a partial set of flags must fail"),
+                Err(err) => err,
+            };
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "{err}"
+            );
+            let rendered = err.to_string();
+            assert!(rendered.contains("Usage:"), "{rendered}");
+        }
     }
 
     #[test]

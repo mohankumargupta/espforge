@@ -14,8 +14,8 @@
 use anyhow::{Context, Result};
 use espforge_elements::element::EmitParts;
 use espforge_elements::{Board, EmitCx, Lowered, MainCtx, Meta, ResolvedOptions, Runtime};
-use proc_macro2::TokenStream;
 use proc_macro2::Literal;
+use proc_macro2::TokenStream;
 use quote::format_ident;
 
 use super::comments::{self, Comment};
@@ -793,9 +793,7 @@ mod tests {
     fn a_wss_client_bumps_the_heap_but_a_ws_client_does_not() {
         let case = case("esp32c3", Runtime::Embassy, true, &[], &["wifi"]);
         let mut board = empty_board(&case);
-        board
-            .services
-            .push(service("ws_client", "ws-client", None));
+        board.services.push(service("ws_client", "ws-client", None));
         let text = main(&board, &collect(&board), &case.meta, &case.opts).unwrap();
         assert!(
             text.contains("esp_alloc::heap_allocator!(size : 72 * 1024);"),

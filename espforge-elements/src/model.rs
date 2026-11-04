@@ -604,9 +604,8 @@ impl crate::element::Lowered for Service {
 
         let init = match &self.config {
             Some(config) => {
-                let config_ty: TokenStream = config
-                    .parse()
-                    .expect("a service config is a Rust path");
+                let config_ty: TokenStream =
+                    config.parse().expect("a service config is a Rust path");
                 let fields: Vec<TokenStream> = self
                     .config_fields
                     .iter()
@@ -715,10 +714,7 @@ impl crate::element::Lowered for Device {
         let args: Vec<TokenStream> = self
             .args
             .iter()
-            .map(|arg| {
-                arg.parse()
-                    .expect("a device argument is a Rust expression")
-            })
+            .map(|arg| arg.parse().expect("a device argument is a Rust expression"))
             .collect();
 
         cx.device_field(quote! {

@@ -34,7 +34,7 @@ pub fn render(list: &[ExampleInfo]) -> String {
         out.push_str(line.trim_end());
         out.push('\n');
     }
-    out.push_str("\nCreate a project:  espforge new --example <example> --dir <dir>\n");
+    out.push_str("\nCreate a project:  espforge new\n");
     out
 }
 
@@ -67,7 +67,7 @@ mod tests {
              02.Digital\n\
              \x20 button\n\
              \n\
-             Create a project:  espforge new --example <example> --dir <dir>\n"
+             Create a project:  espforge new\n"
         );
     }
 
@@ -87,8 +87,7 @@ mod tests {
             }
         }
         assert!(
-            text.trim_end()
-                .ends_with("Create a project:  espforge new --example <example> --dir <dir>"),
+            text.trim_end().ends_with("Create a project:  espforge new"),
             "{text}"
         );
     }
