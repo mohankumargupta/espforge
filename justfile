@@ -41,6 +41,20 @@ list-examples:
         | sed -E 's|espforge-examples/src/examples/(.*)/example\.espf\.txt|  - \1|' \
         | sort
 
+# Bump the workspace version: rewrites the root Cargo.toml (the
+# #[workspace.package] version and the nine `[workspace.dependencies]` pins) and
+# refreshes Cargo.lock. No member manifest carries a version of its own.
+bump version:
+    @echo "==> [bump] {{ version }}"
+    @sed -E \
+        -e 's/^version = "[^"]*"$/version = "{{ version }}"/' \
+        -e 's/^([A-Za-z0-9_-]+) = \{ path = ("[^"]*"), version = "[^"]*" \}$/\1 = { path = \2, version = "{{ version }}" }/' \
+        Cargo.toml > Cargo.toml.tmp
+    @mv Cargo.toml.tmp Cargo.toml
+    @cargo update --workspace --quiet
+    @echo "==> [bump] Cargo.toml and Cargo.lock updated. Regenerate the goldens:"
+    @echo "    UPDATE_GOLDENS=1 cargo test -p espforge --test golden_projects"
+
 cratesio:
     cargo ws publish --from-git  --no-verify --allow-dirty --publish-interval 120
 

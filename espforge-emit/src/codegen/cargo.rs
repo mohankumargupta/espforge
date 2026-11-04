@@ -309,6 +309,12 @@ mod tests {
     use super::*;
     use crate::codegen::test_support::{board, case, chip, device, service};
 
+    /// The version the emitter writes, so a workspace bump never has to touch
+    /// these expectations.
+    fn version() -> &'static str {
+        RUNTIME_VERSION
+    }
+
     fn cargo(defaults: bool, flags: &[(&str, &str)], runtime: Runtime) -> String {
         cargo_with(defaults, flags, runtime, &board())
     }
@@ -358,7 +364,7 @@ mod tests {
         let deps = doc["dependencies"].as_table().unwrap();
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ version = \"0.7.2\" }"
+            format!("{{ version = \"{}\" }}", version())
         );
         assert!(deps.get("embassy-executor").is_none());
         assert!(deps.get("esp-rtos").is_none());
@@ -383,7 +389,10 @@ mod tests {
         assert!(doc["dependencies"].get("embassy-sync").is_some());
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ version = \"0.7.2\", features = [\"embassy\"] }"
+            format!(
+                "{{ version = \"{}\", features = [\"embassy\"] }}",
+                version()
+            )
         );
         // Embassy alone does not drag in the radio stack; `<wifi>` does.
         for name in ["esp-radio", "embassy-net", "smoltcp", "embedded-io"] {
@@ -445,7 +454,7 @@ mod tests {
         assert_eq!(doc["package"]["description"].as_str(), Some("demo"));
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ path = \"../rt\", version = \"0.7.2\" }"
+            format!("{{ path = \"../rt\", version = \"{}\" }}", version())
         );
         // with defaults off, neither alloc nor unstable-hal is implied
         assert!(doc["dependencies"].get("esp-alloc").is_none());
@@ -479,7 +488,10 @@ mod tests {
         ));
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ version = \"0.7.2\", features = [\"embassy\", \"http-client\"] }"
+            format!(
+                "{{ version = \"{}\", features = [\"embassy\", \"http-client\"] }}",
+                version()
+            )
         );
         // Nothing extra lands in the project's own manifest.
         for name in ["edge-http", "edge-net", "embedded-tls"] {
@@ -497,7 +509,10 @@ mod tests {
         ));
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ version = \"0.7.2\", features = [\"embassy\", \"https-client\"] }"
+            format!(
+                "{{ version = \"{}\", features = [\"embassy\", \"https-client\"] }}",
+                version()
+            )
         );
     }
 
@@ -513,7 +528,10 @@ mod tests {
         ));
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ version = \"0.7.2\", features = [\"embassy\", \"ws-client\"] }"
+            format!(
+                "{{ version = \"{}\", features = [\"embassy\", \"ws-client\"] }}",
+                version()
+            )
         );
         for name in ["edge-ws", "edge-http", "embedded-tls"] {
             assert!(doc["dependencies"].get(name).is_none(), "{name}");
@@ -530,7 +548,10 @@ mod tests {
         ));
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ version = \"0.7.2\", features = [\"embassy\", \"wss-client\"] }"
+            format!(
+                "{{ version = \"{}\", features = [\"embassy\", \"wss-client\"] }}",
+                version()
+            )
         );
     }
 
@@ -546,7 +567,10 @@ mod tests {
         ));
         assert_eq!(
             dependency(&doc, "espforge-runtime"),
-            "{ version = \"0.7.2\", features = [\"embassy\", \"ntp\"] }"
+            format!(
+                "{{ version = \"{}\", features = [\"embassy\", \"ntp\"] }}",
+                version()
+            )
         );
         for name in ["sntpc", "edge-http", "edge-ws", "embedded-tls"] {
             assert!(doc["dependencies"].get(name).is_none(), "{name}");
@@ -582,21 +606,30 @@ mod tests {
         for (features, expected) in [
             (
                 &["ssd1306"][..],
-                "{ version = \"0.7.2\", features = [\"ssd1306\"] }",
+                format!(
+                    "{{ version = \"{}\", features = [\"ssd1306\"] }}",
+                    version()
+                ),
             ),
             (
                 &["ili9341"][..],
-                "{ version = \"0.7.2\", features = [\"ili9341\"] }",
+                format!(
+                    "{{ version = \"{}\", features = [\"ili9341\"] }}",
+                    version()
+                ),
             ),
             (
                 &["ssd1306", "ili9341"][..],
-                "{ version = \"0.7.2\", features = [\"ssd1306\", \"ili9341\"] }",
+                format!(
+                    "{{ version = \"{}\", features = [\"ssd1306\", \"ili9341\"] }}",
+                    version()
+                ),
             ),
         ] {
             let doc = with(features);
             assert_eq!(
                 dependency(&doc, "espforge-runtime"),
-                "{ version = \"0.7.2\" }"
+                format!("{{ version = \"{}\" }}", version())
             );
             assert_eq!(dependency(&doc, "espforge-drivers"), expected);
             assert_eq!(dependency(&doc, "embedded-graphics"), "\"0.8.1\"");
@@ -630,7 +663,7 @@ mod tests {
         );
         assert_eq!(
             dependency(&doc, "espforge-drivers"),
-            "{ version = \"0.7.2\", features = [\"scd4x\"] }"
+            format!("{{ version = \"{}\", features = [\"scd4x\"] }}", version())
         );
         assert!(doc["dependencies"].get("embedded-graphics").is_none());
     }
@@ -654,7 +687,10 @@ mod tests {
         );
         assert_eq!(
             dependency(&doc, "espforge-drivers"),
-            "{ path = \"/work/espforge-drivers\", version = \"0.7.2\", features = [\"ssd1306\"] }"
+            format!(
+                "{{ path = \"/work/espforge-drivers\", version = \"{}\", features = [\"ssd1306\"] }}",
+                version()
+            )
         );
     }
 
