@@ -1,8 +1,9 @@
 //! `espforge new`: an embedded example as an editable project.
 //!
-//! There are two ways in — flags for scripts, and an interactive wizard when
-//! the terminal allows it — and both resolve to the same [`Plan`] and go
-//! through the same write, so the wizard cannot drift from the flags.
+//! There are three ways in — flags for scripts, a wizard when the terminal
+//! allows it, and `interactive`, the same wizard after a short explanation —
+//! and all of them resolve to the same [`Plan`] and go through the same write,
+//! so no entry can drift from another.
 //!
 //! Resolving a name and writing the tree belong to `espforge_examples`; editing
 //! the spec's chip belongs to `espforge_core`; this module only asks, in the
@@ -27,6 +28,10 @@ const DEFAULT_CHIP: &str = "esp32c3";
 
 /// Set this to keep `espforge new` from ever blocking on a prompt.
 const NO_PROMPT: &str = "ESPFORGE_NO_PROMPT";
+
+/// What `espforge interactive` says before its first question: the point of
+/// the subcommand is to explain the shape of what is coming.
+const INTERACTIVE_CONTEXT: &str = "As a starting point for your espforge project, start with an example, and build from there.\n\nFirst pick an example category, then an example.";
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct NewArgs {
@@ -85,6 +90,27 @@ pub fn execute(args: &NewArgs) -> Result<(), Failure> {
     execute_with(args, Mode::for_terminal())
 }
 
+/// `espforge interactive`: bare `new`'s wizard, introduced by a sentence
+/// explaining what the questions are for. No flags to know.
+pub fn run_interactive() -> ExitCode {
+    exit_code(interactive())
+}
+
+fn interactive() -> Result<(), Failure> {
+    if !Mode::for_terminal().prompts() {
+        return Err(user(
+            "`espforge interactive` needs a terminal with prompts enabled; \
+             run `espforge new --example <EXAMPLE> --dir <DIR>` instead",
+        ));
+    }
+    cliclack::intro("espforge interactive").map_err(|_| cancelled())?;
+    cliclack::note("Getting started", INTERACTIVE_CONTEXT).map_err(|_| cancelled())?;
+
+    let plan = plan(&NewArgs::default(), true)?;
+    let done = write(&plan)?;
+    report_new(&done, &plan, true)
+}
+
 /// Everything `new` decided before writing anything.
 #[derive(Debug)]
 struct Plan {
@@ -130,7 +156,7 @@ fn plan(args: &NewArgs, wizard: bool) -> Result<Plan, Failure> {
 
     let dir = match &args.dir {
         Some(dir) => dir.clone(),
-        None if wizard => prompt_dir(example)?,
+        None if wizard => prompt_dir()?,
         None => return Err(missing("--dir <DIR>")),
     };
 
@@ -166,10 +192,11 @@ fn default_chip(example: &Example) -> String {
 fn prompt_example() -> Result<&'static Example, Failure> {
     let category = prompt_category()?;
 
+    // The names are descriptive enough on their own; the banner title would
+    // only add noise here.
     let mut prompt = cliclack::select("Example to start from").filter_mode();
     for example in &category.examples {
-        let hint = example.title.as_deref().unwrap_or("");
-        prompt = prompt.item(example.name.as_str(), &example.name, hint);
+        prompt = prompt.item(example.name.as_str(), &example.name, "");
     }
     let name: &str = prompt.interact().map_err(|_| cancelled())?;
     category
@@ -213,14 +240,9 @@ fn prompt_chip(example: &Example) -> Result<String, Failure> {
     if choices.contains(&default) {
         prompt = prompt.initial_value(default);
     }
+    // Just the chip names: the descriptions belong in docs, not in a picker.
     for chip in &choices {
-        let about = chips::description(chip).unwrap_or("supported target");
-        let hint = if example.chips.iter().any(|built| built == chip) {
-            format!("{about} · built for this example")
-        } else {
-            format!("{about} · not built for this example")
-        };
-        prompt = prompt.item(chip.clone(), chip, hint);
+        prompt = prompt.item(chip.clone(), chip, "");
     }
     prompt.interact().map_err(|_| cancelled())
 }
@@ -243,18 +265,35 @@ fn chip_choices(example: &Example) -> Vec<String> {
     choices
 }
 
-fn prompt_dir(example: &Example) -> Result<PathBuf, Failure> {
-    let default = format!("./{}", example.name);
+/// Ask where the project goes. The field starts blank; a blank answer means
+/// the current directory, so pressing Enter is always a valid answer.
+fn prompt_dir() -> Result<PathBuf, Failure> {
     let dir: String = cliclack::input("Project directory")
-        .placeholder(&default)
-        .default_input(&default)
-        .validate(|input: &String| match directory_problem(Path::new(input)) {
-            Some(problem) => Err(problem),
-            None => Ok(()),
+        .placeholder("leave blank for the current directory")
+        .required(false)
+        .validate(|input: &String| {
+            let input = input.trim();
+            if input.is_empty() {
+                return Ok(());
+            }
+            match directory_problem(Path::new(input)) {
+                Some(problem) => Err(problem),
+                None => Ok(()),
+            }
         })
         .interact()
         .map_err(|_| cancelled())?;
-    Ok(PathBuf::from(dir))
+    Ok(destination(&dir))
+}
+
+/// The directory a typed answer names: blank is the current directory.
+fn destination(input: &str) -> PathBuf {
+    let input = input.trim();
+    if input.is_empty() {
+        PathBuf::from(".")
+    } else {
+        PathBuf::from(input)
+    }
 }
 
 /// Why `dir` is not available, in the prompt's words.
@@ -515,6 +554,25 @@ mod tests {
         };
         assert!(matches!(never(&partial), Err(Failure::User)));
         assert!(!scratch.path().join("blink").exists());
+    }
+
+    #[test]
+    fn an_empty_directory_answer_means_the_current_directory() {
+        assert_eq!(destination(""), PathBuf::from("."));
+        assert_eq!(destination("   "), PathBuf::from("."));
+        assert_eq!(destination("my-app"), PathBuf::from("my-app"));
+    }
+
+    #[test]
+    fn interactive_explains_the_questions_before_asking_them() {
+        assert!(
+            INTERACTIVE_CONTEXT.contains("start with an example"),
+            "{INTERACTIVE_CONTEXT}"
+        );
+        assert!(
+            INTERACTIVE_CONTEXT.contains("category"),
+            "{INTERACTIVE_CONTEXT}"
+        );
     }
 
     #[test]

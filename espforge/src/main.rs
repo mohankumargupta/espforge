@@ -5,9 +5,9 @@
 //! 0 success, 1 the user's input is at fault (already explained), 2 an
 //! internal or IO failure.
 //!
-//! The commands follow one workflow: `examples` (what is available) -> `new`
-//! (start a project) -> `check` (validate it) -> `gen` (write the crate) ->
-//! `build` (write it and compile).
+//! The commands follow one workflow: `examples` (what is available) ->
+//! `new`/`interactive` (start a project) -> `check` (validate it) -> `gen`
+//! (write the crate) -> `build` (write it and compile).
 
 mod commands;
 
@@ -40,6 +40,14 @@ enum Commands {
         after_help = "Examples:\n  espforge new\n  espforge new --example blink --dir my-app\n  espforge new -e blink -c esp32s3 -d my-app"
     )]
     New(commands::new::NewArgs),
+
+    /// Start from an example, one question at a time.
+    ///
+    /// The friendly way in: it explains what it is about to ask, then asks for
+    /// the category, the example, the chip and the directory. Same result as
+    /// `espforge new`.
+    #[command(name = "interactive", after_help = "Example:\n  espforge interactive")]
+    Interactive,
 
     /// Validate a project without writing anything.
     ///
@@ -76,6 +84,7 @@ fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Commands::Examples) => commands::examples::run(),
         Some(Commands::New(args)) => commands::new::run(args),
+        Some(Commands::Interactive) => commands::new::run_interactive(),
         Some(Commands::Check(args)) => commands::check::run(args),
         Some(Commands::Gen(args)) => commands::generate::run(args),
         Some(Commands::Build(args)) => commands::build::run(args),
@@ -102,8 +111,21 @@ mod tests {
         let names: Vec<&str> = cmd.get_subcommands().map(|c| c.get_name()).collect();
         assert_eq!(
             names,
-            ["examples", "new", "check", "gen", "build", "doctor"]
+            [
+                "examples",
+                "new",
+                "interactive",
+                "check",
+                "gen",
+                "build",
+                "doctor"
+            ]
         );
+    }
+
+    #[test]
+    fn interactive_subcommand_parses() {
+        assert!(Cli::try_parse_from(["espforge", "interactive"]).is_ok());
     }
 
     #[test]

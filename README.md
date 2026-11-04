@@ -102,6 +102,9 @@ espforge examples
 # asks for the example, the chip and the directory:
 espforge new
 
+# the same wizard, explained step by step:
+espforge interactive
+
 # or says it up front:
 espforge new --example blink --chip esp32s3 --dir my-app
 
