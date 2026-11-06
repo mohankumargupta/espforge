@@ -25,8 +25,11 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// List the embedded examples, grouped by category.
-    #[command(name = "examples", after_help = "Example:\n  espforge examples")]
-    Examples,
+    #[command(
+        name = "examples",
+        after_help = "Examples:\n  espforge examples\n  espforge examples --list"
+    )]
+    Examples(commands::examples::ExamplesArgs),
 
     /// Start a project from an embedded example.
     ///
@@ -74,7 +77,7 @@ enum Commands {
 
 fn main() -> ExitCode {
     match Cli::parse().command {
-        Some(Commands::Examples) => commands::examples::run(),
+        Some(Commands::Examples(args)) => commands::examples::run(args),
         Some(Commands::New(args)) => commands::new::run(args),
         Some(Commands::Check(args)) => commands::check::run(args),
         Some(Commands::Gen(args)) => commands::generate::run(args),
@@ -104,6 +107,27 @@ mod tests {
             names,
             ["examples", "new", "check", "gen", "build", "doctor"]
         );
+    }
+
+    #[test]
+    fn examples_subcommand_parses_default_and_flags() {
+        let cli = Cli::try_parse_from(["espforge", "examples"]).unwrap();
+        match cli.command {
+            Some(Commands::Examples(args)) => assert!(!args.list),
+            other => panic!("expected Examples, got {other:?}"),
+        }
+
+        let cli_long = Cli::try_parse_from(["espforge", "examples", "--list"]).unwrap();
+        match cli_long.command {
+            Some(Commands::Examples(args)) => assert!(args.list),
+            other => panic!("expected Examples, got {other:?}"),
+        }
+
+        let cli_short = Cli::try_parse_from(["espforge", "examples", "-l"]).unwrap();
+        match cli_short.command {
+            Some(Commands::Examples(args)) => assert!(args.list),
+            other => panic!("expected Examples, got {other:?}"),
+        }
     }
 
     #[test]

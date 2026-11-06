@@ -5,10 +5,27 @@
 
 use std::process::ExitCode;
 
+use clap::Args;
 use espforge_examples::ExampleInfo;
 
-pub fn run() -> ExitCode {
-    print!("{}", render(&espforge_examples::list()));
+#[derive(Args, Debug, Clone, Default)]
+pub struct ExamplesArgs {
+    /// Print only the example short names, one per line (machine-readable)
+    #[arg(long, short)]
+    pub list: bool,
+}
+
+pub fn run(args: ExamplesArgs) -> ExitCode {
+    let examples = espforge_examples::list();
+
+    if args.list {
+        for example in &examples {
+            println!("{}", example.name);
+        }
+    } else {
+        print!("{}", render(&examples));
+    }
+
     ExitCode::SUCCESS
 }
 
@@ -90,5 +107,11 @@ mod tests {
             text.trim_end().ends_with("Create a project:  espforge new"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn default_args_has_list_false() {
+        let args = ExamplesArgs::default();
+        assert!(!args.list);
     }
 }
