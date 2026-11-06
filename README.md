@@ -91,6 +91,10 @@ Depending on the targets you want, you will either install
 additional toolchain into standard rust, or if you want xtensa based
 ones you will be asked to use espup install.
 
+## Walkthrough
+
+![espforge new](https://cdn.jsdelivr.net/gh/mohankumargupta/assets@refs/heads/main/espforge-new-clone.svg)
+
 ## Examples
 
 `espforge examples` lists the embedded examples. `espforge new` copies one into a
@@ -109,12 +113,6 @@ cd blink
 espforge build
 ```
 
-`new` with no flags needs an interactive terminal. Give all of `--example`,
-`--chip` and `--dir` and it runs without one; missing any of the three is a
-usage error and prints the command's usage. The chip is preselected to the one
-the example is built for (each example declares its chips in `example.toml`);
-another chip is allowed, and `new` says so when that chip has not been built for
-that example. A blank directory answer means a directory named after the example.
 For scripted generation, use `espforge gen --example <example> --out <dir>`. The
 table below is what `espforge examples` lists:
 
@@ -131,7 +129,7 @@ table below is what `espforge examples` lists:
 
 MIT
 
-## Similar projects for inspiration
+## projects for inspiration
 
 -  espresif iot solution https://github.com/espressif/esp-iot-solution
 -  esphome
