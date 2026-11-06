@@ -55,6 +55,12 @@ bump version:
     @echo "==> [bump] Cargo.toml and Cargo.lock updated. Regenerate the goldens:"
     @echo "    UPDATE_GOLDENS=1 cargo test -p espforge --test golden_projects"
 
+tag version:
+    #!/usr/bin/env bash
+    TAG="v{{ version }}"
+    git tag "$TAG"
+    git push origin "$TAG"
+
 cratesio:
     cargo ws publish --from-git  --no-verify --allow-dirty --publish-interval 120
 
