@@ -54,7 +54,7 @@ bump version:
     @cargo update --workspace --quiet
     @echo "==> [bump] Cargo.toml and Cargo.lock updated. Regenerate the goldens:"
     @echo "    UPDATE_GOLDENS=1 cargo test -p espforge --test golden_projects"
-
+    echo "Now do cargo build, push to github, before you tag"
 tag version:
     #!/usr/bin/env bash
     TAG="v{{ version }}"
