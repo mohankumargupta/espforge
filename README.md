@@ -63,6 +63,9 @@ project to `build/` (change it with `--out`) and compiles it.
 
 If you want to see the examples in this repo in action, click [here](https://github.com/mohankumargupta/espforge_wokwi)
 
+If you want to see what is the generated rust no_std examples look like,
+click [here](https://github.com/mohankumargupta/espforge-extras/tree/main/espforge-examples-generated)
+
 ## Prerequisites
 **Rust**: [Install Rust](https://rustup.rs/)
 
