@@ -83,10 +83,11 @@ fn flags(opts: &ResolvedOptions, chip: &Chip) -> Array {
 
 /// Append `--partition-table partitions.csv` to the espflash runner.
 ///
-/// A project that supplies its own `partitions.csv` is flashed with that
-/// table, so a custom layout (data partitions, asymmetric OTA slots) is not
-/// silently ignored. Called by the overlay layer, which is what knows whether
-/// the project has one.
+/// A project with a `partitions.csv` is flashed with that table, so a custom
+/// layout (data partitions, asymmetric OTA slots) is not silently ignored.
+/// Called by the overlay layer, which is what knows whether the project has
+/// one; a runner that already names a table is left alone, so the flag is
+/// appended at most once.
 pub fn with_partition_table(config: &str) -> Result<String> {
     let mut doc = config
         .parse::<DocumentMut>()
@@ -103,6 +104,7 @@ pub fn with_partition_table(config: &str) -> Result<String> {
         };
         let patched = value
             .as_str()
+            .filter(|runner| !runner.contains("--partition-table"))
             .map(|runner| format!("{runner} --partition-table partitions.csv"));
         if let Some(patched) = patched {
             *value = Value::from(patched);
@@ -241,6 +243,23 @@ mod tests {
         let xtensa = parse(&toolchain(&chip("esp32s3")).unwrap());
         assert_eq!(xtensa["toolchain"]["channel"].as_str(), Some("esp"));
         assert!(xtensa["toolchain"].get("components").is_none());
+    }
+
+    /// The overlay layer calls this once; a config that already names a table
+    /// (a future backend that writes the flag itself) must not gain a second.
+    #[test]
+    fn the_partition_table_flag_is_appended_at_most_once() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let generated = cargo_config(&case.opts, &chip("esp32c3")).unwrap();
+        let once = with_partition_table(&generated).unwrap();
+        let twice = with_partition_table(&once).unwrap();
+        assert_eq!(once, twice);
+        assert_eq!(once.matches("--partition-table").count(), 1, "{once}");
+        let doc = parse(&once);
+        assert_eq!(
+            doc["target"]["riscv32imc-unknown-none-elf"]["runner"].as_str(),
+            Some("espflash flash --monitor --chip esp32c3 --partition-table partitions.csv")
+        );
     }
 
     #[test]

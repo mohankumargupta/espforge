@@ -81,8 +81,9 @@ pub struct Rendered {
 ///   the diagram has to name the same chip (see [`check_chip_parts`]).
 /// * `partitions.csv`, `rust-toolchain.toml`, `.cargo/config.toml` and
 ///   `.cargo/esp-config.toml` replace the generated files of the same names.
-///   A `partitions.csv` also puts `--partition-table partitions.csv` on the
-///   espflash runner, unless the user replaced `.cargo/config.toml` outright.
+///   Any `partitions.csv` in the output - the project's own, or one a backend
+///   generated - also puts `--partition-table partitions.csv` on the espflash
+///   runner, unless the user replaced `.cargo/config.toml` outright.
 /// * `Cargo.extra.toml` is merged into the generated `Cargo.toml` (see
 ///   [`codegen::cargo::merge`]): its dependencies, patches, profiles and lints
 ///   are added, and espforge's own keys stay authoritative.
@@ -119,7 +120,6 @@ pub fn layer_overlay(
     }
 
     let mut have_chip = false;
-    let mut have_partitions = false;
     let mut own_cargo_config = false;
     for f in overlay {
         match f.path {
@@ -139,10 +139,7 @@ pub fn layer_overlay(
                 put(f, artifacts, assets);
             }
             p if p.starts_with("chip/") && wokwi && keep_zig => put(f, artifacts, assets),
-            "partitions.csv" => {
-                have_partitions = true;
-                put(f, artifacts, assets);
-            }
+            "partitions.csv" => put(f, artifacts, assets),
             ".cargo/config.toml" => {
                 own_cargo_config = true;
                 put(f, artifacts, assets);
@@ -167,8 +164,10 @@ pub fn layer_overlay(
         check_chip_parts(&a.content, name)?;
     }
 
-    // A project with its own partition table is flashed with it. A user who
-    // replaced `.cargo/config.toml` owns the runner line themselves.
+    // A project with a partition table is flashed with it, whether the table
+    // came from beside the `.espf` or from a backend (a generated OTA layout).
+    // A user who replaced `.cargo/config.toml` owns the runner line themselves.
+    let have_partitions = artifacts.iter().any(|a| a.path == "partitions.csv");
     if have_partitions
         && !own_cargo_config
         && let Some(a) = artifacts
@@ -560,6 +559,24 @@ mod tests {
         assert!(
             config.contains("--partition-table partitions.csv"),
             "{config}"
+        );
+    }
+
+    /// Only a project that has a partition table gets the flag: otherwise the
+    /// generated runner is left exactly as emitted.
+    #[test]
+    fn without_a_partition_table_the_runner_is_unchanged() {
+        let (board, opts) = board_case();
+        let rendered = generated(&board, &opts, &[]);
+        let config = &file(&rendered, ".cargo/config.toml").content;
+        assert!(
+            config.contains("runner = \"espflash flash --monitor --chip esp32c3\""),
+            "{config}"
+        );
+        assert!(!config.contains("--partition-table"), "{config}");
+        assert!(
+            rendered.artifacts.iter().all(|a| a.path != "partitions.csv"),
+            "no table is emitted without <ota /> or an overlay"
         );
     }
 
