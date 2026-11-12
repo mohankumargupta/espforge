@@ -1,0 +1,37 @@
+// A project driver package: the manifest is data, the crate is beside it.
+//
+// This is the shape `espforge driver add` records and the generated project
+// depends on by path. The tag is deliberately not a bundled one: a duplicate
+// tag is refused, so an external driver never shadows `espforge-drivers`.
+driver "fx_accel" {
+    format_version 2
+    summary "Fixture accelerometer from a project driver package"
+    description "A two-byte identity sensor used to prove the package path end to end."
+    category "sensor"
+
+    dependency "espforge-driver-fx-accel" {
+        path "../fx-accel-driver"
+    }
+    dependency "embedded-graphics" {
+        version "0.8.1"
+    }
+
+    bus "i2c" {
+        address fixed="0x10"
+    }
+
+    codegen {
+        runtime "blocking" {
+            type "espforge_driver_fx_accel::FxAccel"
+            constructor "espforge_driver_fx_accel::FxAccel::new({bus_device}, {address})"
+        }
+    }
+
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "boot builds the sensor before setup; deferred builds it when the app calls init()."
+    }
+
+    example "minimal" #"<fx_accel id="accel" bus="$i2c0" address="0x10" />"#
+    see_also "peripherals/i2c"
+}

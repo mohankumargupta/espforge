@@ -6,8 +6,8 @@
 //! `chip.wasm` + `chip.json` (seeded at the project root), the `chip-<name>`
 //! part in `diagram.json` only resolves if `wokwi.toml` declares it. The
 //! section is appended as text so an example's own `wokwi.toml` keeps its
-//! formatting; the name is parsed from `chip.json` (every example uses
-//! `chip`, which is the fallback).
+//! formatting; the name is the example's `chip.json` name ([`chip_name`]),
+//! falling back to `chip` only when the example ships no chip description.
 
 use anyhow::Result;
 use espforge_elements::Meta;
@@ -44,20 +44,49 @@ pub fn build(meta: &Meta, chip: &Chip) -> Result<String> {
     Ok(doc.to_string())
 }
 
+/// The name a project's custom chip falls back to when its example ships a
+/// `chip.wasm` but no `chip.json`.
+pub const DEFAULT_CHIP_NAME: &str = "chip";
+
 /// The `[[chip]]` section to append to the emitted `wokwi.toml`.
 ///
-/// `chip_json` is the seeded `chip.json` contents when the example has one;
-/// its `"name"` field becomes the wokwi part suffix, else `"chip"`. TOML
-/// literal string quoting is used, which is safe for the identifier-style
-/// names wokwi chips use. Both seeded files sit next to `wokwi.toml` at the
-/// project root, and Wokwi pairs the JSON pin description with the wasm by
-/// basename (`chip.wasm` / `chip.json`).
-pub fn chip_section(chip_json: Option<&str>) -> String {
-    let name = chip_json
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(str::to_string))
-        .unwrap_or_else(|| "chip".to_string());
+/// `name` is the example's declared chip name; `None` keeps the historical
+/// [`DEFAULT_CHIP_NAME`]. TOML literal string quoting is used, which is safe
+/// because [`validate_chip_name`] restricts names to lowercase letters and
+/// digits. Both seeded files sit next to `wokwi.toml` at the project root, and
+/// Wokwi pairs the JSON pin description with the wasm by basename (`chip.wasm`
+/// / `chip.json`).
+pub fn chip_section(name: Option<&str>) -> String {
+    let name = name.unwrap_or(DEFAULT_CHIP_NAME);
     format!("\n[[chip]]\nname = '{name}'\nbinary = 'chip.wasm'\n")
+}
+
+/// The `name` a `chip.json` declares: the suffix Wokwi resolves a `chip-<name>`
+/// part through. `None` when the file is not JSON or carries no string name.
+pub fn chip_name(chip_json: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(chip_json)
+        .ok()?
+        .get("name")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Reject a chip name that cannot be a Wokwi part suffix.
+///
+/// The name reaches `diagram.json` as `chip-<name>` and `wokwi.toml` as a TOML
+/// literal string, so it is kept to the spelling the published examples use.
+pub fn validate_chip_name(name: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    let valid = name.len() <= 32
+        && chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "chip name `{name}` must match `^[a-z][a-z0-9]*$` and be at most 32 characters"
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -106,11 +135,12 @@ mod tests {
     #[test]
     fn the_chip_section_takes_its_name_from_chip_json() {
         let json = r#"{"name": "chip", "pins": ["SDA", "SCL"]}"#;
+        assert_eq!(chip_name(json).as_deref(), Some("chip"));
         assert_eq!(
-            chip_section(Some(json)),
+            chip_section(chip_name(json).as_deref()),
             "\n[[chip]]\nname = 'chip'\nbinary = 'chip.wasm'\n"
         );
-        assert!(chip_section(Some(r#"{"name": "mcp23017"}"#)).contains("name = 'mcp23017'"));
+        assert!(chip_section(Some("mcp23017")).contains("name = 'mcp23017'"));
     }
 
     #[test]
@@ -119,6 +149,20 @@ mod tests {
             chip_section(None),
             "\n[[chip]]\nname = 'chip'\nbinary = 'chip.wasm'\n"
         );
-        assert_eq!(chip_section(Some("not json")), chip_section(None));
+        assert_eq!(chip_name("not json"), None);
+        assert_eq!(chip_name(r#"{"name": 7}"#), None);
+        assert_eq!(chip_name("{}"), None);
+    }
+
+    #[test]
+    fn a_chip_name_is_lowercase_and_separator_free() {
+        for good in ["chip", "i2cscanner", "i2cexampleasync", "a1"] {
+            assert!(validate_chip_name(good).is_ok(), "{good} must be accepted");
+        }
+        for bad in ["", "Chip", "i2c-scanner", "i2c_scanner", "1chip", "a b"] {
+            let err = validate_chip_name(bad).expect_err("must be refused");
+            assert!(err.contains("`^[a-z][a-z0-9]*$`"), "{err}");
+        }
+        assert!(validate_chip_name(&"a".repeat(33)).is_err());
     }
 }

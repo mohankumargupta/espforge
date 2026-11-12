@@ -1,11 +1,10 @@
 // The schema (KDL v2): the single source of truth for what an ESPF file may
 // contain and for the build options it can turn on.
 //
-// This is the file cut to what is implemented: the five required sections
-// (`gpio`, `led` and `button` are the only elements outside `espforge`), and
-// the options helloworld's Cargo.toml depends on. An element is in this file
-// if and only if it is implemented; buses, services and devices arrive with
-// their implementations.
+// This is the file cut to what is implemented: the four required sections,
+// and the options helloworld's Cargo.toml depends on. An element is in this
+// file if and only if it is implemented; buses, services and devices arrive
+// with their implementations.
 //
 //   section "name" { summary ".."; description ".." }
 //   element "tag" section="name" {
@@ -16,7 +15,7 @@
 //       example "title" "fragment"  [see_also "section/tag"]
 //   }
 //
-// A component whose attributes are an `id`, one `ref` and booleans carries a
+// A device whose attributes are an `id`, one `ref` and booleans carries a
 // `recipe` and needs no Rust element file; the recipe tier reads it.
 //   options {
 //       option "name" [display_name=".."] [kind="bool|string|choice|list"]
@@ -85,7 +84,7 @@ element "options" section="espforge" {
 
 section "peripherals" {
     summary "The chip's hardware blocks you use: gpio, i2c, spi, uart"
-    description "The chip's hardware blocks that your project uses. Each one gets an id that components refer to with $id."
+    description "The chip's hardware blocks that your project uses. Each one gets an id that devices refer to with $id."
 }
 
 element "gpio" section="peripherals" {
@@ -93,15 +92,16 @@ element "gpio" section="peripherals" {
     attr "id" kind="ident" required=#true
     attr "pin" kind="pin" required=#true
     attr "direction" kind="choice" {
-        choices "output" "input"
+        choices "output" "input" "bidirectional"
     }
     example "minimal" #"<gpio id="gpio18" pin="18" />"#
     example "output" #"<gpio id="gpio18" pin="18" direction="output" />"#
+    example "one-wire line" #"<gpio id="gpio4" pin="4" direction="bidirectional" />"#
 }
 
 element "i2c" section="peripherals" {
     summary "I2C bus controller"
-    description #"Declares an I2C controller. Reference it from a component with i2c="$id"."#
+    description #"Declares an I2C controller. A device binds to it with bus="$id" and carries its own address."#
     attr "id" kind="ident" required=#true {
         help "i2c0, i2c1 or i2c2: the id names the esp-hal peripheral."
     }
@@ -112,19 +112,17 @@ element "i2c" section="peripherals" {
     attr "frequency" kind="freq" default="100kHz"
     example "minimal" #"<i2c id="i2c0" sda="6" scl="7" />"#
     example "with a bus speed" #"<i2c id="i2c0" sda="6" scl="7" frequency="400kHz" />"#
-    example "with a component" #"""
+    example "with a device" #"""
         # espforge
           <project name="i2c" />
           <chip type="esp32c3" />
           <runtime type="blocking" />
         # peripherals
           <i2c id="i2c0" sda="6" scl="7" />
-        # components
-          <i2c_component id="temp_bus" i2c="$i2c0" address="0x48" />
         # devices
+          <scd4x id="air" bus="$i2c0" address="0x62" />
         # services
         """#
-    see_also "components/i2c_component"
 }
 
 element "spi" section="peripherals" {
@@ -141,9 +139,12 @@ element "spi" section="peripherals" {
     attr "frequency" kind="freq" {
         help "Defaults to 1MHz when omitted."
     }
+    attr "cs" kind="pin" {
+        help "Optional chip select for direct raw-bus use; a device declares its own cs instead."
+    }
     example "write-only" #"<spi id="spi2" sclk="6" mosi="7" />"#
     example "full duplex" #"<spi id="spi2" sclk="8" mosi="7" miso="6" mode="0" frequency="100kHz" />"#
-    see_also "components/spi_component"
+    example "raw device" #"<spi id="spi2" sclk="8" mosi="7" miso="6" cs="9" />"#
 }
 
 element "uart" section="peripherals" {
@@ -154,9 +155,17 @@ element "uart" section="peripherals" {
     }
     attr "tx" kind="pin" required=#true
     attr "rx" kind="pin" required=#true
+    attr "baud_rate" kind="u32" default="115200"
+    attr "parity" kind="choice" default="none" {
+        choices "none" "even" "odd"
+    }
+    attr "stop_bits" kind="choice" default="1" {
+        choices "1" "2"
+    }
     example "minimal" #"<uart id="uart1" tx="20" rx="21" />"#
     example "explicit peripheral" #"<uart id="gps" uart="UART1" tx="20" rx="21" />"#
-    see_also "components/uart_component"
+    example "9600 baud" #"<uart id="uart1" tx="20" rx="21" baud_rate="9600" />"#
+    see_also "services/wifi_station"
 }
 
 element "wifi" section="peripherals" {
@@ -164,95 +173,70 @@ element "wifi" section="peripherals" {
     description "Claims the WIFI hardware block. One per chip, and only on a chip that has one."
     attr "id" kind="ident" required=#true
     example "minimal" #"<wifi id="radio" />"#
-    see_also "components/wifi_station"
+    see_also "services/wifi_station"
 }
 
-// --------------------------------------------------------------- components
+// ------------------------------------------------------------------ devices
 
-section "components" {
-    summary "How a peripheral is used: an address on a bus, a direction"
-    description "A component binds a peripheral to a purpose. It refers to its peripheral with $id, for example i2c=\"$i2c0\"."
+section "devices" {
+    summary "Drivers for specific parts: displays, sensors, pins"
+    description "A device is a driver for a specific part. It binds to the bus it drives, for example bus=\"$i2c0\", and carries its own address or chip select."
 }
 
-element "led" section="components" {
+// ----------------------------------------------------------------- services
+
+section "services" {
+    summary "Software services: wifi_station, http_client, https_client, ws_client, wss_client, ntp"
+    description "Services are software, not hardware: they refer to devices and other services, never peripherals. A network client's `network=` names a service that `provides \"network\"`; `<wifi_station>` is the one provider today."
+}
+
+element "led" section="devices" {
     summary "An LED on a GPIO output"
     recipe pin="gpio" direction="output" runtime="espforge_runtime::Led" invalid="E0601"
     attr "id" kind="ident" required=#true
-    attr "gpio" kind="ref" to="gpio" required=#true
+    // `pin="18"` stands alone; `gpio="$gpio18"` also checks the declared
+    // direction. One of the two is required.
+    attr "pin" kind="pin" {
+        help "The GPIO number, without a <gpio> declaration: `pin=\"18\"`."
+    }
+    attr "gpio" kind="ref" to="gpio" {
+        help "A <gpio> in `# peripherals` whose direction is checked."
+    }
     attr "active_low" kind="bool" default="false" {
         help "true when the LED lights on a LOW pin."
     }
-    // Its examples are complete documents carrying their own <gpio>: anything
-    // starting with a `#` header is parsed as-is, so it must carry all five
-    // sections (three of them may be empty).
-    example "esp32c3, blocking" "# espforge\n  <project name=\"blink\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# components\n  <led id=\"red_led\" gpio=\"$gpio18\" />\n# devices\n# services\n"
-    example "active low" "# espforge\n  <project name=\"blink\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# components\n  <led id=\"red_led\" gpio=\"$gpio18\" active_low=\"true\" />\n# devices\n# services\n"
+    // Its examples are complete documents: anything starting with a `#` header
+    // is parsed as-is, so it must carry all four sections.
+    example "esp32c3, blocking" "# espforge\n  <project name=\"blink\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n# devices\n  <led id=\"red_led\" pin=\"18\" />\n# services\n"
+    example "active low" "# espforge\n  <project name=\"blink\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n# devices\n  <led id=\"red_led\" pin=\"18\" active_low=\"true\" />\n# services\n"
     see_also "peripherals/gpio"
 }
 
-element "button" section="components" {
+element "button" section="devices" {
     summary "A push button on a GPIO input"
-    description #"A component over <gpio>: gpio="$<gpio id>" must name an input pin."#
+    description #"`pin="9"` stands alone; `gpio="$<gpio id>"` must name an input pin."#
     recipe pin="gpio" direction="input" runtime="espforge_runtime::Button" invalid="E0602"
     attr "id" kind="ident" required=#true
-    attr "gpio" kind="ref" to="gpio" required=#true
+    attr "pin" kind="pin" {
+        help "The GPIO number, without a <gpio> declaration: `pin=\"9\"`."
+    }
+    attr "gpio" kind="ref" to="gpio" {
+        help "A <gpio> in `# peripherals` whose direction is checked."
+    }
     attr "pull_up" kind="bool" default="false" {
         help "true when the pin has an external pull-up (button to GND)."
     }
-    example "esp32c3, blocking" "# espforge\n  <project name=\"button\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio9\" pin=\"9\" direction=\"input\" />\n# components\n  <button id=\"button\" gpio=\"$gpio9\" />\n# devices\n# services\n"
-    example "pull-up" "# espforge\n  <project name=\"button\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <gpio id=\"gpio9\" pin=\"9\" direction=\"input\" />\n# components\n  <button id=\"button\" gpio=\"$gpio9\" pull_up=\"true\" />\n# devices\n# services\n"
+    example "esp32c3, blocking" "# espforge\n  <project name=\"button\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n# devices\n  <button id=\"button\" pin=\"9\" />\n# services\n"
+    example "pull-up" "# espforge\n  <project name=\"button\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n# devices\n  <button id=\"button\" pin=\"9\" pull_up=\"true\" />\n# services\n"
     see_also "peripherals/gpio"
 }
 
-element "i2c_component" section="components" {
-    summary "An addressed device endpoint or raw bus handle on an I2C controller"
-    description #"I2C is multi-drop: several components may share one <i2c>. With address="0x3C" the component is an addressed device (I2cDevice); without one it is the raw bus (I2cBus), which an I2C scanner sweeps."#
-    attr "id" kind="ident" required=#true
-    attr "i2c" kind="ref" to="i2c" required=#true {
-        help "The I2C bus controller in `# peripherals`."
-    }
-    // The specification reserves 0x00..=0x07 and 0x78..=0x7F; a usable 7-bit
-    // address is 0x08..=0x77. Omitted, the component is the raw bus.
-    attr "address" kind="hex" {
-        help "7-bit slave address in 0x08..=0x77. Omit for raw bus access (an I2C scanner)."
-    }
-    example "sensor endpoint" #"<i2c_component id="temp_bus" i2c="$i2c0" address="0x48" />"#
-    example "raw scanner" #"<i2c_component id="bus_scanner" i2c="$i2c0" />"#
-    see_also "peripherals/i2c"
-}
-
-element "spi_component" section="components" {
-    summary "A chip-select on an SPI bus"
-    attr "id" kind="ident" required=#true
-    attr "spi" kind="ref" to="spi" required=#true
-    attr "mode" kind="u32" default="0" range="0..=3" {
-        help "SPI mode, 0 to 3. Optional on the component; the SPI examples keep it on <spi>."
-    }
-    attr "cs" kind="pin_or_ref" required=#true {
-        help "A GPIO number (`cs=\"9\"`), a <gpio> id (`cs=\"gpio5\"`) or a reference to one (`cs=\"$gpio5\"`)."
-    }
-    example "display bus" #"<spi_component id="display_bus" spi="$spi2" mode="0" cs="gpio5" />"#
-    see_also "peripherals/spi"
-}
-
-element "uart_component" section="components" {
-    summary "Serial settings on a UART port"
-    attr "id" kind="ident" required=#true
-    attr "uart" kind="ref" to="uart" required=#true
-    attr "baud_rate" kind="u32" required=#true
-    attr "parity" kind="choice" default="none" {
-        choices "none" "even" "odd"
-    }
-    attr "stop_bits" kind="choice" default="1" {
-        choices "1" "2"
-    }
-    example "9600 baud" #"<uart_component id="serial_bus" uart="$uart1" baud_rate="9600" />"#
-    see_also "peripherals/uart"
-}
-
-element "wifi_station" section="components" {
+element "wifi_station" section="services" {
     summary "Connect to an existing Wi-Fi network"
     description "Associates with an access point and brings up DHCP over the referenced <wifi> radio. The network stack is what network services (HTTP, NTP) connect through."
+    // The interface network services ride on: a client's `network=` names this,
+    // not the provider's tag, so an Ethernet or cellular provider is additive.
+    provides "network"
     attr "id" kind="ident" required=#true
     attr "wifi" kind="ref" to="wifi" required=#true {
         help "The <wifi> radio this station uses."
@@ -271,24 +255,10 @@ element "wifi_station" section="components" {
     see_also "peripherals/wifi"
 }
 
-// ------------------------------------------------------------------ devices
-
-section "devices" {
-    summary "Drivers for specific parts: displays, sensors"
-    description "A device is a driver for a specific part. It refers to the component it is attached to, for example i2c_component=\"$temp_bus\"."
-}
-
 // The devices themselves live beside their drivers, in
 // `espforge-drivers/drivers.schema.kdl`: a driver crate owns the elements it
 // implements, and `espforge-schema::load_all` composes the two files. This
 // section stays here because a device element names the section it lives in.
-
-// ----------------------------------------------------------------- services
-
-section "services" {
-    summary "Software services: http_client, https_client, ws_client, wss_client, ntp"
-    description "Services are software, not hardware: they refer to components or devices, never peripherals."
-}
 
 // The services themselves live in `services.schema.kdl` beside this file: one
 // recipe block per network feature, composed by `espforge-schema::load_all`.

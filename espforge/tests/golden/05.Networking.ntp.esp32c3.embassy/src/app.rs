@@ -1,36 +1,41 @@
-use crate::{component, service, Context};
+use crate::Context;
 use embassy_executor::Spawner;
 
-/// Runs once at startup: wait for Wi-Fi, then say what we are about to do.
+/// Runs once at startup: wait for Wi-Fi, then anchor the clock.
 pub async fn setup(ctx: &'static Context, _spawner: Spawner) {
     ctx.logger.info("Waiting for Wi-Fi connection...");
-    component!(ctx, home).wait_connected().await;
-    ctx.logger.info("Connected. Starting NTP synchronization.");
+    service!(ctx, home).wait_connected().await;
+
+    // One query is enough: `sync` stores the server's Unix time, and `now`
+    // advances it with the monotonic clock. `get_time()` still exists for a
+    // one-shot query that should not touch the clock.
+    ctx.logger.info("Connected. Synchronising the clock.");
+    match service!(ctx, clock).sync().await {
+        Ok(time) => ctx.logger.info(format_args!(
+            "Clock set to {}.{:06} s since the Unix epoch (RTT {} us)",
+            time.unix_seconds, time.microseconds, time.roundtrip_delay_us
+        )),
+        Err(error) => ctx.logger.warn(format_args!("NTP sync failed: {error:?}")),
+    }
 }
 
-/// Per-tick loop: one SNTP query, log the time, sleep.
+/// Per-tick loop: read the clock locally, no network involved.
 pub async fn forever(ctx: &'static Context) {
-    let ntp = service!(ctx, clock);
-
-    match ntp.get_time().await {
-        Ok(time) => {
+    match service!(ctx, clock).now() {
+        Ok(now) => {
+            let seconds_in_day = now.seconds % 86400;
             ctx.logger.info(format_args!(
-                "NTP sync: {}.{:06} s since the Unix epoch (RTT {} us, offset {} us)",
-                time.unix_seconds, time.microseconds, time.roundtrip_delay_us, time.offset_us
-            ));
-
-            // Unix seconds are UTC, so the time of day is a plain division.
-            let seconds_in_day = time.unix_seconds % 86400;
-            ctx.logger.info(format_args!(
-                "Current UTC time: {:02}:{:02}:{:02}",
+                "UTC {:02}:{:02}:{:02}.{:06} ({} s since the Unix epoch)",
                 seconds_in_day / 3600,
                 (seconds_in_day % 3600) / 60,
-                seconds_in_day % 60
+                seconds_in_day % 60,
+                now.micros,
+                now.seconds
             ));
         }
-        Err(e) => ctx.logger.warn(format_args!("NTP query failed: {e:?}")),
+        Err(error) => ctx.logger.warn(format_args!("Clock not set: {error}")),
     }
 
-    // SNTP (RFC 4330) asks clients to poll at most once a minute.
+    // A local read costs nothing; the one-minute figure only paces the log.
     ctx.delay.delay_ms(60000).await;
 }

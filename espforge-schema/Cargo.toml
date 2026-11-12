@@ -13,6 +13,14 @@ kdl = { workspace = true }
 # The `recipe` node validates its `invalid=` against `codes::ALL`, so the
 # schema owns a `DiagCode` instead of handing a string downstream.
 espforge-diagnostics = { workspace = true }
+# v2 codegen templates are parsed, not string-spliced: a malformed Rust
+# type/expression is a schema error, never a `rustc` error in a project.
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+# A driver's `version` is a Cargo requirement, and two manifests may name one
+# crate at different but compatible versions.
+semver = { workspace = true }
 
 [dev-dependencies]
 espf = { workspace = true }

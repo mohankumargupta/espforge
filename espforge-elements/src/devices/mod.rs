@@ -1,15 +1,18 @@
 //! Elements that live in `# devices`: drivers for a specific part.
 //!
-//! A device refers *down* to the component it is attached to
-//! (`i2c_component=`, `spi_component=`) and, for its auxiliary control lines,
-//! to `<gpio>` peripherals. It never names a bus pin directly. The shared
-//! wording of its diagnostics lives here, so a driver's lowering differs only
-//! in the data its recipe carries.
+//! A device binds *down* to the `i2c`/`spi` peripheral it drives
+//! (`bus="$i2c0"`) and, for its auxiliary control lines, to `<gpio>`
+//! peripherals. It carries its own `address` or `cs`; it never names a bus pin
+//! directly. A UART device has no emitter, so a recipe that declares one is
+//! refused at lowering instead of reaching emission. The shared wording of its
+//! diagnostics lives here, so a driver's lowering differs only in the data its
+//! recipe carries.
 //!
 //! The drivers are blocking-only: a display or sensor declared under the
 //! embassy runtime is refused with [`requires_blocking`] rather than producing
 //! code that cannot compile.
 
+pub mod pin;
 pub mod recipe;
 
 use espf::context::ParsedNode;
@@ -31,7 +34,7 @@ pub(crate) fn span_of(node: &ParsedNode<'_>, attr: &str) -> Range<usize> {
 
 /// A device id that cannot become a Rust identifier.
 pub(crate) fn invalid_id(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     node: &ParsedNode<'_>,
     tag: &str,
     id: &Ident,
@@ -53,7 +56,7 @@ pub(crate) fn invalid_id(
 /// The wording is the one the hand-written device elements used: the message
 /// names the attribute as written, and quotes the values the schema allows.
 pub(crate) fn invalid_element(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     node: &ParsedNode<'_>,
     tag: &str,
     element: &ElementDef,
@@ -97,34 +100,9 @@ fn expected(element: &ElementDef, attr: &str) -> String {
     }
 }
 
-/// A `i2c_component=` / `spi_component=` reference to a component that is not
-/// on the board, or one of the wrong kind.
-pub(crate) fn unknown_component(
-    cx: &mut LowerCx,
-    node: &ParsedNode<'_>,
-    tag: &str,
-    id: &Ident,
-    component: &str,
-    kind: &str,
-) -> Reported {
-    cx.report(
-        codes::DEVICE_UNKNOWN_COMPONENT,
-        span_of(node, component),
-        "unknown bus component",
-        format!(
-            "<{tag} id=\"{}\"> refers to `{name}`, which is not an <{kind}> in `# components`",
-            id.raw,
-            name = node
-                .get_attr_spanned(component)
-                .map(|a| a.val.trim_start_matches('$'))
-                .unwrap_or_default(),
-        ),
-    )
-}
-
 /// An auxiliary pin reference to a `<gpio>` that does not exist.
 pub(crate) fn unknown_gpio(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     node: &ParsedNode<'_>,
     tag: &str,
     id: &Ident,
@@ -144,7 +122,7 @@ pub(crate) fn unknown_gpio(
 
 /// A device auxiliary pin on a GPIO declared as the other direction.
 pub(crate) fn wrong_direction(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     node: &ParsedNode<'_>,
     tag: &str,
     id: &Ident,
@@ -156,10 +134,12 @@ pub(crate) fn wrong_direction(
     let found = match found {
         Direction::Input => "input",
         Direction::Output => "output",
+        Direction::Bidirectional => "bidirectional",
     };
     let wanted = match wanted {
         Direction::Input => "input",
         Direction::Output => "output",
+        Direction::Bidirectional => "bidirectional",
     };
     cx.report(
         codes::DEVICE_WRONG_DIRECTION,
@@ -167,26 +147,6 @@ pub(crate) fn wrong_direction(
         "wrong gpio direction",
         format!(
             "<{tag} id=\"{}\"> needs an {wanted} pin, but `{name}` has direction=\"{found}\"",
-            id.raw
-        ),
-    )
-}
-
-/// A blocking-only driver declared under the embassy runtime.
-pub(crate) fn requires_blocking(
-    cx: &mut LowerCx,
-    node: &ParsedNode<'_>,
-    tag: &str,
-    id: &Ident,
-    kind: &str,
-) -> Reported {
-    cx.report(
-        codes::DEVICE_REQUIRES_BLOCKING,
-        node_span(node),
-        format!("{kind} requires blocking"),
-        format!(
-            "<{tag} id=\"{}\"> needs the blocking runtime; change \
-             <runtime type=\"..\" /> to blocking",
             id.raw
         ),
     )

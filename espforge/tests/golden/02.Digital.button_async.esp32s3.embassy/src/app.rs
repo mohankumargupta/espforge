@@ -10,7 +10,7 @@ crate::signal!(BUTTON_PRESSED);
 #[embassy_executor::task]
 async fn button_task(ctx: &'static Context) {
     loop {
-        ctx.components.button.wait_for_pressed().await;
+        device!(ctx, button).wait_for_pressed().await;
         BUTTON_PRESSED.signal(());
     }
 }
@@ -23,7 +23,7 @@ pub async fn setup(ctx: &'static Context, spawner: Spawner) {
 /// Per-tick loop. Waits for a press signal, toggles the LED, then debounces.
 pub async fn forever(ctx: &'static Context) {
     BUTTON_PRESSED.wait().await;
-    ctx.components.red_led.toggle();
+    device!(ctx, red_led).toggle();
     // Debounce: ignore further presses for a short window.
     ctx.delay.delay_ms(100).await;
 }

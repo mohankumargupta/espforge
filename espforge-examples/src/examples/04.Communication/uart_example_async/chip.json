@@ -1,5 +1,5 @@
 {
-  "name": "chip",
+  "name": "uartexampleasync",
   "author": "Raspberry Pi",
   "pins": [
     "TX",

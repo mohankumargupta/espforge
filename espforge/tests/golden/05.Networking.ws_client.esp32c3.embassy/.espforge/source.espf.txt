@@ -14,10 +14,8 @@ the station's network stack, framed per RFC 6455 by edge-ws.
 # peripherals
   <wifi id="radio" />
 
-# components
-  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
-
 # devices
 
 # services
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
   <ws_client id="ws" network="$home" />

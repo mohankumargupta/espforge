@@ -5,5 +5,5 @@ elf = "target/xtensa-esp32s3-none-elf/debug/i2c_scanner"
 firmware = "target/xtensa-esp32s3-none-elf/debug/i2c_scanner"
 
 [[chip]]
-name = 'chip'
+name = 'i2cscanner'
 binary = 'chip.wasm'

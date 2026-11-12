@@ -9,8 +9,8 @@ pub fn setup(ctx: &mut Context) {
 
 pub fn forever(ctx: &mut Context) {
     let delay = ctx.delay;
-    let button = component!(ctx, button);
-    let led = component!(ctx, red_led);
+    let button = device!(ctx, button);
+    let led = device!(ctx, red_led);
     
     if button.is_pressed() {
         led.toggle();

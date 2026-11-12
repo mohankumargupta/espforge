@@ -1,0 +1,28 @@
+driver "scd4x" {
+    format_version 2
+    summary "Sensirion SCD40/SCD41 CO2, temperature and humidity sensor"
+    description "Takes environmental readings over an I2C bus. Blocking runtime only."
+    category "sensor"
+
+    bus "i2c" {
+        address fixed="0x62"
+    }
+
+    codegen {
+        feature "scd4x"
+        runtime "blocking" {
+            type "espforge_drivers::Scd4x"
+            constructor "espforge_drivers::Scd4x::new({bus_device}, {address})"
+            endpoint "espforge_drivers::Scd4xI2cEndpoint"
+        }
+    }
+
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "boot builds the sensor before setup; deferred builds it when the app calls init()."
+    }
+
+    example "minimal" #"<scd4x id="air" bus="$i2c0" address="0x62" />"#
+    example "deferred" #"<scd4x id="air" bus="$i2c0" address="0x62" init="deferred" />"#
+    see_also "peripherals/i2c"
+}

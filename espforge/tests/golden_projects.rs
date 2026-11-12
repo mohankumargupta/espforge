@@ -119,8 +119,8 @@ fn runtime_name(runtime: Runtime) -> &'static str {
     }
 }
 
-/// Generate one cell into `out`.
-fn generate_cell(cell: &Cell, out: &Path) {
+/// Generate one cell into `out`, optionally against a local runtime checkout.
+fn generate_cell_with_runtime(cell: &Cell, out: &Path, runtime_path: Option<PathBuf>) {
     let source =
         resolve_source(None, Some(&cell.example_path()), Path::new(".")).unwrap_or_else(|e| {
             panic!("resolving example {}: {e}", cell.example_path());
@@ -130,8 +130,13 @@ fn generate_cell(cell: &Cell, out: &Path) {
         runtime: Some(cell.runtime),
         ..Default::default()
     };
-    generate_with(&source, out, &overrides, None)
+    generate_with(&source, out, &overrides, runtime_path)
         .unwrap_or_else(|e| panic!("generating {}: {e:?}", cell.slug));
+}
+
+/// Generate one cell into `out` as checked in (published runtime pin).
+fn generate_cell(cell: &Cell, out: &Path) {
+    generate_cell_with_runtime(cell, out, None);
 }
 
 /// Every file under `root`, relative and sorted.
@@ -345,5 +350,101 @@ fn every_declared_cell_is_byte_identical_to_its_golden() {
             runtime_name(Runtime::Blocking)
         )),
         "the helloworld esp32c3/blocking cell must stay declared"
+    );
+}
+
+/// The targets `rustup` has installed, so the gate below can say what it could
+/// not compile instead of failing on a missing toolchain.
+fn installed_targets() -> BTreeSet<String> {
+    let output = std::process::Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .expect("the compile gate needs `rustup` on PATH");
+    assert!(
+        output.status.success(),
+        "`rustup target list --installed` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The `[build] target = "..."` a generated project compiles for.
+fn build_target(project: &Path) -> String {
+    let config = std::fs::read_to_string(project.join(".cargo/config.toml"))
+        .expect("a generated project has .cargo/config.toml");
+    config
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("target = "))
+        .map(|value| value.trim_matches('"').to_string())
+        .expect("the generated .cargo/config.toml names a build target")
+}
+
+/// The compile gate: every generated project typechecks for its chip.
+///
+/// Ignored in the default run because it shells out to `cargo` per cell: it
+/// needs the RISC-V target and the dependencies in the cargo cache. This is
+/// what CI's `generated-projects` job runs (`-- --ignored`), and the invariant
+/// this repo lacked: an emitter change is compiled here instead of being
+/// discovered by a user running `espforge build`.
+///
+/// Cells whose target is not installed are skipped and named, never silently
+/// counted: the `esp32s3` cells are xtensa and need a different toolchain.
+#[test]
+#[ignore = "compiles every generated project; run with `-- --ignored`"]
+fn every_generated_project_compiles() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the espforge crate lives in the workspace root")
+        .to_path_buf();
+    // Generated projects pin the runtime from crates.io; point them at this
+    // checkout so the gate compiles the emitter it is testing.
+    let runtime = workspace.join("espforge-runtime");
+    // One cache for every cell: the first build compiles the dependencies.
+    let target_dir = workspace.join("target/golden-check");
+    let installed = installed_targets();
+
+    let mut compiled = Vec::new();
+    let mut skipped = Vec::new();
+    for cell in &declared_cells() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("project");
+        generate_cell_with_runtime(cell, &out, Some(runtime.clone()));
+
+        let target = build_target(&out);
+        if !installed.contains(&target) {
+            skipped.push(format!("{} ({target})", cell.slug));
+            continue;
+        }
+
+        let output = std::process::Command::new(env!("CARGO"))
+            .args(["build", "--quiet"])
+            .current_dir(&out)
+            .env("CARGO_TARGET_DIR", &target_dir)
+            .output()
+            .unwrap_or_else(|e| panic!("running cargo build for {}: {e}", cell.slug));
+        assert!(
+            output.status.success(),
+            "{} does not compile for {target}:\n{}",
+            cell.slug,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        compiled.push(cell.slug.clone());
+    }
+
+    assert!(
+        !compiled.is_empty(),
+        "no generated project was compiled; skipped: {skipped:?}"
+    );
+    eprintln!(
+        "compiled {} generated projects; skipped {} for a missing target: {}",
+        compiled.len(),
+        skipped.len(),
+        skipped.join(", ")
     );
 }

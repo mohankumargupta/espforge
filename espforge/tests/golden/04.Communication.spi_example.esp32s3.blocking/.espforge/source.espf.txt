@@ -8,13 +8,8 @@ SPI EXAMPLE
   <runtime type="blocking" />
 
 # peripherals
-  <spi id="spi2" sclk="8" mosi="7" miso="6" mode="0" frequency="100kHz" />
-
-# components
-  <spi_component id="spi_tester" spi="$spi2" cs="9" />
+  <spi id="spi2" sclk="8" mosi="7" miso="6" mode="0" frequency="100kHz" cs="9" />
 
 # devices
 
-# services 
-
-
+# services

@@ -1,0 +1,22 @@
+==================
+I2C MULTI EXAMPLE
+
+Two different parts on one I2C controller: an SSD1306 panel at 0x3C and an
+SCD4x CO2 sensor at 0x62. Each device builds its own `RefCellDevice` over the
+one shared bus, so the panel and the sensor never construct a second bus and
+never steal the first one.
+==================
+
+# espforge
+  <project name="i2c_multi" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <i2c id="i2c0" sda="6" scl="7" frequency="400kHz" />
+
+# devices
+  <ssd1306 id="oled" bus="$i2c0" address="0x3C" size="128x64" />
+  <scd4x id="air" bus="$i2c0" address="0x62" init="deferred" />
+
+# services

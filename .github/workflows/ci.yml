@@ -18,15 +18,12 @@ jobs:
       # Includes the CLI transcripts, the diagnostics corpus and the golden
       # generated projects (byte comparison only, no cargo on them).
       - run: cargo test --workspace
-      # Generated code is checked in. If build.rs had to rewrite it, the
-      # checked-in copy was stale: commit the regenerated file.
-      - run: >
-          git diff --exit-code --
-          espforge-bindings/src/components/generated_vocab.rs
-          espforge-bindings/src/components/generated_elements.rs
-          espforge-bindings/src/drivers/generated_registry.rs
-          espforge-options/src/generated_options.rs
-          espforge-options/src/generated_catalog.rs
+      # No source file is generated at build time: `espforge-elements`' build.rs
+      # writes its `Attrs` types into `OUT_DIR`, so the tests must leave the
+      # tree untouched. This used to diff `espforge-bindings/` and
+      # `espforge-options/`, neither of which exists in this workspace: a gate
+      # over absent files is green by construction.
+      - run: git diff --exit-code
 
   generated-projects:
     name: Generated projects compile

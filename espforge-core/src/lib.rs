@@ -8,6 +8,8 @@
 //! argument parsing, the rendering and the exit codes.
 
 pub mod answers;
+pub mod drivers;
+pub mod fetch;
 pub mod pipeline;
 pub mod project;
 pub mod source;

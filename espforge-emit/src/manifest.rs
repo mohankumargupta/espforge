@@ -15,11 +15,15 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-/// Build the manifest artifact for every `Owned` artifact in `artifacts`.
+/// Build the manifest artifact for every tracked artifact in `artifacts`.
+///
+/// `Merged` files are recorded with the checksum of the *generated* document
+/// (the keys espforge owns); the writer never compares it, because a user edit
+/// outside those keys is not drift.
 pub fn emit_manifest(artifacts: &[Artifact], template_version: &str) -> Result<Artifact> {
     let files: BTreeMap<String, String> = artifacts
         .iter()
-        .filter(|a| a.ownership == Ownership::Owned)
+        .filter(|a| matches!(a.ownership, Ownership::Owned | Ownership::Merged))
         .map(|a| (a.path.clone(), checksum(&a.content)))
         .collect();
     Ok(Artifact::owned(

@@ -16,6 +16,13 @@ espforge-elements = { workspace = true }
 espforge-emit = { workspace = true }
 espforge_examples = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+ureq = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+espforge-drivers = { workspace = true }

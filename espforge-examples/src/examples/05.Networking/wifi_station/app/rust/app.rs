@@ -1,11 +1,11 @@
-use crate::{component, Context};
+use crate::{service, Context};
 use embassy_executor::Spawner;
 
 /// Runs once at startup: wait for the association and DHCP, then report the
 /// address.
 pub async fn setup(ctx: &'static Context, _spawner: Spawner) {
     let logger = ctx.logger;
-    let station = component!(ctx, home);
+    let station = service!(ctx, home);
 
     logger.info("Wi-Fi example: connecting...");
     station.wait_connected().await;

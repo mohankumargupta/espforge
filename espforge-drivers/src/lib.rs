@@ -11,14 +11,48 @@
 
 #![cfg_attr(not(test), no_std)]
 
-/// The `# devices` half of the schema, embedded from beside the drivers it
-/// describes.
+/// The bundled driver manifests, one file per tag, embedded from beside the
+/// drivers they describe.
 ///
-/// `espforge-schema` parses it; `espforge-elements` composes it with
-/// `espforge_schema::SCHEMA_KDL`, so a new driver never edits a compiler crate.
-/// The constant lives here, in the crate whose package contains the file, so
-/// both stay publishable.
-pub const DRIVERS_SCHEMA_KDL: &str = include_str!("../drivers.schema.kdl");
+/// The label is the path a user can open; `espforge-elements` composes these
+/// with the core schema at runtime and in its build script. A new bundled
+/// driver is one file plus this list, plus its feature and module.
+pub const MANIFESTS: &[(&str, &str)] = &[
+    (
+        "espforge-drivers/manifests/ssd1306.kdl",
+        include_str!("../manifests/ssd1306.kdl"),
+    ),
+    (
+        "espforge-drivers/manifests/ili9341.kdl",
+        include_str!("../manifests/ili9341.kdl"),
+    ),
+    (
+        "espforge-drivers/manifests/scd4x.kdl",
+        include_str!("../manifests/scd4x.kdl"),
+    ),
+    (
+        "espforge-drivers/manifests/adxl345.kdl",
+        include_str!("../manifests/adxl345.kdl"),
+    ),
+];
+
+/// The concatenation of [`MANIFESTS`], for callers that take one schema text.
+///
+/// `espforge-schema::load_all` accepts several sources, so new code should use
+/// [`MANIFESTS`] instead; the constant keeps the old one-string entry point.
+pub const DRIVERS_SCHEMA_KDL: &str = concat!(
+    include_str!("../manifests/ssd1306.kdl"),
+    "\n",
+    include_str!("../manifests/ili9341.kdl"),
+    "\n",
+    include_str!("../manifests/scd4x.kdl"),
+    "\n",
+    include_str!("../manifests/adxl345.kdl"),
+    "\n",
+);
+
+/// Every bundled tag, in manifest order.
+pub const TAGS: &[&str] = &["ssd1306", "ili9341", "scd4x", "adxl345"];
 
 #[cfg(all(
     any(target_arch = "riscv32", target_arch = "xtensa"),
@@ -55,3 +89,15 @@ pub mod scd4x;
     feature = "scd4x"
 ))]
 pub use scd4x::*;
+
+#[cfg(all(
+    any(target_arch = "riscv32", target_arch = "xtensa"),
+    feature = "adxl345"
+))]
+pub mod adxl345;
+
+#[cfg(all(
+    any(target_arch = "riscv32", target_arch = "xtensa"),
+    feature = "adxl345"
+))]
+pub use adxl345::*;

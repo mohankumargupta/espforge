@@ -44,19 +44,44 @@ impl From<esp_radio::wifi::WifiError> for WifiError {
 }
 
 /// Handle to a running station connection. `Copy`, so it can sit on a
-/// component and be reached through the generated `Context`.
+/// device and be reached through the generated `Context`.
 #[derive(Clone, Copy)]
 pub struct Wifi {
     stack: Stack<'static>,
 }
 
-static RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
+/// The `static` one `<wifi_station>` needs: its own embassy-net stack-resource
+/// pool.
+///
+/// The generated `generated.rs` declares one per station (`__HOME_STORAGE`), so
+/// two stations never fight over one pool inside `StaticCell::init`.
+pub struct WifiStorage {
+    resources: StaticCell<StackResources<4>>,
+}
+
+impl WifiStorage {
+    pub const fn new() -> Self {
+        Self {
+            resources: StaticCell::new(),
+        }
+    }
+}
+
+impl Default for WifiStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Wifi {
     /// Create the controller, configure the station, build the network stack
     /// (DHCP) and spawn the connection and network tasks. Returns right away;
     /// use [`Wifi::wait_connected`] to wait for an address.
-    pub fn start(
+    ///
+    /// `storage` is the station's own `static`, so `start_in` can never
+    /// initialise one pool twice.
+    pub fn start_in(
+        storage: &'static WifiStorage,
         spawner: &Spawner,
         wifi: WIFI<'static>,
         config: WifiConfig,
@@ -80,7 +105,7 @@ impl Wifi {
         let (stack, runner) = embassy_net::new(
             interface,
             embassy_net::Config::dhcpv4(Default::default()),
-            RESOURCES.init(StackResources::new()),
+            storage.resources.init(StackResources::new()),
             seed,
         );
 
@@ -102,7 +127,7 @@ impl Wifi {
     }
 }
 
-/// A `<wifi_station>` component: the station's credentials, and once started,
+/// A `<wifi_station>` service: the station's credentials, and once started,
 /// the running connection handle.
 ///
 /// It constructs in `Components::new` — no peripheral, no `unsafe` — and
@@ -111,13 +136,17 @@ impl Wifi {
 /// behind a `RefCell`, and `Components` never needs to be `mut`.
 pub struct WifiStation {
     config: WifiConfig,
+    storage: &'static WifiStorage,
     handle: RefCell<Option<Wifi>>,
 }
 
 impl WifiStation {
-    pub fn new(config: WifiConfig) -> Self {
+    /// `storage` is the station's own generated `static`; the station keeps the
+    /// reference so `start` needs no extra argument.
+    pub fn new(config: WifiConfig, storage: &'static WifiStorage) -> Self {
         Self {
             config,
+            storage,
             handle: RefCell::new(None),
         }
     }
@@ -125,7 +154,7 @@ impl WifiStation {
     /// Bring the radio up and spawn the association and network tasks. Returns
     /// right away; use [`WifiStation::wait_connected`] to wait for an address.
     pub fn start(&self, wifi: WIFI<'static>, spawner: &Spawner) -> Result<(), WifiError> {
-        let handle = Wifi::start(spawner, wifi, self.config)?;
+        let handle = Wifi::start_in(self.storage, spawner, wifi, self.config)?;
         *self.handle.borrow_mut() = Some(handle);
         Ok(())
     }
@@ -147,6 +176,29 @@ impl WifiStation {
     /// Wait until the link is up and DHCP has assigned an address.
     pub async fn wait_connected(&self) {
         self.handle().wait_connected().await;
+    }
+}
+
+/// The interface a network provider satisfies.
+///
+/// A service (HTTP, WebSocket, NTP) rides on a provider's embassy-net stack and
+/// never names a concrete provider type. `<wifi_station>` is the first
+/// implementor; an Ethernet or cellular provider implements the same trait.
+pub trait NetworkInterface {
+    /// The running stack. The generated code starts a provider before it builds
+    /// its clients, so this never observes a not-yet-started handle.
+    fn stack(&self) -> Stack<'static>;
+}
+
+impl NetworkInterface for Wifi {
+    fn stack(&self) -> Stack<'static> {
+        Wifi::stack(self)
+    }
+}
+
+impl NetworkInterface for WifiStation {
+    fn stack(&self) -> Stack<'static> {
+        WifiStation::stack(self)
     }
 }
 

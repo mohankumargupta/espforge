@@ -15,7 +15,7 @@ members = [
 exclude = ["legacy"]
 
 [workspace.package]
-version = "0.7.6"
+version = "0.8.0"
 edition = "2024"
 license = "MIT"
 description = "a scaffolding++ tool for creating esp32 no_std esphal without the hassle"
@@ -30,10 +30,11 @@ winnow = { version = "0.7", features = ["simd"] }
 annotate-snippets = "0.12"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
 anyhow = "1"
 kdl = "6"
 toml_edit = "=0.22.27"
-syn = { version = "=3.0.8", features = ["full"] }
+syn = { version = "=3.0.8", features = ["full", "visit-mut"] }
 quote = "=1.0.47"
 proc-macro2 = "=1.0.107"
 prettyplease = "=0.3.0"
@@ -44,19 +45,27 @@ include_dir = { version = "0.7.4", features = ["glob"] }
 esp-metadata-generated = { version = "0.5.3", features = ["build-script"] }
 tempfile = "3"
 linkme = "0.3.37"
+# Driver fetching is host-side only: `espforge-core` uses these, the generated
+# project and `gen`/`check`/`build` never link a network crate.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+flate2 = "1"
+tar = "0.4"
+# Driver manifests name crates by Cargo requirement; whether two of them may
+# name one crate is a SemVer question, answered host-side only.
+semver = "1"
 
 # Workspace crates, so members declare them with `{ workspace = true }`
 # instead of repeating a relative path.
-espf = { path = "espf", version = "0.7.6" }
-espforge-core = { path = "espforge-core", version = "0.7.6" }
-espforge-diagnostics = { path = "espforge-diagnostics", version = "0.7.6" }
-espforge-drivers = { path = "espforge-drivers", version = "0.7.6" }
-espforge-elements = { path = "espforge-elements", version = "0.7.6" }
-espforge-emit = { path = "espforge-emit", version = "0.7.6" }
+espf = { path = "espf", version = "0.8.0" }
+espforge-core = { path = "espforge-core", version = "0.8.0" }
+espforge-diagnostics = { path = "espforge-diagnostics", version = "0.8.0" }
+espforge-drivers = { path = "espforge-drivers", version = "0.8.0" }
+espforge-elements = { path = "espforge-elements", version = "0.8.0" }
+espforge-emit = { path = "espforge-emit", version = "0.8.0" }
 # The package keeps its underscore name, so the dependency key matches it.
-espforge_examples = { path = "espforge-examples", version = "0.7.6" }
-espforge-runtime = { path = "espforge-runtime", version = "0.7.6" }
-espforge-schema = { path = "espforge-schema", version = "0.7.6" }
+espforge_examples = { path = "espforge-examples", version = "0.8.0" }
+espforge-runtime = { path = "espforge-runtime", version = "0.8.0" }
+espforge-schema = { path = "espforge-schema", version = "0.8.0" }
 
 # The profile that 'dist' will build with
 [profile.dist]

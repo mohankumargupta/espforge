@@ -1,10 +1,10 @@
-use crate::{component, service, Context};
+use crate::{service, Context};
 use embassy_executor::Spawner;
 
 /// Runs once at startup: wait for Wi-Fi, then say what we are about to do.
 pub async fn setup(ctx: &'static Context, _spawner: Spawner) {
     ctx.logger.info("Waiting for Wi-Fi connection...");
-    component!(ctx, home).wait_connected().await;
+    service!(ctx, home).wait_connected().await;
     ctx.logger.info("Connected. Ready to make requests.");
 }
 

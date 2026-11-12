@@ -1,7 +1,7 @@
 //! Network services: outgoing clients over an embassy-net stack.
 //!
 //! Distinct from `hw`: nothing here names a pin or a peripheral. A service
-//! takes the [`Stack`](embassy_net::Stack) a component (`<wifi_station>`)
+//! takes the [`Stack`](embassy_net::Stack) a provider (`<wifi_station>`)
 //! exposes and speaks a protocol over it.
 //!
 //! Each protocol is behind its own runtime feature, so a project with no

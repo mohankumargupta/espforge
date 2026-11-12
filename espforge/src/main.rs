@@ -70,6 +70,16 @@ enum Commands {
     )]
     Build(commands::build::BuildArgs),
 
+    /// Record and inspect the driver manifests a project uses.
+    ///
+    /// Generation is offline; only `add` and `update` write
+    /// `.espforge/drivers.lock`.
+    #[command(
+        name = "driver",
+        after_help = "Examples:\n  espforge driver add drivers/accel.kdl\n  espforge driver list\n  espforge driver update accel"
+    )]
+    Driver(commands::driver::DriverArgs),
+
     /// Check environment and toolchain readiness for ESP32 development.
     #[command(name = "doctor", after_help = "Example:\n  espforge doctor")]
     Doctor,
@@ -82,6 +92,7 @@ fn main() -> ExitCode {
         Some(Commands::Check(args)) => commands::check::run(args),
         Some(Commands::Gen(args)) => commands::generate::run(args),
         Some(Commands::Build(args)) => commands::build::run(args),
+        Some(Commands::Driver(args)) => commands::driver::run(args),
         Some(Commands::Doctor) => commands::doctor::run(),
         // No subcommand given: show help instead of erroring.
         None => {
@@ -105,7 +116,9 @@ mod tests {
         let names: Vec<&str> = cmd.get_subcommands().map(|c| c.get_name()).collect();
         assert_eq!(
             names,
-            ["examples", "new", "check", "gen", "build", "doctor"]
+            [
+                "examples", "new", "check", "gen", "build", "driver", "doctor"
+            ]
         );
     }
 

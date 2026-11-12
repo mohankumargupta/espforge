@@ -14,6 +14,7 @@ use espforge_emit::OverlayFile;
 use espforge_emit::codegen::overlay::OverlayError;
 
 use crate::answers::Overrides;
+use crate::drivers::{self, UsedDriver};
 use crate::pipeline::{self, Checked, Invalid};
 use crate::source::Source;
 
@@ -55,6 +56,11 @@ pub struct Written {
     pub crate_name: String,
     /// `note: ...` lines for flags that changed something.
     pub notes: Vec<String>,
+    /// `tag -> manifest path` for every project driver the run used.
+    ///
+    /// Reported by `gen` so a loaded driver is never invisible, and empty for
+    /// a project that only uses bundled drivers.
+    pub drivers: Vec<String>,
 }
 
 /// Generate `source`'s project under `out`, with no flag overrides and the
@@ -72,8 +78,47 @@ pub fn generate_with(
     overrides: &Overrides,
     runtime_path: Option<PathBuf>,
 ) -> Result<Written, ProjectError> {
-    let checked = pipeline::validate(&source.text, overrides)?;
-    write_checked(source, &checked, out, runtime_path)
+    let manifests = drivers::collect(source, &overrides.driver_dirs).map_err(ProjectError::User)?;
+    let mut checked = pipeline::validate_with(&source.text, overrides, &manifests.sources())?;
+    checked.notes.extend(manifests.warnings.iter().cloned());
+    let used = drivers::used(checked.session.schema(), &manifests, &checked.board);
+    verify_lock(out, &used)?;
+    drivers::resolve_package_paths(&mut checked.board, source_dir(source))
+        .map_err(ProjectError::User)?;
+    let mut written = write_checked(source, &checked, out, runtime_path)?;
+    written.drivers = used
+        .iter()
+        .map(|driver| format!("{} -> {}", driver.tag, driver.manifest.display()))
+        .collect();
+    // The generated project records the manifests it used, so a later run can
+    // tell a changed manifest from the one that produced this crate.
+    if !used.is_empty() {
+        drivers::write_lock(out, &drivers::record(&used)).map_err(ProjectError::User)?;
+    }
+    Ok(written)
+}
+
+/// The directory a project's `drivers/` and lock live beside.
+fn source_dir(source: &Source) -> &Path {
+    source.dir.as_deref().unwrap_or_else(|| Path::new("."))
+}
+
+/// Refuse a lock that no longer matches the manifests on disk.
+///
+/// No lock is fine: the first generation writes one. A lock that exists is
+/// binding, so an edited manifest is refused instead of silently changing the
+/// wiring.
+fn verify_lock(out: &Path, used: &[UsedDriver]) -> Result<(), ProjectError> {
+    let existing = drivers::read_lock(out).map_err(ProjectError::User)?;
+    if let Err(problems) = drivers::verify(existing.as_ref(), used) {
+        let text = problems
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(ProjectError::User(text));
+    }
+    Ok(())
 }
 
 /// Everything generation reads and validates, without writing anything.
@@ -86,11 +131,26 @@ pub fn generate_with(
 ///
 /// Pure apart from reading the user's directory.
 pub fn check(source: &Source, overrides: &Overrides) -> Result<Vec<String>, ProjectError> {
-    let checked = pipeline::validate(&source.text, overrides)?;
+    let manifests = drivers::collect(source, &overrides.driver_dirs).map_err(ProjectError::User)?;
+    let checked = pipeline::validate_with(&source.text, overrides, &manifests.sources())?;
+    let used = drivers::used(checked.session.schema(), &manifests, &checked.board);
+    if !used.is_empty() {
+        let existing = drivers::read_lock(source_dir(source)).map_err(ProjectError::User)?;
+        if let Err(problems) = drivers::verify(existing.as_ref(), &used) {
+            let text = problems
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Err(ProjectError::User(text));
+        }
+    }
     crate::source::app_logic(source).map_err(ProjectError::User)?;
     crate::source::overlay_files(source, checked.resolved.is_on("keep-zig-source"))
         .map_err(ProjectError::User)?;
-    Ok(checked.notes)
+    let mut notes = checked.notes;
+    notes.extend(manifests.warnings);
+    Ok(notes)
 }
 
 /// Emit and write an already validated spec.
@@ -103,7 +163,7 @@ pub fn write_checked(
     let runtime = crate::source::runtime_source(runtime_path).map_err(ProjectError::User)?;
     let overlay_owned =
         crate::source::overlay_files(source, checked.resolved.is_on("keep-zig-source"))
-            .map_err(|e| ProjectError::User(format!("{e}")))?;
+            .map_err(|e| ProjectError::User(e.to_string()))?;
     let overlay: Vec<OverlayFile> = overlay_owned
         .iter()
         .map(|(path, contents)| OverlayFile { path, contents })
@@ -124,7 +184,7 @@ pub fn write_checked(
         None => ProjectError::Internal(e),
     })?;
 
-    espforge_emit::write_all(out, &generated).map_err(|e| {
+    let report = espforge_emit::write_all(out, &generated).map_err(|e| {
         match e.downcast_ref::<ManifestDrift>() {
             // The user edited a machine-owned file.
             Some(drift) => ProjectError::User(drift.to_string()),
@@ -140,9 +200,17 @@ pub fn write_checked(
     // generated project always carries the exact document it came from.
     std::fs::write(out.join(".espforge").join("source.espf.txt"), &source.text)?;
 
+    let mut notes = checked.notes.clone();
+    notes.extend(
+        report
+            .warnings
+            .into_iter()
+            .map(|warning| format!("warning: Cargo.toml: {warning}")),
+    );
     Ok(Written {
         crate_name: checked.meta.crate_name(),
-        notes: checked.notes.clone(),
+        notes,
+        drivers: Vec::new(),
     })
 }
 
@@ -219,7 +287,7 @@ mod tests {
             ..Default::default()
         };
         let written = generate_with(&source, &out, &overrides, None).unwrap();
-        assert_eq!(written.notes.len(), 3);
+        assert_eq!(written.notes.len(), 3, "{:?}", written.notes);
         let cargo = std::fs::read_to_string(out.join("Cargo.toml")).unwrap();
         assert!(
             cargo.contains("\"esp32s3\"")
@@ -266,7 +334,7 @@ mod tests {
     fn check_accepts_a_good_project_and_rejects_a_missing_app() {
         let source = resolve_source(None, Some("01.Basics/helloworld"), Path::new(".")).unwrap();
         let notes = check(&source, &Overrides::default()).unwrap();
-        assert!(notes.is_empty());
+        assert!(notes.is_empty(), "{notes:?}");
 
         // The same spec on disk, with no app logic beside it.
         let dir = tempfile::tempdir().unwrap();

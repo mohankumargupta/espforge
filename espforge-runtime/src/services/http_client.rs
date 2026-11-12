@@ -2,9 +2,14 @@
 //!
 //! Built on [`edge-http`], which frames the request and parses the response,
 //! and [`edge_nal_embassy`], which bridges the stack to edge-http's socket
-//! traits. The whole exchange runs inside one timeout. The connection buffer
-//! is a single static, so an app calls `get`/`post` one at a time — which is
-//! what the generated `app::forever` loop does anyway.
+//! traits. The whole exchange runs inside one timeout.
+//!
+//! Each `<http_client>` declares its own [`HttpClientStorage`], and the project
+//! sizes it: `connections="2"` gives the client two slots, so two tasks can have
+//! a request in flight at the same time instead of queueing on one buffer. A
+//! slot is one connection buffer *and* one socket-buffer pool; a pool is not
+//! `Sync`, so slots are never shared — a request takes a free slot for its
+//! whole exchange and gives it back when it finishes.
 
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -14,26 +19,75 @@ use edge_nal::{AddrType, Dns, WithTimeoutError, with_timeout};
 use edge_nal_embassy::{Dns as EmbassyDns, Tcp, TcpBuffers};
 use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
+use embassy_sync::mutex::{Mutex, MutexGuard};
 use embedded_io_async::{Read, Write};
 
 /// The largest connection buffer the client will use. The declared
 /// `rx_buffer_size` sizes it below this; the cap keeps the static bounded.
 const CONN_BUFFER_CAP: usize = 4096;
 
-/// The connection buffer and the TCP socket-buffer pool, shared by every
-/// client: only one client connection is in flight at a time, and the pool is
-/// not `Sync` on its own, so both live behind one async-aware `Mutex` that the
-/// exchange holds across its awaits.
-struct Shared {
+/// One request in flight: its connection buffer and its own TCP socket-buffer
+/// pool.
+///
+/// The pool is not `Sync` on its own and the framing buffer is `&mut`, so the
+/// pair travels together behind one async-aware `Mutex` that the exchange holds
+/// across its awaits. Two slots never share a pool, which is what lets two
+/// requests overlap.
+struct Slot {
     connection: [u8; CONN_BUFFER_CAP],
     pool: TcpBuffers<1, 1024, 2048>,
 }
 
-static SHARED: Mutex<CriticalSectionRawMutex, Shared> = Mutex::new(Shared {
-    connection: [0; CONN_BUFFER_CAP],
-    pool: TcpBuffers::new(),
-});
+impl Slot {
+    const fn new() -> Self {
+        Self {
+            connection: [0; CONN_BUFFER_CAP],
+            pool: TcpBuffers::new(),
+        }
+    }
+}
+
+/// The `static` one `<http_client>` needs: `N` slots, one request each.
+///
+/// The generated `generated.rs` declares one per service (`__CLIENT_STORAGE`),
+/// so two clients get two buffers instead of contending for one. `N` is the
+/// project's `connections=`: the default 1 keeps one request in flight, and a
+/// larger value costs one connection buffer and socket pool per slot (about
+/// 7 KiB of static RAM each).
+pub struct HttpClientStorage<const N: usize = 1> {
+    slots: [Mutex<CriticalSectionRawMutex, Slot>; N],
+}
+
+impl<const N: usize> HttpClientStorage<N> {
+    pub const fn new() -> Self {
+        assert!(N > 0, "an HttpClientStorage needs at least one slot");
+        Self {
+            slots: [const { Mutex::new(Slot::new()) }; N],
+        }
+    }
+
+    /// How many requests this client can have in flight.
+    pub const SLOTS: usize = N;
+
+    /// A slot to run one exchange in.
+    ///
+    /// A free slot is taken at once; when every slot is busy the request waits
+    /// on the first one, so the client queues instead of spinning or failing.
+    async fn acquire(&self) -> MutexGuard<'_, CriticalSectionRawMutex, Slot> {
+        for slot in &self.slots {
+            if let Ok(guard) = slot.try_lock() {
+                return guard;
+            }
+        }
+        self.slots[0].lock().await
+    }
+}
+
+impl<const N: usize> Default for HttpClientStorage<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// What `<http_client>` declared on the board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,14 +124,26 @@ pub enum HttpError {
 
 /// A handle to the board's HTTP client. `Copy`, so it can sit on `Services`.
 #[derive(Clone, Copy)]
-pub struct HttpClient {
+pub struct HttpClient<const N: usize = 1> {
+    storage: &'static HttpClientStorage<N>,
     stack: Stack<'static>,
     config: HttpClientConfig,
 }
 
-impl HttpClient {
-    pub fn new(stack: Stack<'static>, config: HttpClientConfig) -> Self {
-        Self { stack, config }
+impl<const N: usize> HttpClient<N> {
+    /// `storage` is the service's own generated `static`: the connection buffer
+    /// is never shared with another client, and its slots are what let this
+    /// client serve `N` requests at once.
+    pub fn new_in(
+        storage: &'static HttpClientStorage<N>,
+        stack: Stack<'static>,
+        config: HttpClientConfig,
+    ) -> Self {
+        Self {
+            storage,
+            stack,
+            config,
+        }
     }
 
     /// GET `url`, writing the response body into `rx_buf`. Returns the bytes
@@ -113,8 +179,8 @@ impl HttpClient {
         let addr = self.resolve(host, port).await?;
 
         let conn_len = self.config.rx_buffer_size.clamp(1, CONN_BUFFER_CAP);
-        let mut guard = SHARED.lock().await;
-        let Shared { connection, pool } = &mut *guard;
+        let mut guard = self.storage.acquire().await;
+        let Slot { connection, pool } = &mut *guard;
         let buf: &mut [u8] = &mut connection[..conn_len];
         let tcp = Tcp::new(self.stack, pool);
         let timeout = self.config.timeout_ms.min(u32::MAX as u64) as u32;
@@ -318,6 +384,43 @@ mod tests {
                 ("Content-Type", "text/plain"),
                 ("Content-Length", "2"),
             ]
+        );
+    }
+
+    /// `connections=2` gives the client two slots: the second request starts
+    /// without waiting for the first, and a third queues behind them.
+    #[test]
+    fn two_slots_serve_two_requests_at_once() {
+        use core::future::Future;
+        use core::pin::pin;
+        use core::task::{Context, Poll, Waker};
+
+        assert_eq!(HttpClientStorage::<1>::SLOTS, 1);
+        assert_eq!(HttpClientStorage::<2>::SLOTS, 2);
+
+        let storage = HttpClientStorage::<2>::new();
+        let mut cx = Context::from_waker(Waker::noop());
+
+        let mut first = pin!(storage.acquire());
+        let mut second = pin!(storage.acquire());
+        let Poll::Ready(mut first_slot) = first.as_mut().poll(&mut cx) else {
+            panic!("a free slot is taken at once");
+        };
+        let Poll::Ready(second_slot) = second.as_mut().poll(&mut cx) else {
+            panic!("the second request gets the second slot");
+        };
+        first_slot.connection[0] = 1;
+        assert_eq!(second_slot.connection[0], 0, "each slot owns its buffer");
+
+        let mut third = pin!(storage.acquire());
+        assert!(
+            third.as_mut().poll(&mut cx).is_pending(),
+            "with both slots busy a request queues"
+        );
+        drop(first_slot);
+        assert!(
+            third.as_mut().poll(&mut cx).is_ready(),
+            "a freed slot is reused"
         );
     }
 

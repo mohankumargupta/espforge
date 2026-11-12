@@ -14,9 +14,7 @@ this brings up is what the HTTP and HTTPS client services connect through.
 # peripherals
   <wifi id="radio" />
 
-# components
-  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
-
 # devices
 
 # services
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />

@@ -5,22 +5,16 @@
 //! this crate explicitly, and the "registry is non-empty" test guards the
 //! other failure mode: a slice the linker drops.
 //!
-//! There are three more doors, all keyed on data the schema owns: a component
-//! with a `recipe` needs no Rust file, a device with a `device_recipe` needs
-//! none either, and neither does a service with a `service_recipe`, so
-//! [`element`] falls back to [`recipes`], [`device_recipes`] and
-//! [`service_recipes`] in schema order. The coherence tests keep the four doors
-//! from disagreeing: every element has exactly one implementation.
-
-use std::sync::OnceLock;
+//! The recipe doors — a pin device with a `recipe`, a device with a
+//! `device_recipe`, a service with a `service_recipe` — are not process-wide:
+//! they are built from the schema a [`Session`](crate::schema::Session) owns,
+//! so two sessions generated in one process cannot disagree about a tag. The
+//! coherence tests keep the four doors apart: every element has exactly one
+//! implementation.
 
 use linkme::distributed_slice;
 
-use crate::components::recipe::RecipeElement;
-use crate::devices::recipe::DeviceRecipeElement;
 use crate::element::Element;
-use crate::schema::schema;
-use crate::services::recipe::ServiceRecipeElement;
 
 /// Every registered element.
 ///
@@ -34,89 +28,10 @@ pub fn elements() -> &'static [&'static dyn Element] {
     &ELEMENTS
 }
 
-/// One [`RecipeElement`] per schema element that declares a `recipe`, in
-/// schema order.
-///
-/// Built once from the schema: a recipe is data, and the element that reads it
-/// is one struct that knows no tag.
-pub fn recipes() -> &'static [RecipeElement] {
-    static RECIPES: OnceLock<Vec<RecipeElement>> = OnceLock::new();
-    RECIPES.get_or_init(|| {
-        schema()
-            .elements
-            .iter()
-            .filter(|element| element.recipe.is_some())
-            .filter(|element| matches!(element.section.as_str(), "peripherals" | "components"))
-            .map(RecipeElement::new)
-            .collect()
-    })
-}
-
-/// One [`DeviceRecipeElement`] per schema element that declares a
-/// `device_recipe`, in schema order.
-///
-/// The device tier: a driver whose wiring is data needs no Rust element, so
-/// adding one edits the driver crate and nothing here.
-pub fn device_recipes() -> &'static [DeviceRecipeElement] {
-    static RECIPES: OnceLock<Vec<DeviceRecipeElement>> = OnceLock::new();
-    RECIPES.get_or_init(|| {
-        schema()
-            .elements
-            .iter()
-            .filter(|element| element.device_recipe.is_some())
-            .map(DeviceRecipeElement::new)
-            .collect()
-    })
-}
-
-/// One [`ServiceRecipeElement`] per schema element that declares a
-/// `service_recipe`, in schema order.
-///
-/// The service tier: a service whose wiring is data needs no Rust element, so
-/// adding one edits the runtime and the schema and nothing here.
-pub fn service_recipes() -> &'static [ServiceRecipeElement] {
-    static RECIPES: OnceLock<Vec<ServiceRecipeElement>> = OnceLock::new();
-    RECIPES.get_or_init(|| {
-        schema()
-            .elements
-            .iter()
-            .filter(|element| element.service_recipe.is_some())
-            .map(ServiceRecipeElement::new)
-            .collect()
-    })
-}
-
-/// The registered element for `tag`, if any: a hand-written element first,
-/// then a component recipe, then a device recipe, then a service recipe.
-pub fn element(tag: &str) -> Option<&'static dyn Element> {
-    ELEMENTS
-        .iter()
-        .copied()
-        .find(|element| element.tag() == tag)
-        .or_else(|| {
-            recipes()
-                .iter()
-                .find(|element| element.tag() == tag)
-                .map(|element| element as &'static dyn Element)
-        })
-        .or_else(|| {
-            device_recipes()
-                .iter()
-                .find(|element| element.tag() == tag)
-                .map(|element| element as &'static dyn Element)
-        })
-        .or_else(|| {
-            service_recipes()
-                .iter()
-                .find(|element| element.tag() == tag)
-                .map(|element| element as &'static dyn Element)
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use espforge_schema::{AttrDef, AttrKind};
+    use crate::schema::{Session, schema};
 
     #[test]
     fn the_registry_is_not_empty() {
@@ -128,12 +43,18 @@ mod tests {
     }
 
     #[test]
-    fn the_recipe_door_reaches_led() {
-        let led = element("led").expect("a recipe element is registered");
+    fn the_pin_recipe_door_reaches_led() {
+        let session = Session::bundled();
+        let led = session
+            .element("led")
+            .expect("a pin recipe element is registered");
         assert_eq!(led.tag(), "led");
         assert!(
-            recipes().iter().any(|element| element.tag() == "led"),
-            "`<led>` is a recipe, not a hand-written element"
+            session
+                .pin_recipes()
+                .iter()
+                .any(|element| element.tag() == "led"),
+            "`<led>` is a pin recipe, not a hand-written element"
         );
     }
 
@@ -181,7 +102,7 @@ mod tests {
             // the core reader, not by the registry.
             if !matches!(
                 element.section.as_str(),
-                "peripherals" | "components" | "devices" | "services"
+                "peripherals" | "devices" | "services"
             ) {
                 continue;
             }
@@ -191,15 +112,15 @@ mod tests {
         }
     }
 
-    /// A component with a `recipe` *and* a registered implementation has two
+    /// A pin device with a `recipe` *and* a registered implementation has two
     /// doors and must be caught, naming the file to delete.
     #[test]
-    fn a_recipe_beside_a_rust_file_is_refused() {
+    fn a_pin_recipe_beside_a_rust_file_is_refused() {
         let schema = schema();
         let led = schema.element("led").expect("`<led>` is a schema element");
         let problem = implementation_problem(led, &["led"]).expect("two doors is a problem");
         assert!(
-            problem.contains("delete `espforge-elements/src/components/led.rs`"),
+            problem.contains("delete `espforge-elements/src/devices/led.rs`"),
             "{problem}"
         );
         assert!(problem.contains("already has a `recipe`"), "{problem}");
@@ -207,127 +128,24 @@ mod tests {
         assert!(implementation_problem(led, &[]).is_none());
     }
 
-    /// An `AttrDef` of `kind`, for the shape predicate's own unit test.
-    fn attr(name: &str, kind: AttrKind) -> AttrDef {
-        AttrDef {
-            name: name.into(),
-            kind,
-            required: false,
-            default: None,
-            range: None,
-            help: None,
-            span: 0..0,
-        }
-    }
-
-    /// The shape a recipe describes: an `id`, exactly one `ref` and booleans.
-    fn is_recipe_shaped(attrs: &[AttrDef]) -> bool {
-        let mut idents = 0;
-        let mut refs = 0;
-        for attr in attrs {
-            match attr.kind {
-                AttrKind::Ident => idents += 1,
-                AttrKind::Bool => {}
-                AttrKind::Ref { .. } => refs += 1,
-                _ => return false,
-            }
-        }
-        idents == 1 && refs == 1
-    }
-
-    /// Why a `# components` element that is recipe-shaped but not a recipe is a
-    /// problem, if it is. The predicate has its own unit test below, so the
-    /// failure path is exercised without adding a real element.
-    fn tier_problem(tag: &str, attrs: &[AttrDef], has_recipe: bool) -> Option<String> {
-        (is_recipe_shaped(attrs) && !has_recipe).then(|| {
-            format!(
-                "`<{tag}>` is a recipe component: add `recipe …` to its schema block and delete \
-                 `components/{tag}.rs`"
-            )
-        })
-    }
-
-    #[test]
-    fn a_recipe_shaped_component_without_a_recipe_fails() {
-        let recipe_shaped = [
-            attr("id", AttrKind::Ident),
-            attr(
-                "gpio",
-                AttrKind::Ref {
-                    to: vec!["gpio".into()],
-                },
-            ),
-            attr("active_low", AttrKind::Bool),
-        ];
-        assert!(is_recipe_shaped(&recipe_shaped));
-        assert_eq!(
-            tier_problem("buzzer", &recipe_shaped, false).unwrap(),
-            "`<buzzer>` is a recipe component: add `recipe …` to its schema block and delete \
-             `components/buzzer.rs`"
-        );
-        // A real recipe is not a problem.
-        assert!(tier_problem("buzzer", &recipe_shaped, true).is_none());
-
-        // A bus component with an integer address is out of shape.
-        let bus = [
-            attr("id", AttrKind::Ident),
-            attr(
-                "i2c",
-                AttrKind::Ref {
-                    to: vec!["i2c".into()],
-                },
-            ),
-            attr("address", AttrKind::U32),
-        ];
-        assert!(!is_recipe_shaped(&bus));
-        assert!(tier_problem("screen", &bus, false).is_none());
-
-        // Two refs is not one pin.
-        let two_refs = [
-            attr("id", AttrKind::Ident),
-            attr(
-                "a",
-                AttrKind::Ref {
-                    to: vec!["gpio".into()],
-                },
-            ),
-            attr(
-                "b",
-                AttrKind::Ref {
-                    to: vec!["gpio".into()],
-                },
-            ),
-        ];
-        assert!(!is_recipe_shaped(&two_refs));
-    }
-
-    /// The real schema has to obey the tier: every recipe-shaped component is a
-    /// recipe.
-    #[test]
-    fn every_recipe_shaped_component_declares_a_recipe() {
-        let schema = schema();
-        for element in schema.elements_in("components") {
-            if let Some(problem) =
-                tier_problem(&element.tag, &element.attrs, element.recipe.is_some())
-            {
-                panic!("{problem}");
-            }
-        }
-    }
-
     /// The device door is open: a `device_recipe` element is found without a
-    /// Rust file, in schema order after the component recipes.
+    /// Rust file, in schema order after the pin recipes.
     #[test]
     fn the_device_door_reaches_every_recipe_driver() {
+        let session = Session::bundled();
         for tag in ["ssd1306", "ili9341", "scd4x"] {
-            let registered =
-                element(tag).unwrap_or_else(|| panic!("`<{tag}>` has an implementation"));
+            let registered = session
+                .element(tag)
+                .unwrap_or_else(|| panic!("`<{tag}>` has an implementation"));
             assert_eq!(registered.tag(), tag);
             assert!(
-                device_recipes().iter().any(|recipe| recipe.tag() == tag),
+                session
+                    .device_recipes()
+                    .iter()
+                    .any(|recipe| recipe.tag() == tag),
                 "`<{tag}>` comes from its device recipe"
             );
-            let schema_element = schema().element(tag).unwrap();
+            let schema_element = session.schema().element(tag).unwrap();
             assert!(
                 implementation_problem(schema_element, &[]).is_none(),
                 "`<{tag}>` has exactly one implementation"
@@ -356,6 +174,7 @@ mod tests {
     /// Rust file, in schema order after the device recipes.
     #[test]
     fn the_service_door_reaches_every_recipe_service() {
+        let session = Session::bundled();
         for tag in [
             "http_client",
             "https_client",
@@ -363,14 +182,18 @@ mod tests {
             "wss_client",
             "ntp",
         ] {
-            let registered =
-                element(tag).unwrap_or_else(|| panic!("`<{tag}>` has an implementation"));
+            let registered = session
+                .element(tag)
+                .unwrap_or_else(|| panic!("`<{tag}>` has an implementation"));
             assert_eq!(registered.tag(), tag);
             assert!(
-                service_recipes().iter().any(|recipe| recipe.tag() == tag),
+                session
+                    .service_recipes()
+                    .iter()
+                    .any(|recipe| recipe.tag() == tag),
                 "`<{tag}>` comes from its service recipe"
             );
-            let schema_element = schema().element(tag).unwrap();
+            let schema_element = session.schema().element(tag).unwrap();
             assert!(
                 implementation_problem(schema_element, &[]).is_none(),
                 "`<{tag}>` has exactly one implementation"
@@ -406,10 +229,10 @@ mod tests {
             assert!(
                 matches!(
                     schema_element.section.as_str(),
-                    "peripherals" | "components" | "devices" | "services"
+                    "peripherals" | "devices" | "services"
                 ),
                 "`<{tag}>` is registered from a `<{}>` schema element, but only \
-                 peripherals, components, devices and services lower",
+                 peripherals, devices and services lower",
                 schema_element.section
             );
         }

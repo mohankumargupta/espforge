@@ -5,5 +5,5 @@ elf = "target/xtensa-esp32s3-none-elf/debug/uart_example"
 firmware = "target/xtensa-esp32s3-none-elf/debug/uart_example"
 
 [[chip]]
-name = 'chip'
+name = 'uartexample'
 binary = 'chip.wasm'

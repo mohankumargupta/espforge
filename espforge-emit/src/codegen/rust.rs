@@ -2,30 +2,29 @@
 //! `build.rs`, emitted from `Board` with `quote!` and printed by
 //! `prettyplease`.
 //!
-//! Comments are inserted by [`super::comments`] after printing; the AST cannot
-//! carry them. The four files are owned by the project (regenerated on every
-//! build).
+//! The four files are owned by the project (regenerated on every build).
 //!
-//! `generated()` walks `board.components` and calls each component's
-//! `Lowered::emit` through an `EmitCx`; it has no arm per element. With zero
-//! components it emits exactly the empty `Components`, `Devices {}` and
-//! `Services {}` of the helloworld golden.
+//! `generated()` walks `board.devices` and `board.services` and calls each
+//! one's `Lowered::emit` through an `EmitCx`; it has no arm per element. With
+//! nothing declared it emits exactly the empty `Devices {}` and `Services {}`
+//! of the helloworld golden.
 
 use anyhow::{Context, Result};
 use espforge_elements::element::EmitParts;
-use espforge_elements::{Board, EmitCx, Lowered, MainCtx, Meta, ResolvedOptions, Runtime};
+use espforge_elements::{
+    Board, Device, EmitCx, Lowered, MainCtx, Meta, ResolvedOptions, Runtime, Service,
+};
 use proc_macro2::Literal;
 use proc_macro2::TokenStream;
 use quote::format_ident;
 
-use super::comments::{self, Comment};
 use crate::artifact::{Artifact, Ownership};
 
 /// Every Rust artifact, in a deterministic order.
 ///
 /// The elements are asked to emit **once**, here: the same `EmitParts` feed
-/// `generated.rs` (fields, initialisers, prelude, safety notes) and `main.rs`
-/// (startup statements). A component cannot be asked to emit twice.
+/// `generated.rs` (fields, initialisers, prelude) and `main.rs`
+/// (startup statements). An element cannot be asked to emit twice.
 pub fn generate(board: &Board, meta: &Meta, opts: &ResolvedOptions) -> Result<Vec<Artifact>> {
     let parts = collect(board);
     Ok(vec![
@@ -46,7 +45,7 @@ pub fn generate(board: &Board, meta: &Meta, opts: &ResolvedOptions) -> Result<Ve
         },
         Artifact {
             path: "src/lib.rs".into(),
-            content: lib(meta, !board.devices.is_empty())?,
+            content: lib(meta, !parts.device_fields.is_empty())?,
             ownership: Ownership::Owned,
         },
     ])
@@ -58,13 +57,16 @@ fn print(tokens: TokenStream) -> Result<String> {
 }
 
 fn generated(parts: &EmitParts, _meta: &Meta) -> Result<String> {
-    let fields = &parts.fields;
-    let inits = &parts.inits;
-    let prelude = &parts.prelude;
+    // The elements choose the container at their own emission site: a blocking
+    // board keeps the bare device field, an embassy board wraps every device
+    // in `AsyncMutex`. There is no second wrapping pass here.
     let device_fields = &parts.device_fields;
     let device_inits = &parts.device_inits;
     let service_fields = &parts.service_fields;
     let service_inits = &parts.service_inits;
+    let service_prelude = &parts.service_prelude;
+    let module_items = &parts.module_items;
+    let device_prelude = &parts.device_prelude;
 
     // `Devices` is byte-identical to the styles that predate devices (the
     // helloworld `Devices {}` with no `new`) when nothing is declared.
@@ -81,13 +83,18 @@ fn generated(parts: &EmitParts, _meta: &Meta) -> Result<String> {
             }
 
             impl Devices {
+                /// Build every declared device.
+                ///
+                /// Fallible: a part that does not answer is a named
+                /// `DeviceError`, not a panic. The boot site decides whether
+                /// to stop there.
                 pub fn new(
                     registry: &mut PeripheralRegistry,
-                    components: &mut Components,
-                ) -> Self {
-                    Self {
+                ) -> Result<Self, espforge_runtime::DeviceError> {
+                    #(#device_prelude)*
+                    Ok(Self {
                         #(#device_inits)*
-                    }
+                    })
                 }
             }
         }
@@ -110,7 +117,8 @@ fn generated(parts: &EmitParts, _meta: &Meta) -> Result<String> {
             }
 
             impl Services {
-                pub fn new(components: &Components) -> Self {
+                pub fn new() -> Self {
+                    #(#service_prelude)*
                     Self {
                         #(#service_inits)*
                     }
@@ -121,6 +129,10 @@ fn generated(parts: &EmitParts, _meta: &Meta) -> Result<String> {
 
     let tokens = quote::quote! {
         #![allow(dead_code, unused_variables)]
+
+        // Generated storage: one `static` per bus/station/client, declared by
+        // the element that owns it.
+        #(#module_items)*
 
         #[doc = " Raw ESP32 peripherals, moved out of `esp_hal::peripherals::Peripherals` once at init."]
         pub struct PeripheralRegistry {
@@ -133,80 +145,92 @@ fn generated(parts: &EmitParts, _meta: &Meta) -> Result<String> {
             }
         }
 
-        #[doc = " Constructed components."]
-        pub struct Components {
-            #(#fields)*
-        }
-
-        impl Components {
-            pub fn new(registry: &mut PeripheralRegistry) -> Self {
-                #(#prelude)*
-                Self {
-                    #(#inits)*
-                }
-            }
-        }
-
         #devices
 
         #services
     };
 
-    let mut text = comments::prepend(
-        print(tokens)?,
-        &["GENERATED BY ESPFORGE — DO NOT EDIT. Source of truth is the project .espf file."],
-    );
-    text = comments::apply(text, &safety_comments(&parts.safety))?;
-    // Re-parse: an inserted comment must never change what the file means.
-    syn::parse_file(&text).context("commented generated.rs does not parse")?;
-    Ok(text)
+    print(tokens)
 }
 
-/// Fill the `Components` and `Services` fields and initialisers, and collect
-/// the `main()` startup statements, by asking every component and service to
-/// emit itself. There is no `match` on `Component` here: an element's own file
-/// owns every token it prints.
+/// Fill the `Devices` and `Services` fields and initialisers, and collect the
+/// `main()` startup statements, by asking every pin device, raw bus, bus
+/// device and service to emit itself. An element's own file owns every token
+/// it prints.
 ///
-/// Components emit before services, so a service's `components.<network>`
-/// reference is to a field declared above it.
+/// A station's provider local must exist before a client names it, and its
+/// storage static has always preceded the bus statics, so the station pass
+/// stays first. Pin devices and raw buses follow, then bus devices, then the
+/// protocol services that consume the station. That keeps the generated text
+/// stable while removing the old non-device pass.
 fn collect(board: &Board) -> EmitParts {
     let mut cx = EmitCx::with_main(MainCtx::default());
-    for component in &board.components {
-        component.emit(board, &mut cx);
+    for service in &board.services {
+        if matches!(service, Service::WifiStation(_)) {
+            service.emit(board, &mut cx);
+        }
     }
     for device in &board.devices {
-        device.emit(board, &mut cx);
+        if let Device::Pin(device) = device {
+            device.emit(board, &mut cx);
+        }
+    }
+    espforge_elements::raw_bus::emit_raw_buses(board, &mut cx);
+    for device in &board.devices {
+        if let Device::Bus(device) = device {
+            device.emit(board, &mut cx);
+        }
     }
     for service in &board.services {
-        service.emit(board, &mut cx);
+        if matches!(service, Service::Protocol(_)) {
+            service.emit(board, &mut cx);
+        }
     }
     cx.into_parts()
 }
 
-/// Turn the elements' `(anchor, line)` notes into comment blocks, in board
-/// order.
-fn safety_comments(safety: &[(String, Vec<String>)]) -> Vec<Comment> {
-    safety
-        .iter()
-        .map(|(anchor, lines)| {
-            if let [line] = lines.as_slice() {
-                Comment::new(anchor.clone(), line.clone())
-            } else {
-                let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
-                Comment::block(anchor.clone(), &refs)
-            }
-        })
-        .collect()
-}
-
 fn lib(meta: &Meta, has_devices: bool) -> Result<String> {
-    // A device is a draw target: drawing needs `&mut`, so with devices the
-    // macro hands one out. A project without devices keeps the `&` spelling it
-    // has always had (the helloworld golden depends on it byte for byte).
-    let device_borrow = if has_devices {
-        quote::quote! { &mut }
-    } else {
-        quote::quote! { & }
+    // One universal accessor: the container decides the spelling. A blocking
+    // board hands out `&mut`; an embassy board awaits the device's
+    // `AsyncMutex`. A board with no devices keeps the shared-reference
+    // spelling it has always had (the helloworld golden depends on it byte
+    // for byte).
+    let device_macro = match (has_devices, meta.runtime) {
+        (true, Runtime::Embassy) => quote::quote! {
+            #[doc = " Access a device from the `Context`: waits for its `AsyncMutex` and yields a guard. Usage: `let mut dev = device!(ctx, my_device);`"]
+            #[macro_export]
+            macro_rules! device {
+                ($ctx:expr, $name:ident) => {
+                    $ctx.devices.$name.lock().await
+                };
+            }
+
+            #[doc = " Backward compatibility alias for `device!`"]
+            #[macro_export]
+            macro_rules! async_device {
+                ($ctx:expr, $name:ident) => {
+                    $crate::device!($ctx, $name)
+                };
+            }
+        },
+        (true, Runtime::Blocking) => quote::quote! {
+            #[doc = " Access a device from the `Context`. Usage: `device!(ctx, my_screen)`"]
+            #[macro_export]
+            macro_rules! device {
+                ($ctx:expr, $name:ident) => {
+                    &mut $ctx.devices.$name
+                };
+            }
+        },
+        (false, _) => quote::quote! {
+            #[doc = " Access a device from the `Context`. Usage: `device!(ctx, my_screen)`"]
+            #[macro_export]
+            macro_rules! device {
+                ($ctx:expr, $name:ident) => {
+                    &$ctx.devices.$name
+                };
+            }
+        },
     };
     let signal = if meta.runtime == Runtime::Embassy {
         quote::quote! {
@@ -233,19 +257,13 @@ fn lib(meta: &Meta, has_devices: bool) -> Result<String> {
         pub use espforge_runtime::Delay;
         pub use espforge_runtime::embedded_hal;
 
-        #[doc = " Access a component from the `Context`. Usage: `component!(ctx, my_led)`"]
+        #device_macro
+
+        #[doc = " Backward compatibility alias for `device!`"]
         #[macro_export]
         macro_rules! component {
             ($ctx:expr, $name:ident) => {
-                &$ctx.components.$name
-            };
-        }
-
-        #[doc = " Access a device from the `Context`. Usage: `device!(ctx, my_screen)`"]
-        #[macro_export]
-        macro_rules! device {
-            ($ctx:expr, $name:ident) => {
-                #device_borrow $ctx.devices.$name
+                $crate::device!($ctx, $name)
             };
         }
 
@@ -261,13 +279,12 @@ fn lib(meta: &Meta, has_devices: bool) -> Result<String> {
 
         pub mod app;
 
-        pub use generated::{Components, Devices, PeripheralRegistry, Services};
+        pub use generated::{Devices, PeripheralRegistry, Services};
 
         #[doc = " The whole context the app receives."]
         pub struct Context {
             pub logger: espforge_runtime::Logger,
             pub delay: espforge_runtime::Delay,
-            pub components: Components,
             pub devices: Devices,
             pub services: Services,
         }
@@ -275,18 +292,7 @@ fn lib(meta: &Meta, has_devices: bool) -> Result<String> {
         #[doc = " Set by the entry point once wiring is complete."]
         pub static CTX: static_cell::StaticCell<Context> = static_cell::StaticCell::new();
     };
-    let mut text = comments::prepend(
-        print(tokens)?,
-        &["GENERATED BY ESPFORGE — DO NOT EDIT. Source of truth is the project .espf file."],
-    );
-    text = comments::apply(
-        text,
-        &[Comment::new(
-            "pub use espforge_runtime::Delay;",
-            "Re-exports for `app.rs` (it only uses `crate::` paths).",
-        )],
-    )?;
-    Ok(text)
+    print(tokens)
 }
 
 /// The heap line `main()` must install, if any.
@@ -320,27 +326,30 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
     let startup = &parts.startup;
 
     // The empty `Devices {}` keeps the helloworld golden byte-identical; a
-    // declared device gets the constructor that takes its bus from
-    // `Components`.
-    let (devices, components_mut) = if parts.device_fields.is_empty() {
-        (
-            quote::quote! { let devices = Devices {}; },
-            quote::quote! {},
-        )
+    // declared device gets the constructor, which builds its buses itself.
+    let devices = if parts.device_fields.is_empty() {
+        quote::quote! { let devices = Devices {}; }
     } else {
-        (
-            quote::quote! { let devices = Devices::new(&mut registry, &mut components); },
-            quote::quote! { mut },
-        )
+        quote::quote! {
+            let devices = match Devices::new(&mut registry) {
+                Ok(devices) => devices,
+                Err(error) => {
+                    logger.error(format_args!("{}", error));
+                    loop {
+                        esp_hal::delay::Delay::new().delay_millis(1_000);
+                    }
+                }
+            };
+        }
     };
 
     // `Services {}` without a `new` when nothing is declared keeps the
     // helloworld golden byte-identical; a declared service gets the
-    // `Services::new(&components)` constructor instead.
+    // `Services::new()` constructor instead.
     let services = if parts.service_fields.is_empty() {
         quote::quote! { let services = Services {}; }
     } else {
-        quote::quote! { let services = Services::new(&components); }
+        quote::quote! { let services = Services::new(); }
     };
 
     let tokens = match meta.runtime {
@@ -349,7 +358,7 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
             #![no_main]
 
             use esp_backtrace as _;
-            use #crate_name::{app, Components, Context, Devices, PeripheralRegistry, CTX};
+            use #crate_name::{app, Context, Devices, PeripheralRegistry, CTX};
             use #crate_name::Services;
 
             #[esp_hal::main]
@@ -364,11 +373,10 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
                 let logger = espforge_runtime::Logger::new();
                 let delay = espforge_runtime::Delay::new();
 
-                let #components_mut components = Components::new(&mut registry);
                 #devices
                 #services
 
-                let ctx = Context { logger, delay, components, devices, services };
+                let ctx = Context { logger, delay, devices, services };
                 let ctx = CTX.init(ctx);
                 app::setup(ctx);
                 loop {
@@ -383,7 +391,7 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
             use embassy_executor::Spawner;
             use esp_backtrace as _;
             use esp_hal::timer::timg::TimerGroup;
-            use #crate_name::{app, Components, Context, Devices, PeripheralRegistry, CTX};
+            use #crate_name::{app, Context, Devices, PeripheralRegistry, CTX};
             use #crate_name::Services;
 
             #[esp_rtos::main]
@@ -396,20 +404,19 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
                 #[allow(unused_mut)]
                 let mut registry = PeripheralRegistry::new(peripherals);
 
-                let #components_mut components = Components::new(&mut registry);
+                let logger = espforge_runtime::Logger::new();
+                let delay = espforge_runtime::Delay::new();
+
                 #devices
 
                 let timg0 = TimerGroup::new(registry.peripherals.TIMG0);
                 esp_rtos::start(timg0.timer0, registry.peripherals.FROM_CPU_INTR0);
 
-                #(#startup)*
-
-                let logger = espforge_runtime::Logger::new();
-                let delay = espforge_runtime::Delay::new();
-
                 #services
 
-                let ctx = Context { logger, delay, components, devices, services };
+                #(#startup)*
+
+                let ctx = Context { logger, delay, devices, services };
                 let ctx = CTX.init(ctx);
                 app::setup(ctx, spawner).await;
                 loop {
@@ -419,32 +426,7 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
         },
     };
 
-    let mut text = comments::prepend(
-        print(tokens)?,
-        &[
-            "GENERATED BY ESPFORGE — DO NOT EDIT.",
-            "Source of truth is the project .espf file.",
-        ],
-    );
-    let mut notes = vec![Comment::new(
-        "components = Components::new(",
-        "Built first: it borrows the whole registry, which the moves below break.",
-    )];
-    if meta.runtime == Runtime::Embassy {
-        notes.push(Comment::block(
-            "let logger = espforge_runtime::Logger::new();",
-            &[
-                "Hoisted above the component/device wiring because some drivers take",
-                "`&ctx.delay` at construct time.",
-            ],
-        ));
-        notes.push(Comment::new(
-            "let services =",
-            "Services need the scheduler (started above) and the spawner.",
-        ));
-    }
-    text = comments::apply(text, &notes)?;
-    Ok(text)
+    print(tokens)
 }
 
 fn build_rs(meta: &Meta) -> Result<String> {
@@ -596,26 +578,112 @@ fn build_rs(meta: &Meta) -> Result<String> {
             #arch_arg
         }
     };
-    let mut text = comments::prepend(
-        print(tokens)?,
-        &["GENERATED BY ESPFORGE — DO NOT EDIT. Source of truth is the project .espf file."],
-    );
-    text = comments::apply(
-        text,
-        &[Comment::new(
-            "println!(\"cargo:rustc-link-arg=-Tlinkall.x\");",
-            "make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)",
-        )],
-    )?;
-    Ok(text)
+    print(tokens)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codegen::test_support::{case, service};
-    use espforge_elements::components::recipe::RecipeComponent;
-    use espforge_elements::{Component, Ident, Owner, OwnerKind, Pin, PinUse, ResourceGraph};
+    use crate::codegen::test_support::{case, device, service};
+    use espforge_elements::{
+        BusDevice, BusTransport, Device, Driver, I2cTransport, Ident, Owner, OwnerKind, Pin,
+        PinDevice, PinUse, ResourceGraph, Service, SpiTransport,
+    };
+
+    /// Every name the generated `lib.rs`/`main.rs` binds must be reserved for
+    /// the user: a local added without reserving its name is how a user id
+    /// starts producing a `rustc` error in generated code.
+    #[test]
+    fn every_name_the_generated_code_binds_is_reserved() {
+        use espforge_elements::MainCtx;
+        use espforge_elements::element::RESERVED_IDENTS;
+
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+
+        for name in MainCtx::default().names() {
+            assert!(
+                RESERVED_IDENTS.contains(&name.as_str()),
+                "`main()` binds `{name}`, which is not in RESERVED_IDENTS"
+            );
+        }
+
+        let text = lib(&case.meta, true).unwrap();
+        let context = text
+            .split("pub struct Context {")
+            .nth(1)
+            .and_then(|rest| rest.split('}').next())
+            .expect("`lib()` prints a `Context` struct");
+        let fields: Vec<&str> = context
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("pub "))
+            .filter_map(|field| field.split(':').next())
+            .map(str::trim)
+            .collect();
+        assert_eq!(fields.len(), 4, "`Context` field scan found {fields:?}");
+        for field in fields {
+            assert!(
+                RESERVED_IDENTS.contains(&field),
+                "`Context` has a field `{field}` that is not in RESERVED_IDENTS"
+            );
+        }
+    }
+
+    /// WS-A's grep guard: no runtime singleton may hide its storage in a
+    /// `static`. Each one takes a `&'static` storage value that the generated
+    /// code declares per element, so two instances cannot share one cell.
+    #[test]
+    fn no_static_storage_in_runtime() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("the runtime sources are readable") {
+                let path = entry.expect("a readable directory entry").path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.to_string_lossy().ends_with(".rs") {
+                    out.push(path);
+                }
+            }
+        }
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the emit crate lives beside espforge-runtime")
+            .join("espforge-runtime/src");
+        let mut files = Vec::new();
+        walk(&root, &mut files);
+        assert!(
+            !files.is_empty(),
+            "no runtime sources under {}",
+            root.display()
+        );
+
+        let mut offenders = Vec::new();
+        for file in &files {
+            let text = std::fs::read_to_string(file).expect("a runtime source is UTF-8");
+            // A `#[cfg(test)]` module may hold a static; the code shipped to the
+            // chip may not.
+            let shipped = text.split("#[cfg(test)]").next().unwrap_or_default();
+            for (number, line) in shipped.lines().enumerate() {
+                let line = line.trim_start();
+                if ["static ", "pub static ", "static mut "]
+                    .iter()
+                    .any(|prefix| line.starts_with(prefix))
+                {
+                    offenders.push(format!("{}:{}: {line}", file.display(), number + 1));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "runtime storage must be a parameter, not a `static`:\n{}",
+            offenders.join("\n")
+        );
+
+        // The same on the generated side: a board without a bus or a service
+        // needs no storage at all, so it emits no `static`.
+        let (board, meta) = blink();
+        let text = generated(&collect(&board), &meta).unwrap();
+        assert!(!text.contains("static "), "{text}");
+    }
 
     /// `blink`: one LED on GPIO18.
     fn blink() -> (Board, Meta) {
@@ -623,7 +691,6 @@ mod tests {
         let mut board = Board {
             meta: case.meta.clone(),
             resources: ResourceGraph::default(),
-            components: Vec::new(),
             devices: Vec::new(),
             services: Vec::new(),
             warnings: Vec::new(),
@@ -633,24 +700,19 @@ mod tests {
             .resources
             .claim(
                 Pin(18),
-                Owner::new(OwnerKind::Recipe("led"), id.clone()),
+                Owner::new(OwnerKind::Pin("led".into()), id.clone()),
                 0..0,
                 PinUse::Output,
             )
             .expect("pin 18 is free");
         board
-            .components
-            .push(Component::Recipe(RecipeComponent::new(
-                "led",
-                id,
-                pin,
-                vec![false],
-            )));
+            .devices
+            .push(Device::Pin(PinDevice::new("led", id, pin)));
         (board, case.meta)
     }
 
     #[test]
-    fn a_led_emits_its_field_init_and_safety_note() {
+    fn a_led_emits_its_field_and_init() {
         let (board, meta) = blink();
         let text = generated(&collect(&board), &meta).unwrap();
         assert!(
@@ -661,35 +723,284 @@ mod tests {
             text.contains("unsafe { registry.peripherals.GPIO18.clone_unchecked() }"),
             "{text}"
         );
-        assert!(
-            text.contains("// SAFETY: espforge checked that no other component uses GPIO18."),
-            "{text}"
-        );
         assert!(text.contains("false,"), "{text}");
     }
 
-    /// A declared display fills `Devices`, gets a constructor that takes its
-    /// bus out of `Components`, and flips `components` to `mut` in `main`.
+    /// A service that owns mutable state gets one module-scope `static`, and
+    /// its constructor takes it first: two clients never share one buffer.
     #[test]
-    fn a_display_fills_the_devices_struct() {
+    fn a_service_with_storage_owns_one_static() {
+        let case = case("esp32c3", Runtime::Embassy, true, &[], &["wifi"]);
+        let mut board = empty_board(&case);
+        let Service::Protocol(mut client) = service("http_client", "http-client", None) else {
+            panic!("the fixture is a protocol service");
+        };
+        client.new =
+            espforge_elements::model::RustPath::parse("espforge_runtime::HttpClient::new_in")
+                .unwrap();
+        client.storage = Some(
+            espforge_elements::model::RustType::parse("espforge_runtime::HttpClientStorage")
+                .unwrap(),
+        );
+        board.services.push(Service::Protocol(client));
+
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        assert!(
+            text.contains("static __HTTP_CLIENT_STORAGE: espforge_runtime::HttpClientStorage"),
+            "{text}"
+        );
+        assert_eq!(
+            text.matches("__HTTP_CLIENT_STORAGE").count(),
+            2,
+            "declared once, passed once: {text}"
+        );
+        assert!(text.contains("new_in("), "{text}");
+    }
+
+    /// A storage whose slot count is a const argument is declared, and
+    /// constructed, with that argument: `HttpClientStorage::<2>`.
+    #[test]
+    fn a_generic_storage_bakes_its_slot_count() {
+        let case = case("esp32c3", Runtime::Embassy, true, &[], &["wifi"]);
+        let mut board = empty_board(&case);
+        let Service::Protocol(mut client) = service("http_client", "http-client", None) else {
+            panic!("the fixture is a protocol service");
+        };
+        client.ty =
+            espforge_elements::model::RustType::parse("espforge_runtime::HttpClient::<2>").unwrap();
+        client.new =
+            espforge_elements::model::RustPath::parse("espforge_runtime::HttpClient::<2>::new_in")
+                .unwrap();
+        client.storage = Some(
+            espforge_elements::model::RustType::parse("espforge_runtime::HttpClientStorage::<2>")
+                .unwrap(),
+        );
+        board.services.push(Service::Protocol(client));
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        // The printer wraps a long turbofish across lines (adding a trailing
+        // comma inside it) and writes a *type's* argument without the
+        // turbofish. Comparing without whitespace, with that comma dropped,
+        // checks the types without pinning the layout.
+        let flat: String = text
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>()
+            .replace(",>", ">");
+        assert!(
+            flat.contains(
+                "static__HTTP_CLIENT_STORAGE:espforge_runtime::HttpClientStorage<2>=\
+                 espforge_runtime::HttpClientStorage::<2>::new()"
+            ),
+            "{text}"
+        );
+        assert!(
+            flat.contains("pubhttp_client:espforge_runtime::HttpClient<2>,"),
+            "{text}"
+        );
+        assert!(
+            flat.contains("espforge_runtime::HttpClient::<2>::new_in(&__HTTP_CLIENT_STORAGE"),
+            "{text}"
+        );
+    }
+
+    /// A UART device owns its port: `Devices::new` builds one `UartDevice` and
+    /// the constructor's first argument is that port. A bound `<uart>` emits
+    /// no raw field beside it.
+    #[test]
+    fn a_uart_device_builds_its_port_inside_devices() {
+        use espforge_elements::model::{
+            Bus, ClaimedPin, Framing, Init, Parity, RustPath, RustType, StopBits, UartTransport,
+        };
+
+        fn claim(board: &mut Board, pin: u8) -> ClaimedPin {
+            board
+                .resources
+                .claim(
+                    Pin(pin),
+                    Owner::new(OwnerKind::Uart, Ident::new("uart1", 0..0)),
+                    0..0,
+                    PinUse::Unspecified,
+                )
+                .expect("the port's pins are free")
+        }
+
         let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
         let mut board = empty_board(&case);
-        board.devices.push(espforge_elements::Device {
-            id: Ident::new("oled", 0..0),
-            tag: "ssd1306",
-            bus_component: Ident::new("oled_bus", 0..0),
-            feature: "ssd1306".into(),
-            deps: vec!["embedded-graphics".into()],
-            ty: "espforge_drivers::Ssd1306Display<espforge_drivers::Oled128x64>".into(),
-            new: "espforge_drivers::Ssd1306Display::new".into(),
-            takes_bus: false,
-            taken: None,
-            pins: Vec::new(),
-            args: vec![
-                "espforge_drivers::Oled128x64".into(),
-                "espforge_drivers::DisplayRotation::Rotate0".into(),
-            ],
+        let tx = claim(&mut board, 6);
+        let rx = claim(&mut board, 5);
+        let bus = board.resources.add_bus(Bus::Uart {
+            id: Ident::new("uart1", 0..0),
+            peripheral: "UART1".into(),
+            tx,
+            rx,
+            baud: 9600,
+            framing: Framing {
+                parity: Parity::None,
+                stop_bits: StopBits::One,
+            },
         });
+        board.devices.push(Device::Bus(BusDevice {
+            id: Ident::new("gps", 0..0),
+            tag: "uart_probe".into(),
+            driver: Driver {
+                feature: "uart-probe".into(),
+                deps: Vec::new(),
+                ty: RustType::parse("test::Gps").expect("a driver type"),
+                new: RustPath::parse("test::Gps::new").expect("a constructor"),
+                pins: Vec::new(),
+                args: Vec::new(),
+                factory_args: Vec::new(),
+                runtimes: espforge_elements::RuntimeSet::BLOCKING,
+                init: Init::Boot,
+                async_ty: None,
+                async_new: None,
+                async_feature: None,
+                package: None,
+                expose: Vec::new(),
+                dependencies: Vec::new(),
+                manifest: None,
+            },
+            transport: BusTransport::Uart(UartTransport {
+                bus,
+                endpoint: None,
+                async_endpoint: None,
+            }),
+        }));
+
+        let parts = collect(&board);
+        let text = generated(&parts, &case.meta).unwrap();
+        assert!(
+            text.contains(
+                "let uart1_bus: espforge_runtime::UartDevice<esp_hal::Blocking> = \
+                 espforge_runtime::UartDevice::build("
+            ),
+            "{text}"
+        );
+        assert!(text.contains("esp_hal::uart::Parity::None"), "{text}");
+        assert!(text.contains("test::Gps::new(uart1_bus)"), "{text}");
+        assert!(
+            !text.contains("pub uart1:"),
+            "a bound port is not also a raw field: {text}"
+        );
+    }
+
+    /// A composite is two devices: one field each, one constructor call each.
+    /// Emission knows nothing about `compose` — the lowerer hands it one
+    /// `Device` per part, named `<id>_<part>`.
+    #[test]
+    fn a_composite_emits_a_field_per_part() {
+        use espforge_elements::model::Bus;
+
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = empty_board(&case);
+        let owner = Owner::new(OwnerKind::I2c, Ident::new("i2c0", 0..0));
+        let sda = board
+            .resources
+            .claim(Pin(6), owner.clone(), 0..0, PinUse::Bidirectional)
+            .expect("sda is free");
+        let scl = board
+            .resources
+            .claim(Pin(7), owner, 0..0, PinUse::Bidirectional)
+            .expect("scl is free");
+        board.resources.add_bus(Bus::I2c {
+            id: Ident::new("i2c0", 0..0),
+            peripheral: "I2C0".into(),
+            sda,
+            scl,
+            khz: 400,
+        });
+
+        // The composite and its part, named as lowering names them.
+        board
+            .devices
+            .push(crate::codegen::test_support::device("panel", &[]));
+        let mut part = crate::codegen::test_support::device("touch", &[]);
+        if let Device::Bus(bus) = &mut part {
+            bus.id = Ident::new("panel_touch", 0..0);
+        }
+        board.devices.push(part);
+
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        assert!(
+            text.contains("pub panel: espforge_drivers::panel,"),
+            "{text}"
+        );
+        assert!(
+            text.contains("pub panel_touch: espforge_drivers::touch,"),
+            "{text}"
+        );
+        assert_eq!(
+            text.matches("espforge_drivers::panel::new(").count(),
+            1,
+            "{text}"
+        );
+        assert_eq!(
+            text.matches("espforge_drivers::touch::new(").count(),
+            1,
+            "{text}"
+        );
+    }
+
+    /// A declared display fills `Devices` and builds its own I2C bus and
+    /// addressed handle inside `Devices::new`.
+    #[test]
+    fn a_display_builds_its_bus_inside_devices() {
+        use espforge_elements::model::{Bus, RustExpr, RustPath, RustType};
+
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = empty_board(&case);
+        let owner = Owner::new(OwnerKind::I2c, Ident::new("i2c0", 0..0));
+        let sda = board
+            .resources
+            .claim(Pin(6), owner.clone(), 0..0, PinUse::Bidirectional)
+            .expect("sda is free");
+        let scl = board
+            .resources
+            .claim(Pin(7), owner, 0..0, PinUse::Bidirectional)
+            .expect("scl is free");
+        let bus = board.resources.add_bus(Bus::I2c {
+            id: Ident::new("i2c0", 0..0),
+            peripheral: "I2C0".into(),
+            sda,
+            scl,
+            khz: 400,
+        });
+        board.devices.push(Device::Bus(BusDevice {
+            id: Ident::new("oled", 0..0),
+            tag: "ssd1306".into(),
+            driver: Driver {
+                feature: "ssd1306".into(),
+                deps: vec!["embedded-graphics".into()],
+                ty: RustType::parse(
+                    "espforge_drivers::Ssd1306Display<espforge_drivers::Oled128x64>",
+                )
+                .expect("a display type"),
+                new: RustPath::parse("espforge_drivers::Ssd1306Display::new")
+                    .expect("a display constructor"),
+                pins: Vec::new(),
+                args: vec![
+                    RustExpr::parse("espforge_drivers::Oled128x64").expect("a size"),
+                    RustExpr::parse("espforge_drivers::DisplayRotation::Rotate0")
+                        .expect("a rotation"),
+                ],
+                factory_args: Vec::new(),
+                runtimes: espforge_elements::RuntimeSet::BLOCKING,
+                init: espforge_elements::model::Init::Boot,
+                async_ty: None,
+                async_new: None,
+                async_feature: None,
+                package: None,
+                expose: Vec::new(),
+                dependencies: Vec::new(),
+                manifest: None,
+            },
+            transport: BusTransport::I2c(I2cTransport {
+                bus,
+                address: 0x3C,
+                endpoint: None,
+                async_endpoint: None,
+            }),
+        }));
         let parts = collect(&board);
         let text = generated(&parts, &case.meta).unwrap();
         assert!(
@@ -698,21 +1009,191 @@ mod tests {
             ),
             "{text}"
         );
-        assert!(text.contains("components.oled_bus"), "{text}");
+        assert!(
+            text.contains(
+                "let i2c0_bus: espforge_runtime::I2cBus = espforge_runtime::I2cBus::build_in("
+            ),
+            "{text}"
+        );
+        // The address is a constructor argument, and the sharing is the
+        // standard adapter's job.
+        assert!(
+            text.contains("embedded_hal_bus::i2c::RefCellDevice::new("),
+            "{text}"
+        );
+        assert!(text.contains("i2c0_bus.cell(),"), "{text}");
+        assert!(text.contains("device: \"oled\""), "{text}");
         assert!(text.contains("impl Devices"), "{text}");
+        assert!(!text.contains("components.oled_bus"), "{text}");
 
         let boot = main(&board, &parts, &case.meta, &case.opts).unwrap();
-        assert!(
-            boot.contains("let mut components = Components::new("),
-            "{boot}"
-        );
-        assert!(
-            boot.contains("let devices = Devices::new(&mut registry, &mut components);"),
-            "{boot}"
-        );
+        assert!(boot.contains("match Devices::new(&mut registry)"), "{boot}");
+        // There is no `Components` struct any more.
+        assert!(!boot.contains("Components"), "{boot}");
         // Drawing needs `&mut`, so the accessor hands one out.
         let lib = lib(&case.meta, true).unwrap();
         assert!(lib.contains("& mut $ctx .devices"), "{lib}");
+    }
+
+    /// A device that drives an SPI bus builds the bus and its CS-wrapped
+    /// handle inside `Devices::new`: `Components` never carries an `Option`,
+    /// and nothing can be taken out from under the app at boot.
+    #[test]
+    fn a_display_that_drives_an_spi_bus_builds_it_inside_devices() {
+        use espforge_elements::model::{Bus, ClaimedPin, Pin, RustExpr, RustPath, RustType};
+
+        fn claim(board: &mut Board, pin: u8, kind: OwnerKind) -> ClaimedPin {
+            board
+                .resources
+                .claim(
+                    Pin(pin),
+                    Owner::new(kind, Ident::new("spi2", 0..0)),
+                    0..0,
+                    PinUse::Bidirectional,
+                )
+                .expect("the display's pins are free")
+        }
+
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = empty_board(&case);
+        let sclk = claim(&mut board, 8, OwnerKind::Spi);
+        let mosi = claim(&mut board, 7, OwnerKind::Spi);
+        let bus = board.resources.add_bus(Bus::Spi {
+            id: Ident::new("spi2", 0..0),
+            peripheral: "SPI2".into(),
+            sclk,
+            mosi,
+            miso: None,
+            khz: 40_000,
+            mode: 0,
+            cs: None,
+        });
+        let cs = claim(&mut board, 9, OwnerKind::Device("ili9341".into()));
+        board.devices.push(Device::Bus(BusDevice {
+            id: Ident::new("tft", 0..0),
+            tag: "ili9341".into(),
+            driver: Driver {
+                feature: "ili9341".into(),
+                deps: vec!["embedded-graphics".into()],
+                ty: RustType::parse("espforge_drivers::Ili9341Display").expect("a display type"),
+                new: RustPath::parse("espforge_drivers::Ili9341Display::new")
+                    .expect("a display constructor"),
+                pins: Vec::new(),
+                args: vec![
+                    RustExpr::parse("espforge_drivers::Orientation::Landscape")
+                        .expect("an orientation"),
+                ],
+                factory_args: Vec::new(),
+                runtimes: espforge_elements::RuntimeSet::BLOCKING,
+                init: espforge_elements::model::Init::Boot,
+                async_ty: None,
+                async_new: None,
+                async_feature: None,
+                package: None,
+                expose: Vec::new(),
+                dependencies: Vec::new(),
+                manifest: None,
+            },
+            transport: BusTransport::Spi(SpiTransport {
+                bus,
+                cs,
+                spi_config: None,
+                cs_polarity: espforge_elements::model::CsPolarity::ActiveLow,
+                endpoint: None,
+                async_endpoint: None,
+            }),
+        }));
+
+        let parts = collect(&board);
+        let text = generated(&parts, &case.meta).unwrap();
+        assert!(
+            text.contains(
+                "let spi2_bus: espforge_runtime::SpiBus = espforge_runtime::SpiBus::build_write_only_in("
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("espforge_runtime::ConfiguredSpiDevice::new("),
+            "{text}"
+        );
+        assert!(text.contains("espforge_runtime::SpiConfig"), "{text}");
+        assert!(text.contains("CsPolarity::ActiveLow"), "{text}");
+        assert!(text.contains("device: \"tft\""), "{text}");
+        assert!(text.contains("Ili9341Display::new("), "{text}");
+        // No shared legacy handle is involved at all.
+        assert!(!text.contains("components.tft_bus"), "{text}");
+        assert!(!text.contains("Option<"), "{text}");
+        assert!(!text.contains(".take()"), "{text}");
+
+        // Every device is built inside `Devices::new`.
+        let boot = main(&board, &parts, &case.meta, &case.opts).unwrap();
+        assert!(boot.contains("match Devices::new(&mut registry)"), "{boot}");
+        assert!(!boot.contains("Components"), "{boot}");
+    }
+
+    /// Every device on an embassy board is stored in an `AsyncMutex`, so the
+    /// one `device!` macro awaits a lock for a synchronous part just as it does
+    /// for an async one, and the old aliases still resolve.
+    #[test]
+    fn an_embassy_device_is_locked_through_a_guard() {
+        let case = case("esp32c3", Runtime::Embassy, true, &[], &[]);
+        let mut board = board_with_i2c(&case);
+        board.devices.push(device("ssd1306", &[]));
+
+        let parts = collect(&board);
+        let text = generated(&parts, &case.meta).unwrap();
+        assert!(
+            text.contains("pub ssd1306: espforge_runtime::AsyncMutex<espforge_drivers::ssd1306>"),
+            "{text}"
+        );
+        assert!(
+            text.contains("espforge_runtime::AsyncMutex::new("),
+            "{text}"
+        );
+        assert!(!text.contains("core::cell::RefCell"), "{text}");
+
+        let lib = lib(&case.meta, true).unwrap();
+        assert!(lib.contains("lock()"), "{lib}");
+        assert!(lib.contains("await"), "{lib}");
+        assert!(lib.contains("macro_rules! async_device"), "{lib}");
+        assert!(lib.contains("macro_rules! component"), "{lib}");
+        assert!(!lib.contains("borrow_mut"), "{lib}");
+        assert!(!lib.contains("& mut $ctx .devices"), "{lib}");
+    }
+
+    /// A synchronous device with deferred init on an embassy board is stored
+    /// as `AsyncMutex<Deferred<...>>`: the same lock spelling as every other
+    /// device, with a synchronous factory inside.
+    #[test]
+    fn an_embassy_deferred_sync_device_is_locked_and_deferred() {
+        let case = case("esp32c3", Runtime::Embassy, true, &[], &[]);
+        let mut board = board_with_i2c(&case);
+        let Device::Bus(mut bus_device) = device("ssd1306", &[]) else {
+            panic!("the fixture is a bus device");
+        };
+        bus_device.driver.init = espforge_elements::model::Init::Deferred;
+        let BusTransport::I2c(i2c) = &mut bus_device.transport else {
+            panic!("the fixture is on an I2C bus");
+        };
+        i2c.endpoint = Some(
+            espforge_elements::model::RustType::parse("espforge_drivers::I2cEndpoint")
+                .expect("an endpoint type"),
+        );
+        board.devices.push(Device::Bus(bus_device));
+
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            normalized.contains(
+                "espforge_runtime::AsyncMutex< espforge_runtime::Deferred<Ssd1306Factory>,"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("impl espforge_runtime::DeferredInit for Ssd1306Factory"),
+            "{text}"
+        );
+        assert!(!text.contains("core::cell::RefCell"), "{text}");
     }
 
     #[test]
@@ -721,27 +1202,48 @@ mod tests {
         let board = Board {
             meta: case.meta.clone(),
             resources: ResourceGraph::default(),
-            components: Vec::new(),
             devices: Vec::new(),
             services: Vec::new(),
             warnings: Vec::new(),
         };
         let text = generated(&collect(&board), &case.meta).unwrap();
-        assert!(text.contains("pub struct Components {}"), "{text}");
+        assert!(!text.contains("Components"), "{text}");
+        assert!(text.contains("pub struct Devices {}"), "{text}");
         assert!(text.contains("pub struct Services {}"), "{text}");
         assert!(!text.contains("Services::new"), "{text}");
-        assert!(!text.contains("SAFETY"), "{text}");
     }
 
     fn empty_board(case: &crate::codegen::test_support::Case) -> Board {
         Board {
             meta: case.meta.clone(),
             resources: ResourceGraph::default(),
-            components: Vec::new(),
             devices: Vec::new(),
             services: Vec::new(),
             warnings: Vec::new(),
         }
+    }
+
+    /// `empty_board`, plus the I2C bus at slot 0 that the `device` fixture
+    /// binds to: a test that emits the field needs a bus to build.
+    fn board_with_i2c(case: &crate::codegen::test_support::Case) -> Board {
+        let mut board = empty_board(case);
+        let owner = Owner::new(OwnerKind::I2c, Ident::new("i2c0", 0..0));
+        let sda = board
+            .resources
+            .claim(Pin(6), owner.clone(), 0..0, PinUse::Bidirectional)
+            .expect("sda is free");
+        let scl = board
+            .resources
+            .claim(Pin(7), owner, 0..0, PinUse::Bidirectional)
+            .expect("scl is free");
+        board.resources.add_bus(espforge_elements::model::Bus::I2c {
+            id: Ident::new("i2c0", 0..0),
+            peripheral: "I2C0".into(),
+            sda,
+            scl,
+            khz: 400,
+        });
+        board
     }
 
     /// The heap line, spelled exactly as the legacy `wifi_station` golden has

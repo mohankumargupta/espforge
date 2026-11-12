@@ -1,0 +1,55 @@
+driver "ili9341" {
+    format_version 2
+    summary "ILI9341 240x320 RGB565 color TFT LCD display"
+    description "Drives an SPI ILI9341 TFT display with its data/command, reset and optional backlight pins. Its own mode and frequency are applied before each transaction, so it can share a controller with a slower part."
+    category "display"
+
+    dependency "embedded-graphics" { version "0.8.1" }
+
+    bus "spi" {
+        mode 0
+        frequency "40000kHz"
+        cs_polarity "active-low"
+        cs_via "pin_or_ref"
+    }
+
+    pin "dc" direction="output" default_level="low"
+    pin "reset" direction="output" default_level="high"
+    pin "backlight" direction="output" default_level="high" optional=#true
+
+    codegen {
+        feature "ili9341"
+        runtime "blocking" {
+            type "espforge_drivers::Ili9341Display"
+            constructor "espforge_drivers::Ili9341Display::new({bus_device}, {dc_pin}, {reset_pin}, {backlight_pin}, {rotation}, {rgb})"
+            endpoint "espforge_drivers::SpiEndpoint"
+        }
+        map "rotation" {
+            "0" { expr "espforge_drivers::Orientation::Portrait" }
+            "90" { expr "espforge_drivers::Orientation::Landscape" }
+            "180" { expr "espforge_drivers::Orientation::PortraitFlipped" }
+            "270" { expr "espforge_drivers::Orientation::LandscapeFlipped" }
+        }
+        map "rgb" {
+            "false" { expr "espforge_drivers::ColorOrder::Bgr" }
+            "true" { expr "espforge_drivers::ColorOrder::Rgb" }
+        }
+    }
+
+    attr "rotation" kind="choice" default="0" {
+        choices "0" "90" "180" "270"
+        help "Display orientation in degrees clockwise."
+    }
+    attr "rgb" kind="bool" default="false" {
+        help "When true, uses RGB color order instead of BGR."
+    }
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "boot builds the panel before setup; deferred builds it when the app calls init()."
+    }
+
+    example "minimal" #"<ili9341 id="tft" bus="$spi2" cs="9" dc="$gpio4" reset="$gpio5" />"#
+    example "with reset and backlight" #"<ili9341 id="tft" bus="$spi2" cs="9" dc="$gpio4" reset="$gpio5" backlight="$gpio6" rotation="90" />"#
+    see_also "peripherals/spi"
+    see_also "peripherals/gpio"
+}

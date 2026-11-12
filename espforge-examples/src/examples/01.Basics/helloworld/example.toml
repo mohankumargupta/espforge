@@ -1,2 +1,3 @@
 chips    = ["esp32c3", "esp32s3"]
-runtimes = ["blocking", "embassy"]
+# Blocking-style `app/rust/app.rs`; embassy needs an async `setup`/`forever`.
+runtimes = ["blocking"]

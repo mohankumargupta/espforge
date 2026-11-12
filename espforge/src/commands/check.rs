@@ -24,6 +24,10 @@ pub struct CheckArgs {
     /// Check an embedded example instead of a file (category/name, or a short name like blink)
     #[arg(long, value_name = "EXAMPLE", conflicts_with = "file")]
     pub example: Option<String>,
+    /// Extra directory of driver manifests (repeatable; `drivers/` beside the
+    /// spec is always read first)
+    #[arg(short = 'D', long = "driver-dir", value_name = "DIR")]
+    pub driver_dir: Vec<PathBuf>,
     #[command(flatten)]
     pub answers: AnswerArgs,
 }
@@ -39,8 +43,9 @@ pub fn execute(args: &CheckArgs) -> Result<(), Failure> {
         Path::new("."),
     )
     .map_err(user)?;
-    let notes =
-        project::check(&source, &args.answers.overrides()).map_err(|e| failed(e, &source))?;
+    let mut overrides = args.answers.overrides();
+    overrides.driver_dirs = args.driver_dir.clone();
+    let notes = project::check(&source, &overrides).map_err(|e| failed(e, &source))?;
     report::notes(&notes);
     println!(
         "check: '{}' is valid; `espforge build` verifies the generated project",

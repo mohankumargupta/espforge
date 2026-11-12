@@ -1,5 +1,5 @@
 {
-  "name": "chip",
+  "name": "spiexampleasync",
   "author": "Raspberry Pi",
   "pins": [
     "MISO",

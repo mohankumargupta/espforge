@@ -14,10 +14,8 @@ verification, which also makes the build print a warning.
 # peripherals
   <wifi id="radio" />
 
-# components
-  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
-
 # devices
 
 # services
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
   <https_client id="secure_client" network="$home" insecure="true" />

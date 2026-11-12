@@ -11,7 +11,7 @@ use linkme::distributed_slice;
 
 use crate::attrs::Issue;
 use crate::chips;
-use crate::element::{Element, LowerCx, Reported};
+use crate::element::{Element, LowerCx, Reported, Section};
 use crate::generated::wifi::Attrs;
 use crate::model::{Owner, OwnerKind};
 use crate::registry::ELEMENTS;
@@ -23,13 +23,13 @@ pub struct Wifi;
 static WIFI: &dyn Element = &Wifi;
 
 impl Element for Wifi {
-    fn tag(&self) -> &'static str {
+    fn tag(&self) -> &str {
         "wifi"
     }
 
-    fn lower(&self, node: &ParsedNode<'_>, cx: &mut LowerCx) -> Result<(), Reported> {
+    fn lower(&self, node: &ParsedNode<'_>, cx: &mut LowerCx<'_>) -> Result<(), Reported> {
         let _ = Attrs::from_node(node).map_err(|issue| describe(cx, node, issue))?;
-        let id = cx.ident(node);
+        let id = cx.checked_ident(node, Section::Peripherals)?;
         let span = node_span(node);
 
         if !chips::has_wifi(cx.chip()) {
@@ -42,32 +42,15 @@ impl Element for Wifi {
         }
 
         let owner = Owner::new(OwnerKind::Wifi, id.clone());
-        cx.claim_peripheral("WIFI", owner, span.clone())
-            .map_err(|clash| {
-                cx.report(
-                    codes::CONFLICT_PERIPHERAL,
-                    clash.existing.span.clone(),
-                    "peripheral clash",
-                    format!(
-                        "{} and {} both use {}",
-                        display(&clash.existing.owner),
-                        display(&clash.incoming.owner),
-                        clash.peripheral
-                    ),
-                )
-            })?;
+        cx.claim_peripheral("WIFI", owner, span.clone())?;
 
         cx.add_radio(id.raw);
         Ok(())
     }
 }
 
-fn display(owner: &Owner) -> String {
-    format!("<{} id=\"{}\">", owner.kind.tag(), owner.id.raw)
-}
-
 /// This element's wording for a schema-level problem: only an id can be wrong.
-fn describe(cx: &mut LowerCx, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
+fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
     let id = node.id;
     match issue {
         Issue::Missing { attr } | Issue::Invalid { attr, .. } => cx.report(

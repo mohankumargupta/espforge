@@ -5,5 +5,5 @@ elf = "target/riscv32imc-unknown-none-elf/debug/spi_example"
 firmware = "target/riscv32imc-unknown-none-elf/debug/spi_example"
 
 [[chip]]
-name = 'chip'
+name = 'spiexample'
 binary = 'chip.wasm'

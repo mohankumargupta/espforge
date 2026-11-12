@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 espforge-elements = { workspace = true }
+espforge-schema = { workspace = true }
 esp-metadata-generated = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
@@ -23,5 +24,4 @@ toml = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-espforge-schema = { workspace = true }
 espforge_examples = { workspace = true }

@@ -9,8 +9,6 @@ MINIMAL EXAMPLE
 
 # peripherals
 
-# components
-
 # devices
 
 # services

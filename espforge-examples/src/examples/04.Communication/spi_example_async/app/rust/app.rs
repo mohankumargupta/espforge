@@ -5,7 +5,7 @@ use embassy_executor::Spawner;
 
 #[embassy_executor::task]
 async fn transfer_task(ctx: &'static Context) {
-    let spi = component!(ctx, spi0);
+    let spi = device!(ctx, spi2);
     let logger = ctx.logger;
 
     //ctx.delay.delay_ms(50).await;

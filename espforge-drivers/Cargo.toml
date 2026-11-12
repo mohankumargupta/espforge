@@ -12,14 +12,27 @@ repository.workspace = true
 espforge-runtime = { workspace = true }
 embedded-graphics = { version = "0.8", optional = true }
 ssd1306 = { version = "0.9", default-features = false, features = ["graphics"], optional = true }
+# ssd1306 0.9's async impls are expanded by maybe-async-cfg; 0.2.5 rewrites
+# them wrongly and the crate does not compile, so the async feature pins the
+# last good release.
+maybe-async-cfg = { version = "=0.2.4", optional = true }
+embedded-hal-async = { version = "1.0", optional = true }
 sky-ili9341 = { version = "0.1.1", default-features = false, features = ["graphics"], optional = true }
 
 [features]
 default = []
 
-# The I2C SSD1306 OLED display driver (`Ssd1306Display`). Blocking only: the
-# display takes the bus component by value and draws synchronously.
+# The I2C SSD1306 OLED display driver. `ssd1306` is the blocking
+# `Ssd1306Display`; `ssd1306-async` adds `AsyncSsd1306Display` and brings the
+# runtime's embassy feature with it, so a blocking project never compiles the
+# async bus it does not use.
 ssd1306 = ["dep:ssd1306", "dep:embedded-graphics"]
+ssd1306-async = [
+    "ssd1306",
+    "ssd1306/async",
+    "dep:maybe-async-cfg",
+    "espforge-runtime/embassy",
+]
 
 # The SPI ILI9341 color TFT driver (`Ili9341Display`). Blocking only, for the
 # same reason.
@@ -28,6 +41,11 @@ ili9341 = ["dep:sky-ili9341", "dep:embedded-graphics"]
 # The I2C SCD4x CO2/temperature/humidity sensor driver (`Scd4x`). Blocking
 # only: its commands are plain bus transactions.
 scd4x = []
+
+# The SPI ADXL345 accelerometer driver (`Adxl345`). `adxl345-async` adds the
+# embassy endpoint type (`AsyncAdxl345`) and the runtime's async bus.
+adxl345 = []
+adxl345-async = ["adxl345", "dep:embedded-hal-async", "espforge-runtime/embassy"]
 
 # Drivers only build for esp targets, so keep esp-hal invisible to host builds.
 [target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]

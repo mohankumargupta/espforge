@@ -1,0 +1,23 @@
+====================
+SSD1306 + WIFI EXAMPLE
+
+The shape phase 4 made possible and phase 5 made writable: a Wi-Fi station
+needs the embassy scheduler, an SSD1306 needs a blocking I2C bus, and the bus
+mode belongs to the bus rather than to the project. The panel shows the
+connection state.
+====================
+
+# espforge
+  <project name="ssd1306_wifi" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <i2c id="i2c0" sda="6" scl="7" frequency="400kHz" />
+  <wifi id="radio" />
+
+# devices
+  <ssd1306 id="oled" bus="$i2c0" address="0x3C" size="128x64" />
+
+# services
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />

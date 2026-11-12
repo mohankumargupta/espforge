@@ -1,20 +1,25 @@
-//! `I2cBus`: an I2C master bus shared by reference by its components.
+//! `I2cBus`: an I2C master bus shared by reference by its devices.
 //!
-//! One struct parametric over the esp-hal mode typestate `Dm`: the blocking
-//! build parks the bus in a `RefCell`, the async build in an
-//! `embassy_sync::Mutex`, so a shared `&'static Context` can drive it without
-//! a `&mut` borrow.
+//! Two flavours, and the scheduler no longer decides which one exists:
 //!
-//! `build` is generic over the peripheral instance, so `<i2c id="i2c1">`
-//! emits `I2C1` and still compiles. The tokens in the goldens stay `I2C0`.
+//! - [`I2cBus`] is the blocking bus, parked in a `RefCell`. It is compiled in
+//!   every build, including an embassy project: a display on an embassy board
+//!   still talks over a blocking bus, before the executor starts.
+//! - [`AsyncI2cBus`] is the async bus (feature `embassy`), parked in an
+//!   `embassy_sync::Mutex`.
+//!
+//! Device endpoints that ride a blocking bus are `embedded-hal-bus`
+//! `RefCellDevice`s, built by the generated wiring: the runtime owns the bus,
+//! the standard adapters own the sharing. A device driver receives its address
+//! as a constructor argument, so this runtime never rewrites it.
+//!
+//! `build_in` is generic over the peripheral instance, so `<i2c id="i2c1">`
+//! emits `I2C1` and still compiles. The storage lives in an [`I2cBusStorage`]
+//! (or [`AsyncI2cBusStorage`]) the *generated* code declares, one `static` per
+//! `<i2c>` element, so two buses never share one cell.
 
-#[cfg(not(feature = "embassy"))]
 use core::cell::RefCell;
-#[cfg(feature = "embassy")]
-use esp_hal::Async;
-#[cfg(not(feature = "embassy"))]
 use esp_hal::Blocking;
-use esp_hal::DriverMode;
 use esp_hal::gpio::{InputPin, OutputPin};
 use esp_hal::i2c::master::{Config as EspConfig, Error as EspError, I2c, Instance};
 
@@ -55,59 +60,64 @@ impl embedded_hal::i2c::Error for I2cError {
     }
 }
 
-#[cfg(not(feature = "embassy"))]
-pub struct I2cBus<Dm: DriverMode + 'static> {
-    inner: &'static RefCell<I2c<'static, Dm>>,
+// ---------------------------------------------------------------------------
+// Blocking bus (every build)
+// ---------------------------------------------------------------------------
+
+pub struct I2cBus {
+    inner: &'static RefCell<I2c<'static, Blocking>>,
 }
 
-#[cfg(not(feature = "embassy"))]
-impl<Dm: DriverMode + 'static> Clone for I2cBus<Dm> {
+impl Clone for I2cBus {
     fn clone(&self) -> Self {
         *self
     }
 }
-#[cfg(not(feature = "embassy"))]
-impl<Dm: DriverMode + 'static> Copy for I2cBus<Dm> {}
+impl Copy for I2cBus {}
 
-#[cfg(feature = "embassy")]
-pub struct I2cBus<Dm: DriverMode + 'static> {
-    inner: &'static embassy_sync::mutex::Mutex<
-        embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
-        I2c<'static, Dm>,
-    >,
+/// The `static` one blocking `<i2c>` bus needs.
+///
+/// The generated `generated.rs` declares one per bus (`__I2C0_STORAGE`), so
+/// [`I2cBus::build_in`] can never initialise the same cell twice.
+pub struct I2cBusStorage {
+    cell: static_cell::StaticCell<RefCell<I2c<'static, Blocking>>>,
 }
 
-#[cfg(feature = "embassy")]
-impl<Dm: DriverMode + 'static> Clone for I2cBus<Dm> {
-    fn clone(&self) -> Self {
-        *self
+impl I2cBusStorage {
+    pub const fn new() -> Self {
+        Self {
+            cell: static_cell::StaticCell::new(),
+        }
     }
 }
-#[cfg(feature = "embassy")]
-impl<Dm: DriverMode + 'static> Copy for I2cBus<Dm> {}
 
-// ---------------------------------------------------------------------------
-// Blocking build + inherent transaction + convenience API
-// ---------------------------------------------------------------------------
+impl Default for I2cBusStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-#[cfg(not(feature = "embassy"))]
-impl I2cBus<Blocking> {
-    /// Build the owned esp-hal `I2c` master, park it in a `static` cell, and
-    /// return a `Copy` `I2cBus` handle. Called once by the generated wiring.
-    /// Fallible: the generated code `.expect`s the `ConfigError`.
-    pub fn build<I: Instance + 'static>(
+impl I2cBus {
+    /// Build the owned esp-hal `I2c` master into `storage`, and return a `Copy`
+    /// `I2cBus` handle. Called once per bus by the generated wiring.
+    pub fn build_in<I: Instance + 'static>(
+        storage: &'static I2cBusStorage,
         i2c: I,
         sda: impl OutputPin + 'static + InputPin,
         scl: impl OutputPin + 'static + InputPin,
         config: I2cConfig,
-    ) -> Result<I2cBus<Blocking>, esp_hal::i2c::master::ConfigError> {
-        static CELL: static_cell::StaticCell<RefCell<I2c<'static, Blocking>>> =
-            static_cell::StaticCell::new();
+    ) -> Result<I2cBus, esp_hal::i2c::master::ConfigError> {
         let esp = I2c::new(i2c, EspConfig::from(config))?
             .with_sda(sda)
             .with_scl(scl);
-        let inner = CELL.init(RefCell::new(esp));
+        let inner = storage.cell.init(RefCell::new(esp));
         Ok(I2cBus { inner })
+    }
+
+    /// The shared cell, for an `embedded-hal-bus` endpoint
+    /// (`RefCellDevice::new(bus.cell())`).
+    pub fn cell(&self) -> &'static RefCell<I2c<'static, Blocking>> {
+        self.inner
     }
 
     /// Run a sequence of read/write operations against `address`.
@@ -136,13 +146,11 @@ impl I2cBus<Blocking> {
     }
 }
 
-#[cfg(not(feature = "embassy"))]
-impl embedded_hal::i2c::ErrorType for I2cBus<Blocking> {
+impl embedded_hal::i2c::ErrorType for I2cBus {
     type Error = I2cError;
 }
 
-#[cfg(not(feature = "embassy"))]
-impl embedded_hal::i2c::I2c for I2cBus<Blocking> {
+impl embedded_hal::i2c::I2c for I2cBus {
     fn transaction(
         &mut self,
         address: u8,
@@ -153,29 +161,69 @@ impl embedded_hal::i2c::I2c for I2cBus<Blocking> {
 }
 
 // ---------------------------------------------------------------------------
-// Async build + inherent transaction (only under `embassy`)
+// Async bus (only under `embassy`)
 // ---------------------------------------------------------------------------
 
+/// The `static` one async `<i2c>` bus needs: one mutex-armoured cell per
+/// `<i2c>` element.
 #[cfg(feature = "embassy")]
-impl I2cBus<Async> {
-    pub fn build<I: Instance + 'static>(
+pub struct AsyncI2cBusStorage {
+    cell: static_cell::StaticCell<
+        embassy_sync::mutex::Mutex<
+            embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+            I2c<'static, esp_hal::Async>,
+        >,
+    >,
+}
+
+#[cfg(feature = "embassy")]
+impl AsyncI2cBusStorage {
+    pub const fn new() -> Self {
+        Self {
+            cell: static_cell::StaticCell::new(),
+        }
+    }
+}
+
+#[cfg(feature = "embassy")]
+impl Default for AsyncI2cBusStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "embassy")]
+pub struct AsyncI2cBus {
+    inner: &'static embassy_sync::mutex::Mutex<
+        embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+        I2c<'static, esp_hal::Async>,
+    >,
+}
+
+#[cfg(feature = "embassy")]
+impl Clone for AsyncI2cBus {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[cfg(feature = "embassy")]
+impl Copy for AsyncI2cBus {}
+
+#[cfg(feature = "embassy")]
+impl AsyncI2cBus {
+    pub fn build_in<I: Instance + 'static>(
+        storage: &'static AsyncI2cBusStorage,
         i2c: I,
         sda: impl OutputPin + 'static + InputPin,
         scl: impl OutputPin + 'static + InputPin,
         config: I2cConfig,
-    ) -> Result<I2cBus<Async>, esp_hal::i2c::master::ConfigError> {
-        static CELL: static_cell::StaticCell<
-            embassy_sync::mutex::Mutex<
-                embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
-                I2c<'static, Async>,
-            >,
-        > = static_cell::StaticCell::new();
+    ) -> Result<AsyncI2cBus, esp_hal::i2c::master::ConfigError> {
         let esp = I2c::new(i2c, EspConfig::from(config))?
             .with_sda(sda)
             .with_scl(scl)
             .into_async();
-        let inner = CELL.init(embassy_sync::mutex::Mutex::new(esp));
-        Ok(I2cBus { inner })
+        let inner = storage.cell.init(embassy_sync::mutex::Mutex::new(esp));
+        Ok(AsyncI2cBus { inner })
     }
 
     pub async fn transaction(
@@ -212,152 +260,17 @@ impl I2cBus<Async> {
 }
 
 #[cfg(feature = "embassy")]
-impl embedded_hal::i2c::ErrorType for I2cBus<Async> {
+impl embedded_hal::i2c::ErrorType for AsyncI2cBus {
     type Error = I2cError;
 }
 
 #[cfg(feature = "embassy")]
-impl embedded_hal_async::i2c::I2c for I2cBus<Async> {
+impl embedded_hal_async::i2c::I2c for AsyncI2cBus {
     async fn transaction(
         &mut self,
         address: u8,
         operations: &mut [embedded_hal::i2c::Operation<'_>],
     ) -> Result<(), Self::Error> {
-        I2cBus::transaction(self, address, operations).await
-    }
-}
-
-// ---------------------------------------------------------------------------
-// An addressed endpoint on a shared bus
-// ---------------------------------------------------------------------------
-
-/// An addressed endpoint on a shared I2C bus.
-///
-/// The address comes from `<i2c_component address="..">`, so the project file
-/// stays the single source of truth: neither `app.rs` nor a driver re-types it.
-/// Reads and writes take no address because this handle already knows its
-/// target, and several `I2cDevice`s on one controller are the normal
-/// multi-drop case.
-///
-/// When this handle is used through the `embedded-hal` `I2c` traits (what a
-/// third-party driver such as the SSD1306 crate does), the address the driver
-/// passes is **ignored** and [`address`](Self::address) is used instead. One
-/// handle therefore drives exactly one part.
-pub struct I2cDevice<Dm: DriverMode + 'static> {
-    bus: I2cBus<Dm>,
-    address: u8,
-}
-
-impl<Dm: DriverMode + 'static> Clone for I2cDevice<Dm> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<Dm: DriverMode + 'static> Copy for I2cDevice<Dm> {}
-
-impl<Dm: DriverMode + 'static> I2cDevice<Dm> {
-    /// Wrap `bus`, targeting the 7-bit slave `address`.
-    pub fn new(bus: I2cBus<Dm>, address: u8) -> Self {
-        Self { bus, address }
-    }
-
-    /// The 7-bit address this endpoint talks to, as configured in `.espf`.
-    pub fn address(&self) -> u8 {
-        self.address
-    }
-
-    /// The raw, unaddressed bus this device rides on.
-    pub fn bus(&self) -> I2cBus<Dm> {
-        self.bus
-    }
-}
-
-#[cfg(not(feature = "embassy"))]
-impl I2cDevice<Blocking> {
-    /// Write `bytes` to this device's address.
-    pub fn write(&self, bytes: &[u8]) -> Result<(), I2cError> {
-        self.bus.write(self.address, bytes)
-    }
-
-    /// Read into `buf` from this device's address.
-    pub fn read(&self, buf: &mut [u8]) -> Result<(), I2cError> {
-        self.bus.read(self.address, buf)
-    }
-
-    /// Write `write`, then read into `read`, in one transaction.
-    pub fn write_read(&self, write: &[u8], read: &mut [u8]) -> Result<(), I2cError> {
-        self.bus.write_read(self.address, write, read)
-    }
-
-    /// Run a sequence of operations against this device's address.
-    pub fn transaction(
-        &self,
-        operations: &mut [embedded_hal::i2c::Operation<'_>],
-    ) -> Result<(), I2cError> {
-        self.bus.transaction(self.address, operations)
-    }
-}
-
-#[cfg(not(feature = "embassy"))]
-impl embedded_hal::i2c::ErrorType for I2cDevice<Blocking> {
-    type Error = I2cError;
-}
-
-/// The address a driver passes is ignored: this handle talks to the address
-/// configured in `.espf`. The trait's provided `read`/`write`/`write_read`
-/// route through `transaction`, so they inherit that contract.
-#[cfg(not(feature = "embassy"))]
-impl embedded_hal::i2c::I2c for I2cDevice<Blocking> {
-    fn transaction(
-        &mut self,
-        _address: u8,
-        operations: &mut [embedded_hal::i2c::Operation<'_>],
-    ) -> Result<(), Self::Error> {
-        I2cDevice::transaction(self, operations)
-    }
-}
-
-#[cfg(feature = "embassy")]
-impl I2cDevice<Async> {
-    /// Write `bytes` to this device's address.
-    pub async fn write(&self, bytes: &[u8]) -> Result<(), I2cError> {
-        self.bus.write(self.address, bytes).await
-    }
-
-    /// Read into `buf` from this device's address.
-    pub async fn read(&self, buf: &mut [u8]) -> Result<(), I2cError> {
-        self.bus.read(self.address, buf).await
-    }
-
-    /// Write `write`, then read into `read`, in one transaction.
-    pub async fn write_read(&self, write: &[u8], read: &mut [u8]) -> Result<(), I2cError> {
-        self.bus.write_read(self.address, write, read).await
-    }
-
-    /// Run a sequence of operations against this device's address.
-    pub async fn transaction(
-        &self,
-        operations: &mut [embedded_hal::i2c::Operation<'_>],
-    ) -> Result<(), I2cError> {
-        self.bus.transaction(self.address, operations).await
-    }
-}
-
-#[cfg(feature = "embassy")]
-impl embedded_hal::i2c::ErrorType for I2cDevice<Async> {
-    type Error = I2cError;
-}
-
-/// The address a driver passes is ignored: this handle talks to the address
-/// configured in `.espf`.
-#[cfg(feature = "embassy")]
-impl embedded_hal_async::i2c::I2c for I2cDevice<Async> {
-    async fn transaction(
-        &mut self,
-        _address: u8,
-        operations: &mut [embedded_hal::i2c::Operation<'_>],
-    ) -> Result<(), Self::Error> {
-        I2cDevice::transaction(self, operations).await
+        AsyncI2cBus::transaction(self, address, operations).await
     }
 }

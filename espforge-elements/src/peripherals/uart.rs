@@ -11,9 +11,9 @@ use espforge_diagnostics::codes;
 use linkme::distributed_slice;
 
 use crate::attrs::Issue;
-use crate::element::{Element, LowerCx, Reported};
-use crate::generated::uart::Attrs;
-use crate::model::{Bus, Owner, OwnerKind, Pin, PinUse};
+use crate::element::{Element, LowerCx, Reported, Section};
+use crate::generated::uart::{Attrs, Parity as SchemaParity, StopBits as SchemaStopBits};
+use crate::model::{Bus, Framing, Owner, OwnerKind, Parity, Pin, PinUse, StopBits};
 use crate::registry::ELEMENTS;
 
 /// The `<uart>` element.
@@ -23,13 +23,13 @@ pub struct Uart;
 static UART: &dyn Element = &Uart;
 
 impl Element for Uart {
-    fn tag(&self) -> &'static str {
+    fn tag(&self) -> &str {
         "uart"
     }
 
-    fn lower(&self, node: &ParsedNode<'_>, cx: &mut LowerCx) -> Result<(), Reported> {
+    fn lower(&self, node: &ParsedNode<'_>, cx: &mut LowerCx<'_>) -> Result<(), Reported> {
         let attrs = Attrs::from_node(node).map_err(|issue| describe(cx, node, issue))?;
-        let id = cx.ident(node);
+        let id = cx.checked_ident(node, Section::Peripherals)?;
         let span = node_span(node);
 
         let peripheral = match attrs.uart {
@@ -66,21 +66,20 @@ impl Element for Uart {
             },
         };
 
+        if attrs.baud_rate.value == 0 {
+            return Err(cx.report(
+                codes::UART_INVALID_BAUD,
+                span,
+                "invalid baud_rate",
+                format!(
+                    "<uart id=\"{}\"> baud_rate=\"0\" must be greater than 0",
+                    id.raw
+                ),
+            ));
+        }
+
         let owner = Owner::new(OwnerKind::Uart, id.clone());
-        cx.claim_peripheral(peripheral.clone(), owner.clone(), span.clone())
-            .map_err(|clash| {
-                cx.report(
-                    codes::CONFLICT_PERIPHERAL,
-                    clash.existing.span.clone(),
-                    "peripheral clash",
-                    format!(
-                        "{} and {} both use {}",
-                        display(&clash.existing.owner),
-                        display(&clash.incoming.owner),
-                        clash.peripheral
-                    ),
-                )
-            })?;
+        cx.claim_peripheral(peripheral.clone(), owner.clone(), span.clone())?;
 
         let tx = claim_bus_pin(cx, attrs.tx.value, owner.clone(), span.clone())?;
         let rx = claim_bus_pin(cx, attrs.rx.value, owner, span)?;
@@ -90,28 +89,35 @@ impl Element for Uart {
             peripheral,
             tx,
             rx,
-            used_by: None,
+            baud: attrs.baud_rate.value,
+            framing: Framing {
+                parity: match attrs.parity.value {
+                    SchemaParity::None => Parity::None,
+                    SchemaParity::Even => Parity::Even,
+                    SchemaParity::Odd => Parity::Odd,
+                },
+                stop_bits: match attrs.stop_bits.value {
+                    SchemaStopBits::N1 => StopBits::One,
+                    SchemaStopBits::N2 => StopBits::Two,
+                },
+            },
         });
         Ok(())
     }
 }
 
 fn claim_bus_pin(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     pin: u8,
     owner: Owner,
     span: std::ops::Range<usize>,
 ) -> Result<crate::model::ClaimedPin, Reported> {
     cx.claim_pin(Pin(pin), owner, span, PinUse::Unspecified)
-        .map_err(|conflict| cx.report_conflict(&conflict))
-}
-
-fn display(owner: &Owner) -> String {
-    format!("<{} id=\"{}\">", owner.kind.tag(), owner.id.raw)
+        .map_err(|refusal| refusal.report(cx))
 }
 
 /// This element's wording for a schema-level problem.
-fn describe(cx: &mut LowerCx, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
+fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
     let id = node.id;
     match issue {
         Issue::Missing { attr } | Issue::Invalid { attr, .. } => cx.report(

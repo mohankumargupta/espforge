@@ -1,5 +1,5 @@
 {
-  "name": "chip",
+  "name": "i2cscanner",
   "author": "Raspberry Pi",
   "pins": [
     "SDA",

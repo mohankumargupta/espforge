@@ -3,17 +3,20 @@
 //!
 //! `core` reads `project`/`chip`/`runtime`/`console`/`options`, `options`
 //! resolves the schema's option table, and [`model::Board`] carries the result
-//! with the pins its components claimed. [`generated`] holds the typed
+//! with the pins its devices claimed. [`generated`] holds the typed
 //! attribute readers `build.rs` writes from the schema.
 
 pub mod attrs;
+pub mod bus_emit;
 pub mod chips;
-pub mod components;
 pub mod core;
 pub mod devices;
+pub mod dynamic_attrs;
 pub mod element;
 pub mod lower;
 pub mod peripherals;
+pub mod pin_caps;
+pub mod raw_bus;
 pub mod registry;
 pub mod schema;
 
@@ -30,17 +33,20 @@ pub mod options;
 pub mod services;
 
 pub use core::core_from_section;
-pub use element::{Element, EmitCx, LowerCx, Lowered, MainCtx, Reported};
+pub use element::{Element, EmitCx, LowerCx, Lowered, MainCtx, PinRefusal, Reported};
 pub use espforge_schema::{Compat, Kind, OptValue, OptionDef, Requires, Schema};
 pub use lower::lower;
 pub use model::{
-    Board, Claim, ClaimedPin, Component, Conflict, ConflictKind, Console, Device, Direction,
-    GpioDecl, Ident, Meta, Owner, OwnerKind, Pin, PinUse, ResourceGraph, Runtime, Service,
+    Board, BusDevice, BusId, BusMode, BusTransport, Claim, ClaimedPin, Conflict, ConflictKind,
+    Console, Device, Direction, Driver, GpioDecl, HeldClash, HeldResource, I2cTransport, Ident,
+    Meta, Owner, OwnerKind, PeripheralRefusal, Pin, PinDevice, PinDeviceKind, PinUse,
+    ProtocolService, ResourceGraph, Runtime, RuntimeSet, Service, SpiTransport,
 };
 pub use options::{
     Answer, Answers, DerivedInputs, Origin, Resolved, ResolvedOptions, Why, resolve, resolve_with,
 };
 pub use registry::elements;
+pub use schema::Session;
 
 #[cfg(test)]
 mod tests {
@@ -93,28 +99,37 @@ mod tests {
             }
         );
         assert_eq!(gpio::Direction::parse("sideways"), None);
-        assert_eq!(gpio::Direction::CHOICES, ["output", "input"]);
+        assert_eq!(
+            gpio::Direction::CHOICES,
+            ["output", "input", "bidirectional"]
+        );
     }
 
     #[test]
     fn led_reads_its_reference_and_defaults_active_low_off() {
-        let src = "# components\n  <led id=\"red_led\" gpio=\"$gpio18\" />\n";
-        let n = node("components", src);
+        let src = "# devices\n  <led id=\"red_led\" gpio=\"$gpio18\" />\n";
+        let n = node("devices", src);
         let attrs = led::Attrs::from_node(&n).unwrap();
         assert_eq!(attrs.id.value, "red_led");
-        assert_eq!(attrs.gpio.name, "gpio18");
+        assert_eq!(attrs.gpio.expect("a gpio reference").name, "gpio18");
         assert!(!attrs.active_low.value);
         // Defaulted at the node, not at some unrelated offset.
         assert_eq!(attrs.active_low.span.start, n.offset);
     }
 
     #[test]
-    fn a_missing_led_reference_is_an_issue() {
-        let src = "# components\n  <led id=\"red_led\" />\n";
-        let n = node("components", src);
-        assert_eq!(
-            led::Attrs::from_node(&n).unwrap_err(),
-            Issue::Missing { attr: "gpio" }
-        );
+    fn a_led_may_name_its_pin_by_number_instead_of_a_gpio() {
+        let src = "# devices\n  <led id=\"red_led\" pin=\"18\" />\n";
+        let n = node("devices", src);
+        let attrs = led::Attrs::from_node(&n).expect("pin= is enough");
+        assert_eq!(attrs.pin.expect("a pin number").value, 18);
+        assert!(attrs.gpio.is_none());
+
+        // Neither is a lowering error the recipe reports, not a parse error.
+        let src = "# devices\n  <led id=\"red_led\" />\n";
+        let n = node("devices", src);
+        let attrs = led::Attrs::from_node(&n).expect("both pin attributes are optional");
+        assert!(attrs.pin.is_none());
+        assert!(attrs.gpio.is_none());
     }
 }

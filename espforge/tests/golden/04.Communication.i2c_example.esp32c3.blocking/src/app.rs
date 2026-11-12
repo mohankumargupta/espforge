@@ -4,14 +4,14 @@ use crate::Context;
 
 pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
-    let i2c = component!(ctx, i2c_tester);
+    let i2c = device!(ctx, i2c0);
 
     logger.info("I2C Example");
 
     let mut buffer = [0x00u8];
     let sent_byte = 0x03u8;
-    // The address lives in `example.espf.txt`: this handle already knows it.
-    match i2c.write_read(&[sent_byte], &mut buffer) {
+    // The raw bus takes the target address for each transaction.
+    match i2c.write_read(0x42, &[sent_byte], &mut buffer) {
         Ok(_) => {
             logger.info(format_args!("Sent {}", sent_byte));
             logger.info(format_args!("Received: {}", buffer[0]));

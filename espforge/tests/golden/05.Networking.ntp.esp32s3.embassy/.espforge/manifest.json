@@ -1,13 +1,13 @@
 {
   "files": {
-    "Cargo.toml": "aa62e5e5d7574b19",
-    "README.txt": "1f8b06b13d1c5ff8",
-    "build.rs": "82f37776fdcc61fd",
+    "Cargo.toml": "9be03f32c7aecd67",
+    "README.txt": "567442dd068b2ae7",
+    "build.rs": "2fa429bdfdf4c685",
     "diagram.json": "75eac4f0d0d98b2e",
-    "src/bin/main.rs": "56d59cd774160dcb",
-    "src/generated.rs": "4b02767dad8e06c8",
-    "src/lib.rs": "4376982a9d55953d",
+    "src/bin/main.rs": "d132ca2b607a2c56",
+    "src/generated.rs": "602fe068a69faee0",
+    "src/lib.rs": "6c66281e39763384",
     "wokwi.toml": "e6b7db9307f9dcda"
   },
-  "template_version": "0.7.2"
+  "template_version": "0.8.0"
 }

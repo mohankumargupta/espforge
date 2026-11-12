@@ -1,0 +1,22 @@
+==================
+SPI ASYNC EXAMPLE
+
+One ADXL345 accelerometer on an embassy board. The generated SPI bus is the
+async controller, and the part's endpoint applies its own mode 3 and 5MHz clock
+before asserting chip select. Because the driver's bus is async, the sensor is
+built after boot: the app awaits `init()` and then awaits each read.
+==================
+
+# espforge
+  <project name="spi_async" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <spi id="spi2" sclk="8" mosi="7" miso="6" mode="3" frequency="5000kHz" />
+  <gpio id="gpio10" pin="10" direction="output" />
+
+# devices
+  <adxl345 id="accel" bus="$spi2" cs="$gpio10" mode="3" frequency="5000kHz" init="deferred" />
+
+# services

@@ -17,6 +17,8 @@ pub struct Overrides {
     pub defaults: Option<bool>,
     /// Raw `NAME=VALUE` strings, in the order the user wrote them.
     pub options: Vec<String>,
+    /// Extra directories of driver manifests, in precedence order.
+    pub driver_dirs: Vec<std::path::PathBuf>,
 }
 
 fn runtime_name(r: Runtime) -> &'static str {

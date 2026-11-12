@@ -17,7 +17,7 @@ pub mod manifest;
 pub mod project;
 pub mod runtime_source;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use espforge_elements::{Board, Meta, ResolvedOptions};
 use std::fs;
 use std::path::Path;
@@ -88,15 +88,27 @@ fn finish(rendered: project::Rendered, core: &Meta) -> Result<Generated> {
     Ok(Generated { artifacts, assets })
 }
 
+/// What a write did that the caller may want to tell the user about.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct WriteReport {
+    /// `Merged` files whose managed keys had been edited: the generated value
+    /// was restored. One line per key, in file order.
+    pub warnings: Vec<String>,
+}
+
 /// Write artifacts into `out_dir`, respecting ownership:
 ///
 /// Impure: creates directories and writes files under `out_dir`.
 /// - `Owned` files are overwritten, unless the previous manifest shows the
 ///   file was edited since we wrote it (drift): then we refuse.
+/// - `Merged` files are regenerated, but only the keys espforge writes are
+///   replaced; every other key is carried over, so a user-added dependency is
+///   never drift. A managed key the user edited is restored, with a warning.
 /// - `SeedOnce` files are written only if absent.
 /// - `NotOwned` files are never written.
-pub fn write(out_dir: &Path, artifacts: &[Artifact]) -> Result<()> {
+pub fn write(out_dir: &Path, artifacts: &[Artifact]) -> Result<WriteReport> {
     let prev = manifest::read_prev_manifest(out_dir)?;
+    let mut report = WriteReport::default();
     for a in artifacts {
         if a.ownership == Ownership::NotOwned {
             continue;
@@ -124,10 +136,17 @@ pub fn write(out_dir: &Path, artifacts: &[Artifact]) -> Result<()> {
                 }
                 fs::write(&path, &a.content)?;
             }
+            Ownership::Merged => {
+                let previous = fs::read_to_string(&path).ok();
+                let merged = codegen::cargo::merge(previous.as_deref(), &a.content)
+                    .with_context(|| format!("merging `{}`", a.path))?;
+                report.warnings.extend(merged.warnings);
+                fs::write(&path, merged.content)?;
+            }
             Ownership::NotOwned => {}
         }
     }
-    Ok(())
+    Ok(report)
 }
 
 /// Write binary assets into `out_dir`: `SeedOnce` only if absent, `Owned`
@@ -153,9 +172,10 @@ pub fn write_assets(out_dir: &Path, assets: &[Asset]) -> Result<()> {
 /// Convenience: [`write`] then [`write_assets`].
 ///
 /// Impure: writes under `out_dir`.
-pub fn write_all(out_dir: &Path, generated: &Generated) -> Result<()> {
-    write(out_dir, &generated.artifacts)?;
-    write_assets(out_dir, &generated.assets)
+pub fn write_all(out_dir: &Path, generated: &Generated) -> Result<WriteReport> {
+    let report = write(out_dir, &generated.artifacts)?;
+    write_assets(out_dir, &generated.assets)?;
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -173,13 +193,12 @@ mod tests {
         }
     }
 
-    /// A project with no components: every backend except the wiring is
+    /// A project with no devices: every backend except the wiring is
     /// exercised, and the example overlay is the only hardware-shaped input.
     fn board(meta: &Meta) -> Board {
         Board {
             meta: meta.clone(),
             resources: espforge_elements::ResourceGraph::default(),
-            components: Vec::new(),
             devices: Vec::new(),
             services: Vec::new(),
             warnings: Vec::new(),
@@ -290,6 +309,63 @@ mod tests {
         fs::write(dir.path().join("src/lib.rs"), "// my edit").unwrap();
         let err = write(dir.path(), &generate_with(None).artifacts).unwrap_err();
         assert!(err.to_string().contains("drift"));
+    }
+
+    /// WS-E: a dependency the user added is not drift, and survives.
+    #[test]
+    fn a_user_dependency_survives_a_rebuild() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), &generate_with(None).artifacts).unwrap();
+        let cargo = dir.path().join("Cargo.toml");
+        let text = fs::read_to_string(&cargo).unwrap().replace(
+            "static_cell = \"2.1.1\"",
+            "static_cell = \"2.1.1\"\nserde = \"1\"",
+        );
+        fs::write(&cargo, &text).unwrap();
+
+        let report = write(dir.path(), &generate_with(None).artifacts).unwrap();
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        assert!(
+            fs::read_to_string(&cargo)
+                .unwrap()
+                .contains("serde = \"1\""),
+            "the user's dependency was dropped"
+        );
+    }
+
+    /// WS-E: a managed key the user edited is regenerated, with one warning
+    /// naming the key.
+    #[test]
+    fn an_edited_managed_key_is_restored_with_a_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), &generate_with(None).artifacts).unwrap();
+        let cargo = dir.path().join("Cargo.toml");
+        let edited = fs::read_to_string(&cargo)
+            .unwrap()
+            .replace("~1.2.2", "0.1.0");
+        fs::write(&cargo, &edited).unwrap();
+
+        let report = write(dir.path(), &generate_with(None).artifacts).unwrap();
+        assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+        assert!(
+            report.warnings[0].contains("dependencies.esp-hal.version"),
+            "{:?}",
+            report.warnings
+        );
+        let restored = fs::read_to_string(&cargo).unwrap();
+        assert!(restored.contains("~1.2.2"), "{restored}");
+    }
+
+    /// WS-E: a `Cargo.toml` the user broke is a named error, not an overwrite.
+    #[test]
+    fn a_malformed_cargo_toml_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), &generate_with(None).artifacts).unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package").unwrap();
+        let err = write(dir.path(), &generate_with(None).artifacts).unwrap_err();
+        let message = format!("{err:#}");
+        assert!(message.contains("Cargo.toml"), "{message}");
+        assert!(message.contains("not valid TOML"), "{message}");
     }
 
     #[test]

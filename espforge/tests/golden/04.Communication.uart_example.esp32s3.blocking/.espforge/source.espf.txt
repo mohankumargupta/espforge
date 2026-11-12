@@ -8,15 +8,8 @@ UART EXAMPLE
   <runtime type="blocking" />
 
 # peripherals
-  <uart id="uart1" uart="UART1" tx="6" rx="5" />
-
-# components
-  <uart_component id="uart1_wokwi_chip" 
-                  uart="$uart1" baud_rate="9600" />
+  <uart id="uart1" uart="UART1" tx="6" rx="5" baud_rate="9600" />
 
 # devices
 
-# services 
-
-
-
+# services

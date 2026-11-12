@@ -1,0 +1,25 @@
+==================
+SPI MULTI EXAMPLE
+
+One SPI controller, two parts with different settings: an ILI9341 panel at
+40MHz in mode 0 and an ADXL345 accelerometer at 5MHz in mode 3. Each device
+owns its CS line and applies its own configuration before a transaction, so
+neither part inherits the other's clock.
+==================
+
+# espforge
+  <project name="spi_multi" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <spi id="spi2" sclk="8" mosi="7" miso="6" mode="0" frequency="40000kHz" />
+  <gpio id="gpio4" pin="4" direction="output" />
+  <gpio id="gpio5" pin="5" direction="output" />
+  <gpio id="gpio3" pin="3" direction="output" />
+
+# devices
+  <ili9341 id="tft" bus="$spi2" cs="9" dc="$gpio4" reset="$gpio5" backlight="$gpio3" rotation="90" />
+  <adxl345 id="accel" bus="$spi2" cs="10" mode="3" frequency="5000kHz" />
+
+# services

@@ -65,7 +65,7 @@ impl FilePlan {
             PlannedFile {
                 out_path: "Cargo.toml",
                 source: Source::Cargo,
-                ownership: Ownership::Owned,
+                ownership: Ownership::Merged,
             },
             PlannedFile {
                 out_path: "build.rs",

@@ -6,8 +6,31 @@
 //!
 //! Target-only in practice, but it compiles on the host too (the esp-hal parts
 //! live behind one cfg), so `cargo build`/`cargo test` on the workspace work.
+//!
+//! # Per-instance storage
+//!
+//! A singleton never hides its storage in a `static`: `I2cBus::build_in`,
+//! `SpiBus::build_in`/`build_write_only_in`, `Wifi::start_in` and
+//! `HttpClient::new_in` take a `&'static` storage value (`I2cBusStorage`,
+//! `SpiBusStorage`, `WifiStorage`, `HttpClientStorage`) that the generated code
+//! declares once per element. Two buses, two radios or two clients therefore
+//! cannot share a cell, and a cell can never be initialised twice because no
+//! element's storage is reused. The older constructors (`I2cBus::build`,
+//! `SpiBus::build`, `Wifi::start`, `HttpClient::new`) are gone: a project that
+//! pins an earlier runtime must be regenerated to get the `*_in` call sites.
 
 #![cfg_attr(not(test), no_std)]
+
+/// Wall time and the NTP era. Host-testable: the arithmetic names no chip API,
+/// and the `Clock` handle only appears once the `embassy` feature is on.
+pub mod clock;
+pub use clock::*;
+
+/// Deferred device construction: build the handle at boot, initialise the part
+/// after `app::setup`. Host-testable: a factory is plain Rust, and only the
+/// async half needs the `embassy` feature.
+mod deferred;
+pub use deferred::*;
 
 /// Logging handle stored on the generated `Context`. Forwards to the `log`
 /// facade; the generated project installs the sink (esp-println).
@@ -35,13 +58,47 @@ impl Default for Logger {
     }
 }
 
+/// Why a device could not be constructed.
+///
+/// A driver returns this, not a panic: one loose jumper is a named, logged
+/// failure instead of an infinite boot loop before `app::setup()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceErrorKind {
+    /// The part did not answer, or rejected its initialization sequence.
+    Init,
+    /// The bus rejected a transaction while the device was being set up.
+    Bus,
+}
+
+impl core::fmt::Display for DeviceErrorKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            DeviceErrorKind::Init => f.write_str("initialization failed"),
+            DeviceErrorKind::Bus => f.write_str("bus setup failed"),
+        }
+    }
+}
+
+/// A device that failed to construct, named by its `.espf` id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceError {
+    /// The element id as written in the project file (`oled`).
+    pub device: &'static str,
+    /// Why the driver refused.
+    pub kind: DeviceErrorKind,
+}
+
+impl core::fmt::Display for DeviceError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "device `{}`: {}", self.device, self.kind)
+    }
+}
+
 /// Everything that needs esp-hal. One module, one re-export: adding a runtime
 /// type costs a `pub use` here instead of another repeated `cfg` on every
 /// call site.
 #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 mod hw {
-    use core::cell::RefCell;
-
     mod i2c;
     mod spi;
     mod uart;
@@ -57,7 +114,7 @@ mod hw {
     pub use wifi::*;
 
     use esp_hal::gpio::Level;
-    use esp_hal::gpio::{Input, InputConfig, InputPin, Pull};
+    use esp_hal::gpio::{Flex, Input, InputConfig, InputPin, Pin, Pull};
 
     /// Delay handle stored on the generated `Context`.
     ///
@@ -99,13 +156,25 @@ mod hw {
         }
     }
 
+    /// The blocking wait `embedded-hal-bus`'s SPI adapters take, so a
+    /// `RefCellDevice` can honour a transaction's `DelayNs` operation.
+    impl embedded_hal::delay::DelayNs for Delay {
+        fn delay_ns(&mut self, ns: u32) {
+            self.inner.delay_nanos(ns);
+        }
+    }
+
+    /// The standard bus-sharing adapters, re-exported so generated code names
+    /// them through this crate and a project never adds the dependency itself.
+    pub use embedded_hal_bus;
+
     /// An LED on a GPIO output.
     ///
-    /// The `Output` is held behind a `RefCell` so the mutating methods take
-    /// `&self`: the blocking `component!(ctx, led).toggle()` call site keeps
-    /// working, and an embassy task can toggle a shared LED.
+    /// Interior mutability lives in the container, not here: on a blocking
+    /// board the app holds `&mut Led`, and on an embassy board it holds an
+    /// `AsyncMutexGuard<'_, Led>`. Both reach these `&mut self` methods.
     pub struct Led {
-        pin: RefCell<esp_hal::gpio::Output<'static>>,
+        pin: esp_hal::gpio::Output<'static>,
         active_low: bool,
     }
 
@@ -116,44 +185,43 @@ mod hw {
             use esp_hal::gpio::{Output, OutputConfig};
             let off = if active_low { Level::High } else { Level::Low };
             Led {
-                pin: RefCell::new(Output::new(pin, off, OutputConfig::default())),
+                pin: Output::new(pin, off, OutputConfig::default()),
                 active_low,
             }
         }
 
-        pub fn on(&self) {
+        pub fn on(&mut self) {
             let level = if self.active_low {
                 Level::Low
             } else {
                 Level::High
             };
-            self.pin.borrow_mut().set_level(level);
+            self.pin.set_level(level);
         }
 
-        pub fn off(&self) {
+        pub fn off(&mut self) {
             let level = if self.active_low {
                 Level::High
             } else {
                 Level::Low
             };
-            self.pin.borrow_mut().set_level(level);
+            self.pin.set_level(level);
         }
 
-        pub fn toggle(&self) {
-            self.pin.borrow_mut().toggle();
+        pub fn toggle(&mut self) {
+            self.pin.toggle();
         }
     }
 
-    /// `button` component: a single GPIO input with an optional pull-up, wired
+    /// `button` device: a single GPIO input with an optional pull-up, wired
     /// move-by-value (ADR-008).
     ///
-    /// The `Input` is held behind a `RefCell` so the mutating/awaiting methods
-    /// take `&self` (mirroring [`Led`]). This lets an embassy task hold a shared
-    /// `&'static Context` and call `wait_for_pressed().await` (and `is_pressed()`)
-    /// without needing a `&mut` borrow of the context — the same reason `Led`
-    /// uses interior mutability so a spawned task can `toggle(&self)`.
+    /// Like [`Led`], the pin is a plain field: the device's container supplies
+    /// the mutability (`&mut Button` on blocking, an `AsyncMutexGuard` on
+    /// embassy), so a spawned task reaches `wait_for_pressed` through its
+    /// guard rather than an inner `RefCell`.
     pub struct Button {
-        pin: RefCell<Input<'static>>,
+        pin: Input<'static>,
         pull_up: bool,
     }
 
@@ -164,17 +232,17 @@ mod hw {
         pub fn new(pin: impl InputPin + 'static, pull_up: bool) -> Self {
             let pull = if pull_up { Pull::Up } else { Pull::None };
             Button {
-                pin: RefCell::new(Input::new(pin, InputConfig::default().with_pull(pull))),
+                pin: Input::new(pin, InputConfig::default().with_pull(pull)),
                 pull_up,
             }
         }
 
         /// Current pressed state. Pulled-up buttons read low when pressed.
-        pub fn is_pressed(&self) -> bool {
+        pub fn is_pressed(&mut self) -> bool {
             if self.pull_up {
-                self.pin.borrow().is_low()
+                self.pin.is_low()
             } else {
-                self.pin.borrow().is_high()
+                self.pin.is_high()
             }
         }
 
@@ -183,12 +251,64 @@ mod hw {
         /// otherwise we wait for high. Requires the `embassy` feature so the
         /// shared context can be borrowed by a spawned task while waiting.
         #[cfg(feature = "embassy")]
-        pub async fn wait_for_pressed(&self) {
+        pub async fn wait_for_pressed(&mut self) {
             if self.pull_up {
-                self.pin.borrow_mut().wait_for_low().await;
+                self.pin.wait_for_low().await;
             } else {
-                self.pin.borrow_mut().wait_for_high().await;
+                self.pin.wait_for_high().await;
             }
+        }
+    }
+
+    /// A GPIO line the app both drives and reads.
+    ///
+    /// A one-wire part (a DHT11/DHT22, a DS18B20) shares one line: the app
+    /// pulls it low to start a transfer, then releases it so the pull-up — or
+    /// the part — sets the level it reads. `esp-hal`'s `Flex` is the pin, and
+    /// this type keeps the two states explicit so a driver cannot leave a line
+    /// it drove still driven.
+    ///
+    /// The line starts released: nothing drives it until the driver asks.
+    pub struct Bidirectional {
+        pin: Flex<'static>,
+    }
+
+    impl Bidirectional {
+        /// `pin` is the line moved in by value; `pull` is the resistor it reads
+        /// through while released.
+        pub fn new(pin: impl Pin + 'static, pull: Pull) -> Self {
+            let mut pin = Flex::new(pin);
+            pin.apply_input_config(&InputConfig::default().with_pull(pull));
+            pin.set_input_enable(true);
+            pin.set_output_enable(false);
+            Self { pin }
+        }
+
+        /// Drive the line as an output at `level`.
+        pub fn drive(&mut self, level: Level) {
+            self.pin.set_level(level);
+            self.pin.set_output_enable(true);
+        }
+
+        /// Release the line: the output driver off, so the pull resistor sets
+        /// the level other devices and this one read.
+        pub fn release(&mut self) {
+            self.pin.set_output_enable(false);
+        }
+
+        /// The level the line reads.
+        pub fn level(&self) -> Level {
+            self.pin.level()
+        }
+
+        /// Whether the line reads high.
+        pub fn is_high(&self) -> bool {
+            self.pin.is_high()
+        }
+
+        /// Whether the line reads low.
+        pub fn is_low(&self) -> bool {
+            self.pin.is_low()
         }
     }
 

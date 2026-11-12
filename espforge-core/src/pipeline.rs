@@ -8,9 +8,9 @@ use espf::diag::junk_diagnostics;
 use espf::parser::{Parsed, parse_espf};
 use espforge_diagnostics::{Diagnostic, Diagnostics};
 use espforge_elements::{
-    Answers, Board, DerivedInputs, Meta, ResolvedOptions, core_from_section, lower, resolve,
+    Answers, Board, DerivedInputs, Meta, ResolvedOptions, Session, core_from_section, lower,
+    resolve,
 };
-use espforge_schema::schema;
 
 use crate::answers::Overrides;
 
@@ -59,12 +59,16 @@ impl Invalid {
 /// options and the parse result.
 pub struct Checked<'a> {
     pub parsed: Parsed<'a>,
+    /// The schema this board was checked against: the bundled files plus the
+    /// project's own drivers. Owned, so the caller can keep reading it without
+    /// recomposing it.
+    pub session: Session,
     /// Core settings after flag overrides.
     pub meta: Meta,
     /// Option answers after flag overrides.
     pub answers: Answers,
     pub resolved: ResolvedOptions,
-    /// The lowered hardware: pins claimed and components built.
+    /// The lowered hardware: pins claimed and devices built.
     pub board: Board,
     /// `note: ...` lines for flags that changed something.
     pub notes: Vec<String>,
@@ -73,6 +77,39 @@ pub struct Checked<'a> {
 /// Parse, check syntax/structure, read `# espforge`, apply overrides and
 /// resolve the options.
 pub fn validate<'a>(src: &'a str, overrides: &Overrides) -> Result<Checked<'a>, Invalid> {
+    validate_with(src, overrides, &[])
+}
+
+/// [`validate`], with the project's driver manifests composed in first.
+///
+/// The composed schema belongs to this run: it is a [`Session`] that the
+/// validated result carries, so two projects generated in one process cannot
+/// see each other's drivers. A manifest that does not load is a message, not a
+/// located diagnostic: its spans are in another file.
+pub fn validate_with<'a>(
+    src: &'a str,
+    overrides: &Overrides,
+    manifests: &[(String, String)],
+) -> Result<Checked<'a>, Invalid> {
+    let session = match Session::compose(manifests) {
+        Ok(session) => session,
+        Err(errors) => {
+            let mut message = String::from("the project's driver manifests do not load:");
+            for error in errors {
+                message.push_str(&format!("\n  {}: {}", error.span.start, error.message));
+            }
+            return Err(Invalid::Message(message));
+        }
+    };
+    validate_parsed(src, overrides, session)
+}
+
+/// The spec pipeline itself, against this run's schema.
+fn validate_parsed<'a>(
+    src: &'a str,
+    overrides: &Overrides,
+    session: Session,
+) -> Result<Checked<'a>, Invalid> {
     let parsed = parse_espf(src);
 
     // 1. Syntax (junk lines) and structure (duplicate / missing sections).
@@ -83,18 +120,18 @@ pub fn validate<'a>(src: &'a str, overrides: &Overrides) -> Result<Checked<'a>, 
         return Err(Invalid::Diagnostics(errors));
     }
 
-    // 2. `# espforge` core and `<options>` (all five sections exist now).
+    // 2. `# espforge` core and `<options>` (the required sections exist now).
     let header = parsed.header_offsets["espforge"];
     let espforge_nodes = &parsed.sections["espforge"];
     let (mut meta, opt_node) = core_from_section(header, espforge_nodes)?;
-    let mut answers = Answers::from_node(schema(), opt_node, header..header)?;
+    let mut answers = Answers::from_node(session.schema(), opt_node, header..header)?;
     let derived = DerivedInputs::from_nodes(espforge_nodes, &parsed.sections["peripherals"]);
 
     // 3. Overrides win over the file; collect a note when they change
     // something.
     let mut notes = Vec::new();
     overrides.apply_core(&mut meta, &mut notes)?;
-    overrides.apply_options(schema(), &mut answers, &mut notes)?;
+    overrides.apply_options(session.schema(), &mut answers, &mut notes)?;
 
     // 4. Resolve against the (possibly overridden) answers.
     let resolved = resolve(&meta, &answers, &derived)?;
@@ -103,13 +140,13 @@ pub fn validate<'a>(src: &'a str, overrides: &Overrides) -> Result<Checked<'a>, 
     let board = lower(
         meta.clone(),
         &parsed.sections["peripherals"],
-        &parsed.sections["components"],
         &parsed.sections["devices"],
         &parsed.sections["services"],
+        &session,
     )?;
 
-    // 6. Warnings ride on the board; surface them through the notes the CLI
-    // already prints, so a warning never needs its own channel.
+    // 6. Board warnings ride on the notes the CLI already prints, so a warning
+    // never needs its own channel.
     for warning in &board.warnings {
         notes.push(format!(
             "⚠️  {}: {} [{}]",
@@ -121,6 +158,7 @@ pub fn validate<'a>(src: &'a str, overrides: &Overrides) -> Result<Checked<'a>, 
 
     Ok(Checked {
         parsed,
+        session,
         meta,
         answers,
         resolved,
@@ -148,9 +186,8 @@ mod tests {
         \x20 <runtime type=\"blocking\" />\n\
         # peripherals\n\
         \x20 <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n\
-        # components\n\
-        \x20 <led id=\"red_led\" gpio=\"$gpio18\" />\n\
         # devices\n\
+        \x20 <led id=\"red_led\" gpio=\"$gpio18\" />\n\
         # services\n";
 
     #[test]
@@ -158,7 +195,7 @@ mod tests {
         let c = validate(hello(), &Overrides::default())
             .ok()
             .expect("hello validates");
-        assert!(c.notes.is_empty());
+        assert!(c.notes.is_empty(), "{:?}", c.notes);
         assert_eq!(c.meta.chip, "esp32c3");
         assert!(c.resolved.is_on("unstable-hal"));
         assert!(c.resolved.is_on("alloc"));
@@ -167,12 +204,12 @@ mod tests {
     }
 
     #[test]
-    fn blink_validates_to_a_board_with_one_component() {
+    fn blink_validates_to_a_board_with_one_pin_device() {
         let c = validate(BLINK, &Overrides::default())
             .ok()
             .expect("blink validates");
-        assert_eq!(c.board.components.len(), 1);
-        assert_eq!(c.board.components[0].id().rust_name(), "red_led");
+        assert_eq!(c.board.devices.len(), 1);
+        assert_eq!(c.board.devices[0].id().rust_name(), "red_led");
         assert!(
             c.board
                 .resources
@@ -195,7 +232,7 @@ mod tests {
         };
         let c = validate(hello(), &overrides).ok().expect("validates");
         assert_eq!(c.meta.chip, "esp32s3");
-        assert_eq!(c.notes.len(), 1);
+        assert_eq!(c.notes.len(), 1, "{:?}", c.notes);
     }
 
     #[test]

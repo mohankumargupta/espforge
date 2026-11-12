@@ -3,7 +3,7 @@ use crate::{Context};
 pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
     let delay = ctx.delay;
-    let i2c = component!(ctx, i2c0);
+    let i2c = device!(ctx, i2c0);
 
     logger.info("I2C Scanner Example");
 

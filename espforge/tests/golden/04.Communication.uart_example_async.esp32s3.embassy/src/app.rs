@@ -10,7 +10,7 @@ crate::signal!(UART_RX);
 
 #[embassy_executor::task]
 async fn echo_task(ctx: &'static Context) {
-    let uart = component!(ctx, uart0);
+    let uart = device!(ctx, uart1);
     let mut buf = [0u8; 64];
     loop {
         match uart.read_line(&mut buf).await {
@@ -27,7 +27,7 @@ async fn echo_task(ctx: &'static Context) {
 
 #[embassy_executor::task]
 async fn sender_task(ctx: &'static Context) {
-    let uart = component!(ctx, uart0);
+    let uart = device!(ctx, uart1);
     let logger = ctx.logger;
     loop {
         UART_RX.wait().await;
@@ -39,7 +39,7 @@ async fn sender_task(ctx: &'static Context) {
 pub async fn setup(ctx: &'static Context, spawner: Spawner) {
     spawner.spawn(echo_task(ctx).unwrap());
     spawner.spawn(sender_task(ctx).unwrap());
-    component!(ctx, uart0)
+    device!(ctx, uart1)
         .write_str("Async UART ready\n")
         .await
         .ok();

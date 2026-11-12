@@ -1,17 +1,17 @@
 //! Elements that live in `# services`: software over an interface.
 //!
-//! A service claims no pin. It refers *down* to a component (or device) that
-//! provides the interface it rides on — today a `<wifi_station>` and its
-//! embassy-net stack.
+//! A service claims no pin. It refers *down* to a service that provides the
+//! interface it rides on — today a `<wifi_station>` and its embassy-net stack,
+//! declared by `provides "network"` rather than by the tag.
 //!
-//! A service is data as much as a component or a device is: its type, its
-//! constructor, its config fields and its feature all come from a
-//! `service_recipe` in `services.schema.kdl`, so adding one edits the runtime
-//! and the schema, never this crate. [`recipe`] is the interpreter; the wording of
-//! the diagnostics it can report lives here, so every service says "unknown
-//! network" the same way.
+//! A service is data as much as a device is: its type, its constructor, its
+//! config fields and its feature all come from a `service_recipe` in
+//! `services.schema.kdl`, so adding one edits the runtime and the schema, never
+//! this crate. [`recipe`] is the interpreter; the wording of the diagnostics it
+//! can report lives here, so every service says "unknown network" the same way.
 
 pub mod recipe;
+pub mod wifi_station;
 
 use espf::context::ParsedNode;
 use espf::diag::node_span;
@@ -23,12 +23,12 @@ use crate::attrs::Issue;
 use crate::element::{LowerCx, Reported};
 use crate::model::Ident;
 
-/// `components.<network>.stack()` — the embassy-net stack a service's
-/// `network=` reference names. The component that carries the stack exposes it
-/// with a `stack()` method; `<wifi_station>` is the one today.
+/// `<network>.stack()` — the embassy-net stack a service's `network=`
+/// reference names. The provider (`<wifi_station>`) built a local with that
+/// name in `Services::new`, so no separate provider field is involved.
 pub(crate) fn network_stack(network: &Ident) -> TokenStream {
     let name = format_ident!("{}", network.rust_name());
-    quote! { components.#name.stack() }
+    quote! { #name.stack() }
 }
 
 /// The value span of one attribute on `node`, or the node itself.
@@ -40,7 +40,7 @@ pub(crate) fn span_of(node: &ParsedNode<'_>, attr: &str) -> std::ops::Range<usiz
 
 /// An id that cannot become a Rust identifier.
 pub(crate) fn invalid_id(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     node: &ParsedNode<'_>,
     tag: &str,
     id: &Ident,
@@ -59,7 +59,7 @@ pub(crate) fn invalid_id(
 
 /// A schema-level problem (missing or invalid attribute).
 pub(crate) fn invalid_element(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     node: &ParsedNode<'_>,
     tag: &str,
     issue: Issue<'_>,
@@ -67,7 +67,7 @@ pub(crate) fn invalid_element(
     let id = node.id;
     let message = match issue {
         Issue::Missing { attr } => {
-            format!("<{tag} id=\"{id}\"> needs {attr}=\"$<network component id>\"")
+            format!("<{tag} id=\"{id}\"> needs {attr}=\"$<network service id>\"")
         }
         Issue::Invalid { attr, value } => {
             format!("<{tag} id=\"{id}\"> has an invalid {attr}=\"{value}\"")
@@ -81,9 +81,9 @@ pub(crate) fn invalid_element(
     )
 }
 
-/// A `network=` reference that names no provider component.
+/// A `network=` reference that names no provider service.
 pub(crate) fn unknown_network(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     node: &ParsedNode<'_>,
     tag: &str,
     id: &Ident,
@@ -94,7 +94,7 @@ pub(crate) fn unknown_network(
         node_span(node),
         "unknown network interface",
         format!(
-            "<{tag} id=\"{}\"> refers to `{}`, which is not a network component in `# components`",
+            "<{tag} id=\"{}\"> refers to `{}`, which provides no network interface in `# services`",
             id.raw, network.raw
         ),
     )
@@ -102,7 +102,7 @@ pub(crate) fn unknown_network(
 
 /// A buffer below the minimum the protocol needs.
 pub(crate) fn buffer_too_small(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     node: &ParsedNode<'_>,
     tag: &str,
     id: &Ident,

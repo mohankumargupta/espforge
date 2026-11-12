@@ -11,13 +11,13 @@
 //! ```kdl
 //! section "peripherals" {
 //!     summary "The chip's hardware blocks you use"
-//!     description "Each one gets an id components refer to with $id."
+//!     description "Each one gets an id devices refer to with $id."
 //! }
 //! element "i2c" section="peripherals" {
 //!     summary "I2C bus controller"
 //!     attr "sda" kind="pin" required=#true
 //!     example "minimal" #"<i2c id="i2c0" sda="6" scl="7" />"#
-//!     see_also "components/i2c_component"
+//!     see_also "devices/ssd1306"
 //! }
 //! options {
 //!     option "alloc" default=#true {
@@ -33,6 +33,12 @@ use espforge_diagnostics::{DiagCode, codes};
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 use std::ops::Range;
 use std::sync::LazyLock;
+
+mod driver;
+mod requirement;
+pub mod syntax;
+
+pub use syntax::{MappedValue, RustExpr, RustPath, RustType, ServiceExprTemplate, TypeTemplate};
 
 /// The core schema text, embedded at compile time.
 pub const SCHEMA_KDL: &str = include_str!("espf.schema.kdl");
@@ -129,22 +135,200 @@ pub struct Element {
     pub examples: Vec<Example>,
     /// Targets of `see_also`, as `section/tag`.
     pub see_also: Vec<String>,
-    /// The `recipe` child, when this element is a component built from a pin
+    /// The interface this element provides (`provides "network"`), if any.
+    ///
+    /// A `ref` `to=` may name an interface instead of a tag; the reference is
+    /// then resolved by this declaration rather than by the provider's tag.
+    pub provides: Option<String>,
+    /// The `recipe` child, when this element is a device built from a pin
     /// reference and booleans rather than its own Rust file.
     pub recipe: Option<Recipe>,
     /// The `device_recipe` child, when this element is a driver built from a
-    /// bus component, auxiliary pins and value slots rather than its own Rust
+    /// bus, auxiliary pins and value slots rather than its own Rust
     /// file.
     pub device_recipe: Option<DeviceRecipe>,
     /// The `service_recipe` child, when this element is a service built from
-    /// its network component, config fields and arguments rather than its own
+    /// its network provider, config fields and arguments rather than its own
     /// Rust file.
     pub service_recipe: Option<ServiceRecipe>,
+    /// The `crate` block, when this element is an external driver package
+    /// rather than one the bundled `espforge-drivers` umbrella implements.
+    pub package: Option<PackageRef>,
+    /// Crates whose traits the driver's types expose to app code.
+    pub expose: Vec<Expose>,
+    /// Every crate the manifest names, in declaration order.
+    ///
+    /// A v2 `driver` fills this from its `dependency` blocks; a v1 `element`
+    /// is converted from `crate`/`expose` on parse, so the emitter consumes
+    /// one list regardless of the format the author wrote.
+    pub dependencies: Vec<Dependency>,
+    /// Which manifest format declared this element.
+    pub format: Format,
+    /// The schema source this element came from: the path of a project
+    /// manifest, a `--driver-dir` file, or a bundled file's label.
+    pub source: Option<String>,
     /// Span of the `element` node in `espf.schema.kdl`.
     pub span: Range<usize>,
 }
 
-/// The `recipe` child of a `# components` element: how to build it from an id,
+/// The manifest format that declared an element.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Format {
+    /// `element "<tag>" section="devices" { device_recipe { .. } }`.
+    #[default]
+    V1,
+    /// `driver "<tag>" { .. }`.
+    V2,
+}
+
+impl Format {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Format::V1 => "v1",
+            Format::V2 => "v2",
+        }
+    }
+}
+
+/// One crate a driver manifest names, as the generated `Cargo.toml` emits it.
+///
+/// Exactly one of `version`, `path` or `git` names the source; `git` carries
+/// the pinned `rev`. `default_features` is `false` only when the manifest says
+/// `default_features #false`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dependency {
+    pub package: String,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    pub git: Option<String>,
+    pub rev: Option<String>,
+    pub features: Vec<String>,
+    pub default_features: bool,
+}
+
+impl Dependency {
+    /// Which of `version`, `path` or `git` names the source.
+    pub fn source_kind(&self) -> &'static str {
+        if self.path.is_some() {
+            "path"
+        } else if self.git.is_some() {
+            "git"
+        } else {
+            "version"
+        }
+    }
+
+    /// The v1 `crate` block, converted to the one dependency shape.
+    pub fn from_package(package: &PackageRef) -> Self {
+        Self {
+            package: package.package.clone(),
+            version: package.version.clone(),
+            path: package.path.clone(),
+            git: package.git.clone(),
+            rev: package.rev.clone(),
+            features: package.features.clone(),
+            default_features: true,
+        }
+    }
+
+    /// One v1 `expose` block: a version-only crate.
+    pub fn from_expose(expose: &Expose) -> Self {
+        Self {
+            package: expose.package.clone(),
+            version: expose.version.clone(),
+            path: None,
+            git: None,
+            rev: None,
+            features: Vec::new(),
+            default_features: true,
+        }
+    }
+
+    /// Whether `other` names the same crate from the same source.
+    ///
+    /// `path`, `git` and `rev` must match exactly; a missing one is "same as
+    /// the other", because a v1 bundled `deps` entry names no version while a
+    /// v2 manifest may add one. Versions are Cargo requirements, so `0.8.1`
+    /// and `0.8.2` are one caret window and describe one source.
+    pub fn same_source(&self, other: &Self) -> bool {
+        fn agree<T: PartialEq>(left: &Option<T>, right: &Option<T>) -> bool {
+            match (left, right) {
+                (Some(left), Some(right)) => left == right,
+                _ => true,
+            }
+        }
+        agree(&self.path, &other.path)
+            && agree(&self.git, &other.git)
+            && agree(&self.rev, &other.rev)
+            && match (&self.version, &other.version) {
+                (Some(left), Some(right)) => requirement::overlap(left, right),
+                _ => true,
+            }
+    }
+
+    /// Fold a compatible record into this one: the stricter requirement, every
+    /// feature either side asks for, and default features only while both want
+    /// them. Call it only after [`Dependency::same_source`] agrees.
+    pub fn absorb(&mut self, other: &Self) {
+        if let Some(version) = &other.version {
+            self.version = Some(match &self.version {
+                Some(existing) => requirement::stricter(existing, version).to_string(),
+                None => version.clone(),
+            });
+        }
+        for feature in &other.features {
+            if !self.features.contains(feature) {
+                self.features.push(feature.clone());
+            }
+        }
+        self.default_features &= other.default_features;
+    }
+}
+
+/// The `crate` block of an external driver element: which Rust crate
+/// implements it, and where that crate comes from.
+///
+/// Exactly one of `version`, `path` or `git` (with `rev`) names the source, so
+/// the generated `Cargo.toml` line is never ambiguous. A bundled element has no
+/// `crate` block and keeps using the `espforge-drivers` feature instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageRef {
+    /// The crate name, as it appears in the generated `Cargo.toml`.
+    pub package: String,
+    /// A crates.io version.
+    pub version: Option<String>,
+    /// A path to a directory containing the crate, relative to the manifest.
+    pub path: Option<String>,
+    /// A git repository URL.
+    pub git: Option<String>,
+    /// The revision `git` is pinned to.
+    pub rev: Option<String>,
+    /// Features to switch on for the dependency.
+    pub features: Vec<String>,
+}
+
+impl PackageRef {
+    /// Which of `version`, `path` or `git` names the source.
+    pub fn source(&self) -> &'static str {
+        if self.path.is_some() {
+            "path"
+        } else if self.git.is_some() {
+            "git"
+        } else {
+            "version"
+        }
+    }
+}
+
+/// One `expose` block: a crate the driver's public types come from, which the
+/// generated project must name so app code can implement its traits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Expose {
+    pub package: String,
+    pub version: Option<String>,
+}
+
+/// The `recipe` child of a `# devices` element: how to build it from an id,
 /// one pin reference and booleans, with no Rust file of its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recipe {
@@ -161,20 +345,85 @@ pub struct Recipe {
 }
 
 /// The `device_recipe` child of a `# devices` element: how to build a driver
-/// from one bus component, its auxiliary pins and its value slots, with no
+/// from one bus, its auxiliary pins and its value slots, with no
 /// Rust file of its own.
 ///
 /// The recipe carries data, not code. Each [`DeviceArg`] either maps an ESPF
 /// spelling to the Rust expression it emits, or templates a claimed pin, so the
 /// generic lowerer never parses a Rust expression to fill a placeholder.
+/// The bus modes a `device_recipe` declares it supports.
+///
+/// One `runtime "blocking"` / `runtime "async"` line per mode. A recipe with
+/// no line is blocking, which is every driver today; a driver that gains an
+/// async body declares both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Runtimes {
+    pub blocking: bool,
+    pub asynchronous: bool,
+}
+
+impl Runtimes {
+    pub const fn blocking() -> Self {
+        Self {
+            blocking: true,
+            asynchronous: false,
+        }
+    }
+
+    /// Declares `async` and not `blocking`.
+    pub fn async_only(self) -> bool {
+        self.asynchronous && !self.blocking
+    }
+
+    /// Declares `blocking` and not `async`.
+    pub fn blocking_only(self) -> bool {
+        self.blocking && !self.asynchronous
+    }
+}
+
+impl Default for Runtimes {
+    fn default() -> Self {
+        Self::blocking()
+    }
+}
+
+/// The `runtime "async"` block: the type, constructor and feature that replace
+/// the blocking ones when the device's bus resolves async.
+///
+/// The type and constructor are a pair: half a block is a load error, and a
+/// block is only legal beside `runtime "async"`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AsyncMode {
+    /// The field's Rust type on an async bus.
+    pub ty: Option<String>,
+    /// The Rust path of the async constructor.
+    pub new: Option<String>,
+    /// The `espforge-drivers` feature the async type needs, when it differs
+    /// from the recipe's own (`ssd1306-async`).
+    pub feature: Option<String>,
+    /// The endpoint type the async constructor takes, for a deferred factory.
+    pub endpoint: Option<String>,
+}
+
+/// Which level asserts an SPI device's chip select. A recipe fact, like the
+/// device's mode: no project attribute writes it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CsPolarity {
+    /// The common case.
+    #[default]
+    Low,
+    /// A part whose select line is active-high.
+    High,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceRecipe {
-    /// The element's `attr` of `kind="ref"` that names the component this
-    /// device is attached to (`i2c_component`).
+    /// The bus kind the device binds to: `i2c`, `spi` or `uart`.
+    ///
+    /// The element carries a `bus="$<peripheral id>"` attribute; this word is
+    /// the peripheral tag that reference must name, so a display on an SPI bus
+    /// is refused at lowering instead of failing in `rustc`.
     pub bus: String,
-    /// The component tag that reference must name, taken from the bus
-    /// attribute's own `to=`.
-    pub expect: String,
     /// The `espforge-drivers` feature the generated project names.
     pub feature: String,
     /// The kind word the diagnostics use ("display").
@@ -184,24 +433,72 @@ pub struct DeviceRecipe {
     /// The Rust path of the constructor, called with the bus and every `arg`
     /// in declared order.
     pub new: String,
-    /// Whether the device takes the bus component by value, so its
-    /// `Components` field is an `Option` the device takes.
-    pub takes_bus: bool,
-    /// The `expect` message when the bus was already taken.
-    pub taken: Option<String>,
     /// Crates the generated project must name because of this driver
     /// (`embedded-graphics`).
     pub deps: Vec<String>,
     /// The value slots, in constructor argument order.
     pub args: Vec<DeviceArg>,
-    /// What the device needs of the I2C address its component declares.
+    /// The bus modes the driver supports (`runtime "blocking"`).
+    pub runtimes: Runtimes,
+    /// The async half of the recipe (`runtime "async" { .. }`).
+    pub async_mode: AsyncMode,
+    /// The bus endpoint type the blocking constructor takes. Needed only to
+    /// name the field of a deferred device's factory.
+    pub endpoint: Option<String>,
+    /// Whether the device's `mode`/`frequency` attributes are its own transfer
+    /// configuration, applied before each transaction.
+    pub spi_config: bool,
+    /// The chip-select polarity the part needs.
+    pub cs_polarity: CsPolarity,
+    /// What the device needs of the I2C address it declares itself.
     ///
-    /// `None` for a device on a non-I2C bus or one that takes a raw bus;
-    /// `Any` when the project's `.espf` chooses the address; `Fixed` when the
-    /// part answers at one address only.
+    /// `None` for a device on a non-I2C bus; `Any` when the project's `.espf`
+    /// chooses the address; `Fixed` when the part answers at one address only.
     pub address: AddressNeed,
+    /// The address used when the spec omits `address=` (v2 `bus` default).
+    pub address_default: Option<u8>,
+    /// The inclusive range the address must fall in (v2 `bus` allowed).
+    pub address_allowed: Option<(u8, u8)>,
+    /// The companion drivers this one composes (`compose "<tag>" { .. }`).
+    ///
+    /// A composite is a driver plus its sub-chips: the parent's own device and
+    /// one device per part, all on the parent's bus. Empty for every driver
+    /// that is one part.
+    pub parts: Vec<RecipePart>,
     /// Span of the `device_recipe` node in the schema text.
     pub span: Range<usize>,
+}
+
+/// One `compose` block of a [`DeviceRecipe`]: a companion driver on the
+/// composite's bus, with its attributes filled from the composite's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecipePart {
+    /// The tag of the driver being composed.
+    pub tag: String,
+    /// The part's attributes, each filled from the composite or a literal.
+    pub attrs: Vec<PartAttr>,
+    /// Span of the `compose` node in the schema text.
+    pub span: Range<usize>,
+}
+
+/// One `attr "<name>" from=".."` / `value=".."` line of a `compose` block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartAttr {
+    /// The part's attribute this fills (`cs`, `irq`, `address`).
+    pub name: String,
+    /// Where the value comes from.
+    pub source: PartSource,
+    /// Span of the `attr` node in the schema text.
+    pub span: Range<usize>,
+}
+
+/// Where one composed attribute's value comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PartSource {
+    /// `from="touch_cs"`: one of the composite's own attributes.
+    From(String),
+    /// `value="0x48"`: a literal the spec does not write.
+    Value(String),
 }
 
 /// One `arg` of a [`DeviceRecipe`]: a slot the constructor takes, either a
@@ -217,13 +514,13 @@ pub struct DeviceArg {
     /// number goes.
     pub pin: Option<String>,
     /// The direction the referenced `<gpio>` must declare (pin slots).
-    pub direction: Direction,
+    pub direction: PinDirection,
     /// Span of the `arg` node in the schema text.
     pub span: Range<usize>,
 }
 
 /// The `service_recipe` child of a `# services` element: how to build a
-/// service from one network component, a config struct and positional
+/// service from one network provider, a config struct and positional
 /// arguments, with no Rust file of its own.
 ///
 /// A service is software over an interface, so it owns no pin. The recipe names
@@ -233,7 +530,7 @@ pub struct DeviceArg {
 /// and every rule that could make a slot unfillable is a load error here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceRecipe {
-    /// The element's `attr` of `kind="ref"` that names the network component
+    /// The element's `attr` of `kind="ref"` that names the network provider
     /// the service rides on (`network`).
     pub network: String,
     /// The `espforge-runtime` feature the generated project names.
@@ -243,6 +540,10 @@ pub struct ServiceRecipe {
     /// The Rust path of the constructor, called with the stack, the config and
     /// every `arg` in declared order.
     pub new: String,
+    /// The `static` storage type the constructor takes first, if the service
+    /// owns mutable state (`espforge_runtime::HttpClientStorage`). The generated
+    /// project declares one per service, so two services never share one buffer.
+    pub storage: Option<String>,
     /// The config struct passed to `new`, built from the recipe's `field`s.
     /// `None` passes the `arg`s directly.
     pub config: Option<String>,
@@ -278,13 +579,16 @@ pub struct ServiceField {
     pub range: Option<(u32, u32)>,
     /// Whether an empty string is refused.
     pub non_empty: bool,
+    /// `const=#true`: the value parameterizes the recipe's Rust types
+    /// (`HttpClientStorage::<2>`) instead of filling a config member.
+    pub is_const: bool,
     /// Span of the `field` node in the schema text.
     pub span: Range<usize>,
 }
 
 /// What a device needs of the I2C address of the component it binds.
 ///
-/// The address itself always lives on the `<i2c_component>`: this says only
+/// The address itself always lives on the device: this says only
 /// whether the device needs one, and whether the part fixes its value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressNeed {
@@ -292,7 +596,7 @@ pub enum AddressNeed {
     None,
     /// Any usable address; the project's `.espf` decides (a display).
     Any,
-    /// The part's own fixed address; a component declaring another is a
+    /// The part's own fixed address; a device declaring another is a
     /// wiring error.
     Fixed(u8),
 }
@@ -314,6 +618,31 @@ impl Direction {
         match self {
             Direction::Input => "input",
             Direction::Output => "output",
+        }
+    }
+}
+
+/// Which way a v2 manifest's pin line is driven.
+///
+/// A [`Direction`] is what a pin *device* recipe declares: an LED is an output
+/// and a button an input, and the runtime type owns no switching method. A bus
+/// device's pin slot can also name a line the driver switches between the two,
+/// so it needs one value more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinDirection {
+    Input,
+    Output,
+    /// A line the driver drives and reads (`esp_hal::gpio::Flex`).
+    Bidirectional,
+}
+
+impl PinDirection {
+    /// The ESPF spelling, as written in `direction=".."`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PinDirection::Input => "input",
+            PinDirection::Output => "output",
+            PinDirection::Bidirectional => "bidirectional",
         }
     }
 }
@@ -458,17 +787,21 @@ pub struct SchemaError {
 
 // -------------------------------------------------------------------- loader
 
-fn node_range(n: &KdlNode) -> Range<usize> {
+pub(crate) fn node_range(n: &KdlNode) -> Range<usize> {
     let s = n.span();
     s.offset()..s.offset() + s.len()
 }
 
-fn entry_range(e: &KdlEntry) -> Range<usize> {
+pub(crate) fn entry_range(e: &KdlEntry) -> Range<usize> {
     let s = e.span();
     s.offset()..s.offset() + s.len()
 }
 
-fn err(span: Range<usize>, message: impl Into<String>, label: impl Into<String>) -> SchemaError {
+pub(crate) fn err(
+    span: Range<usize>,
+    message: impl Into<String>,
+    label: impl Into<String>,
+) -> SchemaError {
     SchemaError {
         message: message.into(),
         label: label.into(),
@@ -477,7 +810,7 @@ fn err(span: Range<usize>, message: impl Into<String>, label: impl Into<String>)
 }
 
 /// Positional (unnamed) string arguments of a node, with their spans.
-fn positional_strings(
+pub(crate) fn positional_strings(
     node: &KdlNode,
     errors: &mut Vec<SchemaError>,
 ) -> Vec<(String, Range<usize>)> {
@@ -496,7 +829,11 @@ fn positional_strings(
 }
 
 /// Values of a named property like `section=` or `kind=`, with spans.
-fn props(node: &KdlNode, key: &str, errors: &mut Vec<SchemaError>) -> Vec<(String, Range<usize>)> {
+pub(crate) fn props(
+    node: &KdlNode,
+    key: &str,
+    errors: &mut Vec<SchemaError>,
+) -> Vec<(String, Range<usize>)> {
     node.entries()
         .iter()
         .filter(|e| e.name().is_some_and(|n| n.value() == key))
@@ -515,7 +852,7 @@ fn props(node: &KdlNode, key: &str, errors: &mut Vec<SchemaError>) -> Vec<(Strin
 }
 
 /// The first value of a named property.
-fn prop(
+pub(crate) fn prop(
     node: &KdlNode,
     key: &str,
     errors: &mut Vec<SchemaError>,
@@ -523,7 +860,7 @@ fn prop(
     props(node, key, errors).into_iter().next()
 }
 
-fn children(node: &KdlNode) -> &[KdlNode] {
+pub(crate) fn children(node: &KdlNode) -> &[KdlNode] {
     node.children().map(|c| c.nodes()).unwrap_or(&[])
 }
 
@@ -552,12 +889,98 @@ pub fn load_all(sources: &[&str]) -> Result<Schema, Vec<SchemaError>> {
     }
 
     check_references(&schema, &mut errors);
+    check_compositions(&schema, &mut errors);
 
     if errors.is_empty() {
         Ok(schema)
     } else {
         errors.sort_by_key(|e| e.span.start);
         Err(errors)
+    }
+}
+
+/// Parse several **named** sources into one schema, recording where each
+/// element came from and refusing a tag declared twice.
+///
+/// This is the runtime-composition entry point: the caller supplies the
+/// bundled files first, then project manifests in precedence order. The label
+/// is the path a user can open, so a duplicate names both files instead of
+/// silently shadowing one. Unlike [`load_all`], a later source may only add
+/// elements: sections it does not redeclare are borrowed from the sources
+/// before it, which is what a one-element driver manifest needs.
+pub fn load_composed(sources: &[(String, String)]) -> Result<Schema, Vec<SchemaError>> {
+    let mut schema = Schema::new();
+    let mut errors = Vec::new();
+    for (label, text) in sources {
+        // A fragment may name a section declared by an earlier source, so the
+        // temp schema starts with what is already there. Its elements start
+        // empty: duplicates are `extend`'s business, with both labels.
+        let mut one = Schema::new();
+        one.sections = schema.sections.clone();
+        parse_into(&mut one, text, &mut errors);
+        if let Err(duplicates) = schema.extend(one, label) {
+            errors.extend(duplicates);
+        }
+    }
+
+    check_references(&schema, &mut errors);
+    check_compositions(&schema, &mut errors);
+
+    if errors.is_empty() {
+        Ok(schema)
+    } else {
+        errors.sort_by_key(|e| e.span.start);
+        Err(errors)
+    }
+}
+
+impl Schema {
+    /// Add `other`'s sections, options and elements to this schema.
+    ///
+    /// A section already present is kept (a driver fragment reuses the core's
+    /// `devices` section); an option or element tag already present is a
+    /// conflict, refused with both sources named. `source` labels the elements
+    /// this call adds, so a later duplicate can say where the first one came
+    /// from.
+    pub fn extend(&mut self, other: Schema, source: &str) -> Result<(), Vec<SchemaError>> {
+        let mut errors = Vec::new();
+        for section in other.sections {
+            if self.section_named(&section.name).is_none() {
+                self.sections.push(section);
+            }
+        }
+        for option in other.options {
+            if self.get(&option.name).is_some() {
+                errors.push(err(
+                    option.span.clone(),
+                    format!("duplicate option `{}`", option.name),
+                    format!("`{source}` declares it too; each option is defined once"),
+                ));
+            } else {
+                self.options.push(option);
+            }
+        }
+        for mut element in other.elements {
+            if let Some(existing) = self.element(&element.tag) {
+                let first = existing.source.as_deref().unwrap_or("an earlier source");
+                errors.push(err(
+                    element.span.clone(),
+                    format!("duplicate tag `{}`: `{source}` and `{first}`", element.tag),
+                    format!(
+                        "`<{}>` is already declared by `{first}`; a driver tag has one source",
+                        element.tag
+                    ),
+                ));
+            } else {
+                element.source = Some(source.to_string());
+                self.elements.push(element);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
@@ -591,6 +1014,7 @@ fn parse_into(schema: &mut Schema, src: &str, errors: &mut Vec<SchemaError>) {
         match node.name().value() {
             "section" => parse_section(node, schema, errors),
             "element" => parse_element(node, schema, errors),
+            "driver" => driver::parse_driver(node, schema, errors),
             "required" | "options" => parse_options(node, schema, errors),
             other => errors.push(err(
                 node_range(node),
@@ -682,6 +1106,15 @@ fn parse_section(node: &KdlNode, schema: &mut Schema, errors: &mut Vec<SchemaErr
     });
 }
 
+/// `[a-z][a-z0-9_]*`: an interface name an element can provide.
+fn is_interface_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
 fn parse_element(node: &KdlNode, schema: &mut Schema, errors: &mut Vec<SchemaError>) {
     let span = node_range(node);
     let mut names = positional_strings(node, errors);
@@ -732,9 +1165,12 @@ fn parse_element(node: &KdlNode, schema: &mut Schema, errors: &mut Vec<SchemaErr
     let mut attrs = Vec::new();
     let mut examples = Vec::new();
     let mut see_also = Vec::new();
+    let mut provides = None;
     let mut recipe_node: Option<&KdlNode> = None;
     let mut device_recipe_node: Option<&KdlNode> = None;
     let mut service_recipe_node: Option<&KdlNode> = None;
+    let mut package_node: Option<&KdlNode> = None;
+    let mut expose_nodes: Vec<&KdlNode> = Vec::new();
     for child in children(node) {
         match child.name().value() {
             "summary" | "description" => {
@@ -790,6 +1226,36 @@ fn parse_element(node: &KdlNode, schema: &mut Schema, errors: &mut Vec<SchemaErr
                     service_recipe_node = Some(child);
                 }
             }
+            "crate" => {
+                if package_node.is_some() {
+                    errors.push(err(node_range(child), "`crate` given twice", "keep one"));
+                } else {
+                    package_node = Some(child);
+                }
+            }
+            "expose" => expose_nodes.push(child),
+            "provides" => {
+                let value = positional_strings(child, errors).into_iter().next();
+                if provides.is_some() {
+                    errors.push(err(node_range(child), "`provides` given twice", "keep one"));
+                } else if let Some((value, _)) = value {
+                    if is_interface_name(&value) {
+                        provides = Some(value);
+                    } else {
+                        errors.push(err(
+                            node_range(child),
+                            format!("`{value}` is not an interface name"),
+                            "write `provides \"network\"`: lowercase letters, digits and `_`",
+                        ));
+                    }
+                } else {
+                    errors.push(err(
+                        node_range(child),
+                        "`provides` takes a string",
+                        "write `provides \"network\"`",
+                    ));
+                }
+            }
             "example" => parse_example(child, &mut examples, errors),
             "see_also" => {
                 for (target, target_span) in positional_strings(child, errors) {
@@ -797,7 +1263,7 @@ fn parse_element(node: &KdlNode, schema: &mut Schema, errors: &mut Vec<SchemaErr
                         errors.push(err(
                             target_span,
                             format!("`{target}` is not a `section/leaf` target"),
-                            "write for example `components/i2c_component`",
+                            "write for example `devices/ssd1306`",
                         ));
                         continue;
                     }
@@ -807,8 +1273,8 @@ fn parse_element(node: &KdlNode, schema: &mut Schema, errors: &mut Vec<SchemaErr
             other => errors.push(err(
                 node_range(child),
                 format!("unknown node `{other}` in element `{tag}`"),
-                "expected summary, description, attr, recipe, device_recipe, service_recipe, \
-                 example or see_also",
+                "expected summary, description, attr, provides, recipe, device_recipe, \
+                 service_recipe, crate, expose, example or see_also",
             )),
         }
     }
@@ -821,6 +1287,38 @@ fn parse_element(node: &KdlNode, schema: &mut Schema, errors: &mut Vec<SchemaErr
         .and_then(|node| parse_device_recipe(node, &tag, &section_name, &attrs, errors));
     let service_recipe = service_recipe_node
         .and_then(|node| parse_service_recipe(node, &tag, &section_name, &attrs, errors));
+    let package = package_node.and_then(|node| parse_package(node, &tag, &section_name, errors));
+    let expose: Vec<Expose> = expose_nodes
+        .iter()
+        .filter_map(|node| parse_expose(node, errors))
+        .collect();
+    let mut dependencies: Vec<Dependency> = Vec::new();
+    if let Some(package) = &package {
+        dependencies.push(Dependency::from_package(package));
+    }
+    dependencies.extend(expose.iter().map(Dependency::from_expose));
+    if let Some(recipe) = &device_recipe {
+        for dep in &recipe.deps {
+            if !dependencies.iter().any(|known| &known.package == dep) {
+                dependencies.push(Dependency {
+                    package: dep.clone(),
+                    version: None,
+                    path: None,
+                    git: None,
+                    rev: None,
+                    features: Vec::new(),
+                    default_features: true,
+                });
+            }
+        }
+    }
+    if (package.is_some() || !expose.is_empty()) && device_recipe.is_none() {
+        errors.push(err(
+            span.clone(),
+            format!("`{tag}` names a crate but has no `device_recipe`"),
+            "an external driver is a `device_recipe`; a hand-written element lives in a crate",
+        ));
+    }
 
     if summary.is_none() {
         errors.push(err(
@@ -845,11 +1343,150 @@ fn parse_element(node: &KdlNode, schema: &mut Schema, errors: &mut Vec<SchemaErr
         attrs,
         examples,
         see_also,
+        provides,
         recipe,
         device_recipe,
         service_recipe,
+        package,
+        expose,
+        dependencies,
+        format: Format::V1,
+        source: None,
         span,
     });
+}
+
+/// Parse the `crate` block of an external driver element.
+///
+/// The block is data the generated `Cargo.toml` copies: a package name and
+/// exactly one source (`version`, `path`, or `git` + `rev`), plus features.
+/// Every rule that could produce an unbuildable dependency line is a load
+/// error here, with the offending node's span.
+fn parse_package(
+    node: &KdlNode,
+    tag: &str,
+    section: &str,
+    errors: &mut Vec<SchemaError>,
+) -> Option<PackageRef> {
+    let span = node_range(node);
+    if section != "devices" {
+        errors.push(err(
+            span,
+            "`crate` is for devices",
+            "only a `# devices` element can be an external driver package",
+        ));
+        return None;
+    }
+    let Some((package, _)) = child_string(node, "package", errors) else {
+        errors.push(err(
+            span.clone(),
+            format!("`crate` in `{tag}` has no `package`"),
+            "name the crate, e.g. `package \"espforge-driver-adxl345\"`",
+        ));
+        return None;
+    };
+    if package.is_empty()
+        || !package
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        errors.push(err(
+            span.clone(),
+            format!("`{package}` is not a crate name"),
+            "crate names use letters, digits, `-` and `_`",
+        ));
+        return None;
+    }
+    let version = child_string(node, "version", errors).map(|(value, _)| value);
+    let path = child_string(node, "path", errors).map(|(value, _)| value);
+    let git = child_string(node, "git", errors).map(|(value, _)| value);
+    let rev = child_string(node, "rev", errors).map(|(value, _)| value);
+
+    let chosen = [version.is_some(), path.is_some(), git.is_some()]
+        .into_iter()
+        .filter(|chosen| *chosen)
+        .count();
+    if chosen != 1 {
+        errors.push(err(
+            span.clone(),
+            format!("`crate` in `{tag}` names {chosen} sources"),
+            "write exactly one of `version`, `path` or `git`",
+        ));
+        return None;
+    }
+    if git.is_some() && rev.is_none() {
+        errors.push(err(
+            span.clone(),
+            format!("`crate` in `{tag}` names a `git` without a `rev`"),
+            "pin the revision, e.g. `rev \"<commit>\"`",
+        ));
+    }
+    if rev.is_some() && git.is_none() {
+        errors.push(err(
+            span.clone(),
+            format!("`crate` in `{tag}` names a `rev` without a `git`"),
+            "a revision pins a repository; add `git \"<url>\"` or drop `rev`",
+        ));
+    }
+    if path.as_ref().is_some_and(|path| path.is_empty()) {
+        errors.push(err(
+            span.clone(),
+            "`path` is empty",
+            "name the crate's directory",
+        ));
+    }
+
+    let mut features: Vec<String> = Vec::new();
+    for child in children(node) {
+        match child.name().value() {
+            "package" | "version" | "path" | "git" | "rev" => {}
+            "features" => features.extend(
+                positional_strings(child, errors)
+                    .into_iter()
+                    .map(|(feature, _)| feature),
+            ),
+            other => errors.push(err(
+                node_range(child),
+                format!("unknown node `{other}` in `crate` of `{tag}`"),
+                "expected package, version, path, git, rev or features",
+            )),
+        }
+    }
+
+    Some(PackageRef {
+        package,
+        version,
+        path,
+        git,
+        rev,
+        features,
+    })
+}
+
+/// Parse one `expose` block: a crate the driver's public API comes from.
+fn parse_expose(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<Expose> {
+    let span = node_range(node);
+    let mut names = positional_strings(node, errors);
+    if names.is_empty() {
+        errors.push(err(
+            span,
+            "`expose` has no crate",
+            "write `expose \"embedded-graphics\" { version \"0.8\" }`",
+        ));
+        return None;
+    }
+    let (package, _) = names.remove(0);
+    let version = child_string(node, "version", errors).map(|(value, _)| value);
+    for child in children(node) {
+        if child.name().value() != "version" {
+            errors.push(err(
+                node_range(child),
+                format!("unknown node `{}` in `expose`", child.name().value()),
+                "expected `version`",
+            ));
+        }
+    }
+    Some(Expose { package, version })
 }
 
 /// Parse and validate the `recipe` child of an element.
@@ -865,11 +1502,11 @@ fn parse_recipe(
 ) -> Option<Recipe> {
     let span = node_range(node);
 
-    // A recipe is only for components: a peripheral has no pin reference.
-    if section != "components" {
+    // A recipe is for a device: a peripheral has no pin reference.
+    if section != "devices" {
         errors.push(err(
             span,
-            "`recipe` is for components",
+            "`recipe` is for devices",
             "a peripheral with no pin reference needs an `Element`",
         ));
         return None;
@@ -962,17 +1599,17 @@ fn parse_recipe(
         None => codes::COMPONENT_INVALID,
     };
 
-    // A recipe component is an id, one pin reference and booleans; anything
-    // else needs a hand-written `Element`.
+    // A recipe device is an id, one pin reference (or a literal `pin=`
+    // number) and booleans; anything else needs a hand-written `Element`.
     for attr in attrs {
-        if attr.name == pin {
+        if attr.name == pin || matches!(attr.kind, AttrKind::Pin) {
             continue;
         }
         if !matches!(attr.kind, AttrKind::Ident | AttrKind::Bool) {
             errors.push(err(
                 attr.span.clone(),
                 format!("`{tag}.{}` is `{}`", attr.name, attr.kind.display()),
-                "a recipe component is an id, one pin reference and booleans; write an `Element`",
+                "a recipe device is an id, one pin reference and booleans; write an `Element`",
             ));
         }
     }
@@ -988,7 +1625,7 @@ fn parse_recipe(
 
 /// Whether `text` is `ident(::ident)*`: the shape of the runtime path a recipe
 /// splices into generated Rust.
-fn is_rust_path(text: &str) -> bool {
+pub(crate) fn is_rust_path(text: &str) -> bool {
     !text.is_empty()
         && text.split("::").all(|segment| {
             !segment.is_empty()
@@ -1032,7 +1669,7 @@ fn parse_device_recipe(
         errors.push(err(
             span,
             "`device_recipe` is for devices",
-            "only an element in `# devices` has a bus component to attach to",
+            "only an element in `# devices` has a bus to attach to",
         ));
         return None;
     }
@@ -1048,7 +1685,17 @@ fn parse_device_recipe(
         ));
     }
 
-    for name in ["bus", "feature", "kind", "type", "new", "taken"] {
+    for name in [
+        "bus",
+        "feature",
+        "kind",
+        "type",
+        "new",
+        "taken",
+        "endpoint",
+        "spi_config",
+        "cs_polarity",
+    ] {
         if children(node)
             .iter()
             .filter(|child| child.name().value() == name)
@@ -1067,47 +1714,34 @@ fn parse_device_recipe(
         errors.push(err(
             span.clone(),
             "`device_recipe` has no `bus`",
-            "name the element's `ref` attribute, e.g. `bus=\"i2c_component\"`",
+            "name the bus kind, e.g. `bus \"i2c\"`",
         ));
         return None;
     };
-    let expect = match attrs
-        .iter()
-        .find(|attr| attr.name == bus)
-        .map(|attr| &attr.kind)
-    {
-        Some(AttrKind::Ref { to }) => match to.first() {
-            Some(target) => target.clone(),
-            None => {
-                errors.push(err(
-                    bus_span.clone(),
-                    format!("`{tag}.{bus}` has no `to=`"),
-                    "a device's bus attribute names the component tag it accepts",
-                ));
-                return None;
-            }
-        },
+    if !matches!(bus.as_str(), "i2c" | "spi" | "uart") {
+        errors.push(err(
+            bus_span,
+            format!("`{bus}` is not a bus kind"),
+            "write `bus \"i2c\"`, `bus \"spi\"` or `bus \"uart\"`",
+        ));
+        return None;
+    }
+    // The element must expose that peripheral as a `bus` reference, so the
+    // recipe and the attributes cannot disagree about what it binds to.
+    match attrs.iter().find(|attr| attr.name == "bus") {
+        Some(AttrDef {
+            kind: AttrKind::Ref { to },
+            ..
+        }) if to.iter().any(|target| target == &bus) => {}
         _ => {
-            let refs: Vec<String> = attrs
-                .iter()
-                .filter(|attr| matches!(attr.kind, AttrKind::Ref { .. }))
-                .map(|attr| format!("`{}`", attr.name))
-                .collect();
             errors.push(err(
-                bus_span,
-                format!("`<{tag}>` has no ref attribute `{bus}`"),
-                format!(
-                    "`bus` must name one of: {}",
-                    if refs.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        refs.join(", ")
-                    }
-                ),
+                span.clone(),
+                format!("`<{tag}>` has no `bus` reference to `{bus}`"),
+                format!("write `attr \"bus\" kind=\"ref\" to=\"{bus}\" required=#true`"),
             ));
             return None;
         }
-    };
+    }
 
     let Some((feature, feature_span)) = child_string(node, "feature", errors) else {
         errors.push(err(
@@ -1156,13 +1790,69 @@ fn parse_device_recipe(
         return None;
     }
 
-    let takes_bus = children(node)
-        .iter()
-        .any(|child| child.name().value() == "takes_bus");
-
     let address = parse_needs_address(node, errors);
+    let (runtimes, async_mode) = parse_runtimes(node, errors);
+    let endpoint = parse_path_child(node, "endpoint", errors);
+    let spi_config = children(node)
+        .iter()
+        .any(|child| child.name().value() == "spi_config");
+    let cs_polarity = parse_cs_polarity(node, errors);
 
-    let taken = child_string(node, "taken", errors).map(|(taken, _)| taken);
+    // A per-device transfer configuration only makes sense on SPI, and the
+    // element must declare the two attributes the lowerer consumes.
+    if spi_config {
+        if bus != "spi" {
+            errors.push(err(
+                span.clone(),
+                format!("`{tag}` declares `spi_config` but binds to `{bus}`"),
+                "a per-device configuration belongs on an `spi` device",
+            ));
+        }
+        for name in ["mode", "frequency"] {
+            if !attrs.iter().any(|attr| attr.name == name) {
+                errors.push(err(
+                    span.clone(),
+                    format!("`{tag}` declares `spi_config` without a `{name}` attribute"),
+                    format!("write `attr \"{name}\" ...`, or drop `spi_config`"),
+                ));
+            }
+        }
+    }
+
+    // A polarity is a fact about the part's select line, so it is only legal
+    // where there is one.
+    if cs_polarity != CsPolarity::Low && bus != "spi" {
+        errors.push(err(
+            span.clone(),
+            format!("`{tag}` declares `cs_polarity` but binds to `{bus}`"),
+            "chip-select polarity belongs on an `spi` device",
+        ));
+    }
+
+    // A recipe that needs an address is only valid on an I2C device, and the
+    // element must declare the attribute the project fills in.
+    if !matches!(address, AddressNeed::None) {
+        if bus != "i2c" {
+            errors.push(err(
+                span.clone(),
+                format!("`{tag}` needs an I2C address but binds to `{bus}`"),
+                "a `needs_address` recipe belongs on an `i2c` device",
+            ));
+        }
+        if attrs
+            .iter()
+            .find(|attr| attr.name == "address")
+            .map(|attr| &attr.kind)
+            != Some(&AttrKind::Hex)
+        {
+            errors.push(err(
+                span.clone(),
+                format!("`<{tag}>` needs an `address` attribute"),
+                "write `attr \"address\" kind=\"hex\" required=#true`",
+            ));
+        }
+    }
+
     let mut deps: Vec<String> = Vec::new();
     for child in children(node) {
         if child.name().value() == "deps" {
@@ -1178,22 +1868,27 @@ fn parse_device_recipe(
     for child in children(node) {
         match child.name().value() {
             // The scalars were collected above, by name.
-            "bus" | "feature" | "kind" | "type" | "new" | "takes_bus" | "taken" | "deps"
-            | "needs_address" => {}
+            "bus" | "feature" | "kind" | "type" | "new" | "deps" | "needs_address" | "runtime"
+            | "endpoint" | "spi_config" | "cs_polarity" => {}
             "arg" => parse_device_arg(child, tag, attrs, &mut args, errors),
             other => errors.push(err(
                 node_range(child),
                 format!("unknown node `{other}` in `device_recipe` of `{tag}`"),
-                "expected bus, feature, kind, type, new, takes_bus, taken, deps, needs_address or \
-                 arg",
+                "expected bus, feature, kind, type, new, deps, needs_address, runtime, \
+                 endpoint, spi_config, cs_polarity or arg",
             )),
         }
     }
 
     // A slot per attribute, and no attribute without a slot: a device recipe
-    // that reads an attribute nowhere is a mistake, not a fixed value.
+    // that reads an attribute nowhere is a mistake, not a fixed value. `id`,
+    // `bus` and the wiring attributes (`address`, `cs`) are consumed by the
+    // lowerer itself, not by a constructor slot.
     for attr in attrs {
-        if attr.name == "id" || attr.name == bus {
+        if matches!(attr.name.as_str(), "id" | "bus" | "address" | "cs" | "init") {
+            continue;
+        }
+        if spi_config && matches!(attr.name.as_str(), "mode" | "frequency") {
             continue;
         }
         if !args.iter().any(|arg| arg.name == attr.name) {
@@ -1206,7 +1901,10 @@ fn parse_device_recipe(
     }
 
     // Every type placeholder names a slot the recipe fills.
-    for slot in slots(&ty) {
+    for slot in slots(&ty)
+        .into_iter()
+        .chain(async_mode.ty.as_deref().map(slots).unwrap_or_default())
+    {
         if !args.iter().any(|arg| arg.name == slot) {
             errors.push(err(
                 ty_span.clone(),
@@ -1218,18 +1916,175 @@ fn parse_device_recipe(
 
     Some(DeviceRecipe {
         bus,
-        expect,
         feature,
         kind,
         ty,
         new,
-        takes_bus,
-        taken,
         deps,
         args,
         address,
+        address_default: None,
+        address_allowed: None,
+        parts: Vec::new(),
+        runtimes,
+        async_mode,
+        endpoint,
+        spi_config,
+        cs_polarity,
         span,
     })
+}
+
+/// Parse the `runtime` children of a `device_recipe`.
+///
+/// `runtime "blocking"` and `runtime "async"` may appear together. No line
+/// means blocking (the shape every driver had before the attribute existed);
+/// an unknown or repeated value is a load error, so a typo cannot quietly
+/// narrow what a driver supports.
+fn parse_runtimes(node: &KdlNode, errors: &mut Vec<SchemaError>) -> (Runtimes, AsyncMode) {
+    let mut runtimes = Runtimes {
+        blocking: false,
+        asynchronous: false,
+    };
+    let mut mode = AsyncMode::default();
+    let mut seen = false;
+    for child in children(node) {
+        if child.name().value() != "runtime" {
+            continue;
+        }
+        seen = true;
+        let Some(value) = child.get(0).and_then(|value| value.as_string()) else {
+            errors.push(err(
+                node_range(child),
+                "`runtime` needs a value",
+                "write `runtime \"blocking\"` or `runtime \"async\"`",
+            ));
+            continue;
+        };
+        match value {
+            "blocking" => {
+                if runtimes.blocking {
+                    errors.push(err(
+                        node_range(child),
+                        "`runtime \"blocking\"` given twice",
+                        "keep one line per mode",
+                    ));
+                } else {
+                    runtimes.blocking = true;
+                }
+                if !children(child).is_empty() {
+                    errors.push(err(
+                        node_range(child),
+                        "`runtime \"blocking\"` takes no block",
+                        "the per-mode `type`/`new` block belongs on `runtime \"async\"`",
+                    ));
+                }
+            }
+            "async" => {
+                if runtimes.asynchronous {
+                    errors.push(err(
+                        node_range(child),
+                        "`runtime \"async\"` given twice",
+                        "keep one line per mode",
+                    ));
+                } else {
+                    runtimes.asynchronous = true;
+                }
+                for entry in children(child) {
+                    let name = entry.name().value();
+                    if !matches!(name, "type" | "new" | "feature" | "endpoint") {
+                        errors.push(err(
+                            node_range(entry),
+                            format!("unknown node `{name}` in `runtime \"async\"`"),
+                            "expected type, new, feature or endpoint",
+                        ));
+                        continue;
+                    }
+                    let Some((text, span)) = child_string(child, name, errors) else {
+                        continue;
+                    };
+                    if matches!(name, "new" | "endpoint") && !is_rust_path(&text) {
+                        errors.push(err(
+                            span,
+                            format!("`{name}` must be a Rust path"),
+                            "segments are identifiers separated by `::`",
+                        ));
+                        continue;
+                    }
+                    if name == "feature" && text.is_empty() {
+                        errors.push(err(span, "`feature` is empty", "name the async feature"));
+                        continue;
+                    }
+                    let slot = match name {
+                        "type" => &mut mode.ty,
+                        "new" => &mut mode.new,
+                        "feature" => &mut mode.feature,
+                        _ => &mut mode.endpoint,
+                    };
+                    if slot.is_some() {
+                        errors.push(err(
+                            span,
+                            format!("`{name}` given twice in `runtime \"async\"`"),
+                            "keep one",
+                        ));
+                    } else {
+                        *slot = Some(text);
+                    }
+                }
+                if mode.ty.is_none() || mode.new.is_none() {
+                    errors.push(err(
+                        node_range(child),
+                        "`runtime \"async\"` needs `type` and `new`",
+                        "name both the async field type and its constructor",
+                    ));
+                }
+            }
+            other => errors.push(err(
+                node_range(child),
+                format!("`{other}` is not a bus mode"),
+                "write `runtime \"blocking\"` or `runtime \"async\"`",
+            )),
+        }
+    }
+    if seen {
+        (runtimes, mode)
+    } else {
+        (Runtimes::blocking(), mode)
+    }
+}
+
+/// The first positional string of the optional child `name`, validated as a
+/// Rust path when present.
+fn parse_path_child(node: &KdlNode, name: &str, errors: &mut Vec<SchemaError>) -> Option<String> {
+    let (text, span) = child_string(node, name, errors)?;
+    if !is_rust_path(&text) {
+        errors.push(err(
+            span,
+            format!("`{name}` must be a Rust path"),
+            "segments are identifiers separated by `::`",
+        ));
+        return None;
+    }
+    Some(text)
+}
+
+/// The optional `cs_polarity` child: `"low"` (the default) or `"high"`.
+fn parse_cs_polarity(node: &KdlNode, errors: &mut Vec<SchemaError>) -> CsPolarity {
+    let Some((text, span)) = child_string(node, "cs_polarity", errors) else {
+        return CsPolarity::Low;
+    };
+    match text.as_str() {
+        "low" => CsPolarity::Low,
+        "high" => CsPolarity::High,
+        other => {
+            errors.push(err(
+                span,
+                format!("`{other}` is not a chip-select polarity"),
+                "write `cs_polarity \"low\"` or `cs_polarity \"high\"`",
+            ));
+            CsPolarity::Low
+        }
+    }
 }
 
 /// Parse the `needs_address` child of a `device_recipe`, which is optional.
@@ -1283,7 +2138,7 @@ fn parse_needs_address(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Address
 }
 
 /// A `0x..` or decimal byte.
-fn hex_byte(text: &str) -> Option<u8> {
+pub(crate) fn hex_byte(text: &str) -> Option<u8> {
     match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
         Some(hex) => u8::from_str_radix(hex, 16).ok(),
         None => text.parse().ok(),
@@ -1293,7 +2148,7 @@ fn hex_byte(text: &str) -> Option<u8> {
 /// The first positional string of the child node `name`, with its span.
 ///
 /// A missing child is `None`; a child with no string is a schema error.
-fn child_string(
+pub(crate) fn child_string(
     node: &KdlNode,
     name: &str,
     errors: &mut Vec<SchemaError>,
@@ -1372,18 +2227,19 @@ fn parse_device_arg(
 
     let direction = match prop(node, "direction", errors) {
         Some((direction, direction_span)) => match direction.as_str() {
-            "input" => Direction::Input,
-            "output" => Direction::Output,
+            "input" => PinDirection::Input,
+            "output" => PinDirection::Output,
+            "bidirectional" => PinDirection::Bidirectional,
             other => {
                 errors.push(err(
                     direction_span,
-                    "`direction` must be `input` or `output`",
-                    format!("`{other}` is neither"),
+                    "`direction` must be `input`, `output` or `bidirectional`",
+                    format!("`{other}` is none of them"),
                 ));
-                Direction::Output
+                PinDirection::Output
             }
         },
-        None => Direction::Output,
+        None => PinDirection::Output,
     };
 
     match (&pin, map.is_empty()) {
@@ -1467,8 +2323,8 @@ fn parse_device_arg(
 
 /// Parse and validate the `service_recipe` child of a `# services` element.
 ///
-/// A service is software over a network component, so the recipe names that
-/// component's attribute, the runtime feature, the field type and constructor,
+/// A service is software over a network provider, so the recipe names that
+/// provider's attribute, the runtime feature, the field type and constructor,
 /// and one `field` or `arg` per remaining attribute. Every rule is checked
 /// here, with the offending node's span, so a bad recipe is a load error.
 fn parse_service_recipe(
@@ -1484,7 +2340,7 @@ fn parse_service_recipe(
         errors.push(err(
             span,
             "`service_recipe` is for services",
-            "only an element in `# services` rides on a network component",
+            "only an element in `# services` rides on a network provider",
         ));
         return None;
     }
@@ -1505,6 +2361,7 @@ fn parse_service_recipe(
         "feature",
         "type",
         "new",
+        "storage",
         "config",
         "heap_bytes",
         "requires_embassy",
@@ -1594,6 +2451,21 @@ fn parse_service_recipe(
         return None;
     }
 
+    let storage = match child_string(node, "storage", errors) {
+        Some((storage, storage_span)) => {
+            if !is_rust_path(&storage) {
+                errors.push(err(
+                    storage_span,
+                    "`storage` must be a Rust path such as `espforge_runtime::HttpClientStorage`",
+                    "segments are identifiers separated by `::`",
+                ));
+                return None;
+            }
+            Some(storage)
+        }
+        None => None,
+    };
+
     let config = match child_string(node, "config", errors) {
         Some((config, config_span)) => {
             if !is_rust_path(&config) {
@@ -1634,7 +2506,7 @@ fn parse_service_recipe(
     for child in children(node) {
         match child.name().value() {
             // The scalars were collected above, by name.
-            "network" | "feature" | "type" | "new" | "config" | "heap_bytes"
+            "network" | "feature" | "type" | "new" | "storage" | "config" | "heap_bytes"
             | "requires_embassy" => {}
             "field" => parse_service_field(child, tag, attrs, &mut fields, errors),
             "arg" => {
@@ -1667,10 +2539,21 @@ fn parse_service_recipe(
             other => errors.push(err(
                 node_range(child),
                 format!("unknown node `{other}` in `service_recipe` of `{tag}`"),
-                "expected network, feature, type, new, config, heap_bytes, requires_embassy, \
-                 field or arg",
+                "expected network, feature, type, new, storage, config, heap_bytes, \
+                 requires_embassy, field or arg",
             )),
         }
+    }
+
+    // One `const` field per recipe: it names the `::<value>` the recipe's
+    // types take, so a second one would have nowhere to go.
+    let consts: Vec<&ServiceField> = fields.iter().filter(|field| field.is_const).collect();
+    for field in consts.iter().skip(1) {
+        errors.push(err(
+            field.span.clone(),
+            "more than one `const` field",
+            "a recipe parameterizes its Rust types with one value",
+        ));
     }
 
     // A slot per attribute, and no attribute without a slot: a service recipe
@@ -1679,9 +2562,7 @@ fn parse_service_recipe(
         if attr.name == "id" || attr.name == network {
             continue;
         }
-        if !fields.iter().any(|field| field.name == attr.name)
-            && !args.iter().any(|arg| *arg == attr.name)
-        {
+        if !fields.iter().any(|field| field.name == attr.name) && !args.contains(&attr.name) {
             errors.push(err(
                 attr.span.clone(),
                 format!(
@@ -1698,6 +2579,7 @@ fn parse_service_recipe(
         feature,
         ty,
         new,
+        storage,
         config,
         heap_bytes,
         requires_embassy,
@@ -1756,6 +2638,38 @@ fn parse_service_field(
         None => None,
     };
     let non_empty = prop_flag(node, "non_empty");
+    let is_const = prop_flag(node, "const");
+
+    if is_const {
+        let declared = attrs
+            .iter()
+            .find(|attr| attr.name == name)
+            .expect("the attribute was found above");
+        if expr.is_some() {
+            errors.push(err(
+                span.clone(),
+                format!("`const` field `{name}` has an `as=`"),
+                "a `const` value is not written into the config, so it has no expression",
+            ));
+        }
+        if declared.kind != AttrKind::U32 {
+            errors.push(err(
+                span.clone(),
+                format!(
+                    "`const` needs a `u32` attribute, but `{tag}.{name}` is {}",
+                    declared.kind.display()
+                ),
+                "declare the attribute `kind=\"u32\"`",
+            ));
+        }
+        if declared.default.is_none() {
+            errors.push(err(
+                span.clone(),
+                format!("`const` field `{name}` needs a `default`"),
+                "a project that omits the attribute still needs a value",
+            ));
+        }
+    }
 
     for child in children(node) {
         errors.push(err(
@@ -1764,7 +2678,8 @@ fn parse_service_field(
                 "unknown node `{}` in `field` `{name}`",
                 child.name().value()
             ),
-            "a `field` is a name plus `as=`, `min=`, `range=` and `non_empty=` properties",
+            "a `field` is a name plus `as=`, `min=`, `range=`, `non_empty=` and \
+             `const=` properties",
         ));
     }
 
@@ -1774,6 +2689,7 @@ fn parse_service_field(
         min,
         range,
         non_empty,
+        is_const,
         span,
     });
 }
@@ -1862,7 +2778,12 @@ fn positional_u32(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<u32> 
 }
 
 /// A bare or `#true`/`#false` child flag, defaulting to `default` when absent.
-fn child_flag(node: &KdlNode, name: &str, default: bool, errors: &mut Vec<SchemaError>) -> bool {
+pub(crate) fn child_flag(
+    node: &KdlNode,
+    name: &str,
+    default: bool,
+    errors: &mut Vec<SchemaError>,
+) -> bool {
     let Some(child) = children(node)
         .iter()
         .find(|child| child.name().value() == name)
@@ -1889,7 +2810,11 @@ fn child_flag(node: &KdlNode, name: &str, default: bool, errors: &mut Vec<Schema
     }
 }
 
-fn parse_example(node: &KdlNode, examples: &mut Vec<Example>, errors: &mut Vec<SchemaError>) {
+pub(crate) fn parse_example(
+    node: &KdlNode,
+    examples: &mut Vec<Example>,
+    errors: &mut Vec<SchemaError>,
+) {
     let strings = positional_strings(node, errors);
     if strings.len() != 2 {
         if strings.len() == 1 {
@@ -1916,7 +2841,7 @@ fn parse_example(node: &KdlNode, examples: &mut Vec<Example>, errors: &mut Vec<S
     });
 }
 
-fn parse_attr(node: &KdlNode, attrs: &mut Vec<AttrDef>, errors: &mut Vec<SchemaError>) {
+pub(crate) fn parse_attr(node: &KdlNode, attrs: &mut Vec<AttrDef>, errors: &mut Vec<SchemaError>) {
     let span = node_range(node);
     let mut names = positional_strings(node, errors);
     if names.is_empty() {
@@ -2019,7 +2944,7 @@ fn parse_attr(node: &KdlNode, attrs: &mut Vec<AttrDef>, errors: &mut Vec<SchemaE
 }
 
 /// Parse a `range="0..=3"` property into its inclusive bounds.
-fn parse_range(text: &str) -> Option<(u32, u32)> {
+pub(crate) fn parse_range(text: &str) -> Option<(u32, u32)> {
     let (low, high) = text.split_once("..=")?;
     Some((low.trim().parse().ok()?, high.trim().parse().ok()?))
 }
@@ -2321,11 +3246,19 @@ fn check_references(schema: &Schema, errors: &mut Vec<SchemaError>) {
         for attr in &element.attrs {
             if let AttrKind::Ref { to } = &attr.kind {
                 for target in to {
-                    if schema.element(target).is_none() {
+                    let known = schema.element(target).is_some()
+                        || schema
+                            .elements
+                            .iter()
+                            .any(|element| element.provides.as_deref() == Some(target.as_str()));
+                    if !known {
                         errors.push(err(
                             attr.span.clone(),
-                            format!("`{}` refers to unknown element `{target}`", attr.name),
-                            "`to=` must name an element defined in this file",
+                            format!(
+                                "`{}` refers to unknown element or interface `{target}`",
+                                attr.name
+                            ),
+                            "`to=` must name an element in this file, or an interface one provides",
                         ));
                     }
                 }
@@ -2346,14 +3279,113 @@ fn check_references(schema: &Schema, errors: &mut Vec<SchemaError>) {
     }
 }
 
+/// Check `compose` blocks after every node is known.
+///
+/// A part is a driver on the composite's bus, mapped attribute by attribute.
+/// The expansion is one level deep, so a part's pin mapping always names a
+/// name the spec element writes.
+fn check_compositions(schema: &Schema, errors: &mut Vec<SchemaError>) {
+    for element in &schema.elements {
+        let Some(recipe) = &element.device_recipe else {
+            continue;
+        };
+        for part in &recipe.parts {
+            let Some(part_element) = schema.element(&part.tag) else {
+                errors.push(err(
+                    part.span.clone(),
+                    format!("`compose` names unknown driver `{}`", part.tag),
+                    "`compose` names a `driver` declared in this schema or a project manifest",
+                ));
+                continue;
+            };
+            let Some(part_recipe) = &part_element.device_recipe else {
+                errors.push(err(
+                    part.span.clone(),
+                    format!("`<{}>` is not a driver", part.tag),
+                    "`compose` builds a device, so the tag must declare a device recipe",
+                ));
+                continue;
+            };
+            if part_recipe.bus != recipe.bus {
+                errors.push(err(
+                    part.span.clone(),
+                    format!(
+                        "`<{}>` drives an <{}> bus, but `{}` composes it on <{}>",
+                        part.tag, part_recipe.bus, element.tag, recipe.bus
+                    ),
+                    "a part rides the composite's bus; a part on another bus is a separate element",
+                ));
+                continue;
+            }
+            if let Some(inner) = part_recipe.parts.first() {
+                errors.push(err(
+                    part.span.clone(),
+                    format!(
+                        "`<{}>` composes `<{}>` too, so `{}` would nest two levels",
+                        part.tag, inner.tag, element.tag
+                    ),
+                    "a composed driver must not compose: the pin mapping would name a name the \
+                     spec does not write",
+                ));
+                continue;
+            }
+
+            for attr in &part.attrs {
+                if !part_element
+                    .attrs
+                    .iter()
+                    .any(|known| known.name == attr.name)
+                {
+                    let known: Vec<&str> = part_element
+                        .attrs
+                        .iter()
+                        .map(|known| known.name.as_str())
+                        .collect();
+                    errors.push(err(
+                        attr.span.clone(),
+                        format!("`<{}>` has no attribute `{}`", part.tag, attr.name),
+                        format!("the part declares: {}", known.join(", ")),
+                    ));
+                    continue;
+                }
+                if let PartSource::From(name) = &attr.source
+                    && !element.attrs.iter().any(|known| known.name == *name)
+                {
+                    errors.push(err(
+                        attr.span.clone(),
+                        format!("`{name}` is not an attribute of `{}`", element.tag),
+                        "`from=` names one of the composite's own `attr`s or `pin`s",
+                    ));
+                }
+            }
+
+            for attr in &part_element.attrs {
+                if !attr.required || matches!(attr.name.as_str(), "id" | "bus") {
+                    continue;
+                }
+                if !part.attrs.iter().any(|mapped| mapped.name == attr.name) {
+                    errors.push(err(
+                        part.span.clone(),
+                        format!("`compose \"{}\"` does not fill `{}`", part.tag, attr.name),
+                        format!(
+                            "`<{}>` requires `{}`, and the part declares no default for it",
+                            part.tag, attr.name
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const SAMPLE: &str = r##"
-section "components" {
+section "devices" {
     summary "How a peripheral is used"
-    description "A component binds a peripheral to a purpose."
+    description "A device binds a peripheral to a purpose."
 }
 section "peripherals" {
     summary "The chip's hardware blocks"
@@ -2365,7 +3397,7 @@ element "gpio" section="peripherals" {
     attr "pin" kind="pin" required=#true
     example "minimal" #"<gpio id="gpio4" pin="4" />"#
 }
-element "led" section="components" {
+element "led" section="devices" {
     summary "An LED on a GPIO output"
     attr "id" kind="ident" required=#true
     attr "gpio" kind="ref" to="gpio" required=#true
@@ -2385,7 +3417,7 @@ options {
         assert_eq!(schema.sections.len(), 2);
         assert_eq!(schema.elements.len(), 2);
         let led = schema.element("led").unwrap();
-        assert_eq!(led.section, "components");
+        assert_eq!(led.section, "devices");
         assert_eq!(led.examples[0].title, "minimal");
         assert_eq!(led.see_also, ["peripherals/gpio"]);
         let gpio = schema.element("gpio").unwrap();
@@ -2405,20 +3437,13 @@ options {
     #[test]
     fn the_embedded_schema_loads_and_has_the_phase_one_vocabulary() {
         let schema = schema();
-        for section in [
-            "espforge",
-            "peripherals",
-            "components",
-            "devices",
-            "services",
-        ] {
+        for section in ["espforge", "peripherals", "devices", "services"] {
             assert!(schema.section_named(section).is_some(), "{section}");
         }
         // The `# devices` elements live beside the drivers that implement
         // them (`espforge-drivers/drivers.schema.kdl`), so this file is the
-        // core vocabulary only: 21 elements. The section stays, because a
-        // composed schema's devices refer to it.
-        assert_eq!(schema.elements.len(), 21);
+        // core vocabulary only: 18 elements.
+        assert_eq!(schema.elements.len(), 18);
         for tag in [
             "project",
             "chip",
@@ -2432,9 +3457,6 @@ options {
             "wifi",
             "led",
             "button",
-            "i2c_component",
-            "spi_component",
-            "uart_component",
             "wifi_station",
             "http_client",
             "https_client",
@@ -2444,11 +3466,21 @@ options {
         ] {
             assert!(schema.element(tag).is_some(), "{tag}");
         }
-        // Five peripherals, six components and the five network services.
         assert_eq!(schema.elements_in("peripherals").count(), 5);
-        assert_eq!(schema.elements_in("components").count(), 6);
-        assert_eq!(schema.elements_in("devices").count(), 0);
-        assert_eq!(schema.elements_in("services").count(), 5);
+        assert_eq!(schema.elements_in("devices").count(), 2);
+        assert_eq!(schema.elements_in("services").count(), 6);
+
+        // A provider declares the interface; a client names it, not a tag.
+        let station = schema.element("wifi_station").unwrap();
+        assert_eq!(station.provides.as_deref(), Some("network"));
+        let http = schema.element("http_client").unwrap();
+        let network = http.attrs.iter().find(|a| a.name == "network").unwrap();
+        assert_eq!(
+            network.kind,
+            AttrKind::Ref {
+                to: vec!["network".into()]
+            }
+        );
 
         let gpio = schema.element("gpio").unwrap();
         assert_eq!(gpio.section, "peripherals");
@@ -2459,11 +3491,15 @@ options {
         assert!(!gpio.attrs[2].required);
         assert_eq!(
             gpio.attrs[2].kind,
-            AttrKind::Choice(vec!["output".into(), "input".into()])
+            AttrKind::Choice(vec![
+                "output".into(),
+                "input".into(),
+                "bidirectional".into()
+            ])
         );
 
         let led = schema.element("led").unwrap();
-        assert_eq!(led.section, "components");
+        assert_eq!(led.section, "devices");
         assert_eq!(led.see_also, ["peripherals/gpio"]);
         let gpio_attr = led.attrs.iter().find(|a| a.name == "gpio").unwrap();
         assert_eq!(
@@ -2472,10 +3508,14 @@ options {
                 to: vec!["gpio".into()]
             }
         );
-        assert!(gpio_attr.required);
+        // `pin="18"` stands alone, so neither pin named is required.
+        assert!(!gpio_attr.required);
+        let pin_attr = led.attrs.iter().find(|a| a.name == "pin").unwrap();
+        assert_eq!(pin_attr.kind, AttrKind::Pin);
+        assert!(!pin_attr.required);
 
         let button = schema.element("button").unwrap();
-        assert_eq!(button.section, "components");
+        assert_eq!(button.section, "devices");
         assert_eq!(button.see_also, ["peripherals/gpio"]);
         let button_gpio = button.attrs.iter().find(|a| a.name == "gpio").unwrap();
         assert_eq!(
@@ -2484,7 +3524,7 @@ options {
                 to: vec!["gpio".into()]
             }
         );
-        assert!(button_gpio.required);
+        assert!(!button_gpio.required);
         let pull_up = button.attrs.iter().find(|a| a.name == "pull_up").unwrap();
         assert_eq!(pull_up.kind, AttrKind::Bool);
         assert!(!pull_up.required);
@@ -2591,9 +3631,7 @@ element "spi" section="peripherals" {{
             if fragment.trim_start().starts_with('#') {
                 fragment.to_string()
             } else {
-                format!(
-                    "# espforge\n{fragment}\n# peripherals\n# components\n# devices\n# services\n"
-                )
+                format!("# espforge\n{fragment}\n# peripherals\n# devices\n# services\n")
             }
         }
 
@@ -2635,7 +3673,7 @@ element "led" section="peripherals" {
         assert!(
             messages
                 .iter()
-                .any(|m| m.contains("unknown element `gpio`")),
+                .any(|m| m.contains("unknown element or interface `gpio`")),
             "{messages:?}"
         );
         assert!(
@@ -2647,12 +3685,12 @@ element "led" section="peripherals" {
     #[test]
     fn reserved_names_and_missing_summaries_are_errors() {
         let src = r##"
-section "components" { summary "s"; description "d" }
-element "help" section="components" {
+section "devices" { summary "s"; description "d" }
+element "help" section="devices" {
     summary "s"
     example "e" #"<help />"#
 }
-element "bare" section="components" {
+element "bare" section="devices" {
     attr "id" kind="ident"
 }
 "##;
@@ -2675,8 +3713,8 @@ element "bare" section="components" {
     #[test]
     fn see_also_must_name_an_existing_element() {
         let src = r##"
-section "components" { summary "s"; description "d" }
-element "led" section="components" {
+section "devices" { summary "s"; description "d" }
+element "led" section="devices" {
     summary "An LED"
     example "e" #"<led id="l" />"#
     see_also "peripherals/nope"
@@ -2686,17 +3724,17 @@ element "led" section="components" {
         assert!(errors[0].message.contains("names no element"), "{errors:?}");
     }
 
-    /// A schema with one peripheral and one recipe component over it.
+    /// A schema with one peripheral and one recipe device over it.
     const RECIPE: &str = r##"
 section "peripherals" { summary "s"; description "d" }
-section "components" { summary "s"; description "d" }
+section "devices" { summary "s"; description "d" }
 element "gpio" section="peripherals" {
     summary "A pin"
     attr "id" kind="ident" required=#true
     attr "pin" kind="pin" required=#true
     example "minimal" #"<gpio id="g" pin="4" />"#
 }
-element "led" section="components" {
+element "led" section="devices" {
     summary "An LED"
     recipe pin="gpio" direction="output" runtime="espforge_runtime::Led" invalid="E0601"
     attr "id" kind="ident" required=#true
@@ -2711,6 +3749,95 @@ element "led" section="components" {
         let errors = load(src).unwrap_err();
         assert_eq!(errors.len(), 1, "{errors:?}");
         errors[0].message.clone()
+    }
+
+    /// A provider and a client whose slot count is a `const` field.
+    const SERVICE_RECIPE: &str = r##"
+section "services" { summary "s"; description "d" }
+element "station" section="services" {
+    summary "A provider"
+    provides "network"
+    attr "id" kind="ident" required=#true
+    example "minimal" #"<station id="home" />"#
+}
+element "client" section="services" {
+    summary "A client"
+    attr "id" kind="ident" required=#true
+    attr "network" kind="ref" to="network" required=#true
+    attr "connections" kind="u32" default="1"
+    service_recipe {
+        network "network"
+        feature "http-client"
+        type "espforge_runtime::HttpClient"
+        new "espforge_runtime::HttpClient::new_in"
+        storage "espforge_runtime::HttpClientStorage"
+        config "espforge_runtime::HttpClientConfig"
+        field "connections" const=#true range="1..=4"
+    }
+    example "minimal" #"<client id="c" network="$home" />"#
+}
+"##;
+
+    #[test]
+    fn a_const_field_parameterizes_the_recipe() {
+        let schema = load(SERVICE_RECIPE).unwrap();
+        let recipe = schema
+            .element("client")
+            .unwrap()
+            .service_recipe
+            .as_ref()
+            .unwrap();
+        assert_eq!(recipe.fields.len(), 1);
+        assert!(recipe.fields[0].is_const);
+        assert_eq!(recipe.fields[0].range, Some((1, 4)));
+        assert_eq!(
+            recipe.storage.as_deref(),
+            Some("espforge_runtime::HttpClientStorage")
+        );
+    }
+
+    #[test]
+    fn a_const_field_needs_a_u32_attribute_with_a_default_and_no_expression() {
+        let src = SERVICE_RECIPE.replace(
+            "attr \"connections\" kind=\"u32\" default=\"1\"",
+            "attr \"connections\" kind=\"str\" default=\"1\"",
+        );
+        assert_eq!(
+            only_message(&src),
+            "`const` needs a `u32` attribute, but `client.connections` is string"
+        );
+
+        let src = SERVICE_RECIPE.replace(
+            "attr \"connections\" kind=\"u32\" default=\"1\"",
+            "attr \"connections\" kind=\"u32\"",
+        );
+        assert_eq!(
+            only_message(&src),
+            "`const` field `connections` needs a `default`"
+        );
+
+        let src = SERVICE_RECIPE.replace(
+            "field \"connections\" const=#true",
+            "field \"connections\" const=#true as=\"connections\"",
+        );
+        assert_eq!(
+            only_message(&src),
+            "`const` field `connections` has an `as=`"
+        );
+    }
+
+    #[test]
+    fn a_recipe_has_one_const_field() {
+        let src = SERVICE_RECIPE
+            .replace(
+                "    attr \"connections\" kind=\"u32\" default=\"1\"\n",
+                "    attr \"connections\" kind=\"u32\" default=\"1\"\n    attr \"slots\" kind=\"u32\" default=\"1\"\n",
+            )
+            .replace(
+                "        field \"connections\" const=#true range=\"1..=4\"\n",
+                "        field \"connections\" const=#true range=\"1..=4\"\n        field \"slots\" const=#true\n",
+            );
+        assert_eq!(only_message(&src), "more than one `const` field");
     }
 
     #[test]
@@ -2736,10 +3863,10 @@ element "led" section="components" {
     }
 
     #[test]
-    fn a_recipe_outside_components_is_refused() {
+    fn a_recipe_outside_devices_is_refused() {
         let src = r##"
 section "peripherals" { summary "s"; description "d" }
-section "components" { summary "s"; description "d" }
+section "devices" { summary "s"; description "d" }
 element "gpio" section="peripherals" {
     summary "A pin"
     recipe pin="pin" direction="output" runtime="espforge_runtime::Led"
@@ -2748,7 +3875,7 @@ element "gpio" section="peripherals" {
     example "minimal" #"<gpio id="g" pin="4" />"#
 }
 "##;
-        assert_eq!(only_message(src), "`recipe` is for components");
+        assert_eq!(only_message(src), "`recipe` is for devices");
     }
 
     #[test]
@@ -2818,20 +3945,19 @@ element "gpio" section="peripherals" {
         assert_eq!(only_message(&src), "`recipe` given twice");
     }
 
-    /// A schema with one bus component and one device over it.
+    /// A schema with one I2C peripheral and one device bound to it.
     const DEVICE_RECIPE: &str = r##"
-section "components" { summary "s"; description "d" }
+section "peripherals" { summary "s"; description "d" }
 section "devices" { summary "s"; description "d" }
-element "i2c_component" section="components" {
-    summary "An address on a bus"
+element "i2c" section="peripherals" {
+    summary "An I2C bus"
     attr "id" kind="ident" required=#true
-    attr "address" kind="hex"
-    example "minimal" #"<i2c_component id="bus" address="0x3C" />"#
+    example "minimal" #"<i2c id="i2c0" />"#
 }
 element "sensor" section="devices" {
     summary "A sensor"
     device_recipe {
-        bus "i2c_component"
+        bus "i2c"
         feature "sensor"
         kind "sensor"
         type "espforge_drivers::Sensor"
@@ -2839,8 +3965,9 @@ element "sensor" section="devices" {
         needs_address "0x62"
     }
     attr "id" kind="ident" required=#true
-    attr "i2c_component" kind="ref" to="i2c_component" required=#true
-    example "minimal" #"<sensor id="air" i2c_component="$bus" />"#
+    attr "bus" kind="ref" to="i2c" required=#true
+    attr "address" kind="hex" required=#true
+    example "minimal" #"<sensor id="air" bus="$i2c0" address="0x62" />"#
 }
 "##;
 

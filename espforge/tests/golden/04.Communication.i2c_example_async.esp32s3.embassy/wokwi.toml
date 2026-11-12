@@ -5,5 +5,5 @@ elf = "target/xtensa-esp32s3-none-elf/debug/i2c_example_async"
 firmware = "target/xtensa-esp32s3-none-elf/debug/i2c_example_async"
 
 [[chip]]
-name = 'chip'
+name = 'i2cexampleasync'
 binary = 'chip.wasm'

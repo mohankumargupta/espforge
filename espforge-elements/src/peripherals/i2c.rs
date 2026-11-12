@@ -9,7 +9,7 @@ use espforge_diagnostics::codes;
 use linkme::distributed_slice;
 
 use crate::attrs::Issue;
-use crate::element::{Element, LowerCx, Reported};
+use crate::element::{Element, LowerCx, Reported, Section};
 use crate::generated::i2c::Attrs;
 use crate::model::{Bus, Owner, OwnerKind, Pin, PinUse};
 use crate::peripherals::parse_khz;
@@ -22,13 +22,13 @@ pub struct I2c;
 static I2C: &dyn Element = &I2c;
 
 impl Element for I2c {
-    fn tag(&self) -> &'static str {
+    fn tag(&self) -> &str {
         "i2c"
     }
 
-    fn lower(&self, node: &ParsedNode<'_>, cx: &mut LowerCx) -> Result<(), Reported> {
+    fn lower(&self, node: &ParsedNode<'_>, cx: &mut LowerCx<'_>) -> Result<(), Reported> {
         let attrs = Attrs::from_node(node).map_err(|issue| describe(cx, node, issue))?;
-        let id = cx.ident(node);
+        let id = cx.checked_ident(node, Section::Peripherals)?;
 
         let peripheral = match id.raw.as_str() {
             "i2c0" | "i2c1" | "i2c2" => id.raw.to_ascii_uppercase(),
@@ -68,17 +68,17 @@ impl Element for I2c {
 }
 
 fn claim_bus_pin(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     pin: u8,
     owner: Owner,
     span: std::ops::Range<usize>,
 ) -> Result<crate::model::ClaimedPin, Reported> {
     cx.claim_pin(Pin(pin), owner, span, PinUse::Bidirectional)
-        .map_err(|conflict| cx.report_conflict(&conflict))
+        .map_err(|refusal| refusal.report(cx))
 }
 
 /// This element's wording for a schema-level problem.
-fn describe(cx: &mut LowerCx, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
+fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
     let id = node.id;
     match issue {
         Issue::Missing { attr } | Issue::Invalid { attr, .. } => cx.report(

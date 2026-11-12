@@ -64,3 +64,8 @@ tag version:
 cratesio:
     cargo ws publish --from-git  --no-verify --allow-dirty --publish-interval 120
 
+
+# Compile the ignored compile-fail harness (riscv; runs in the release gate)
+test-compile-fail:
+    @echo "==> [compile-fail] Mutating and compiling the two guard cases..."
+    cargo test -p espforge --test compile_fail -- --ignored

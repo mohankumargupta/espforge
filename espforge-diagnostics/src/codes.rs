@@ -28,6 +28,8 @@ codes! {
     STRUCTURE_DUPLICATE_SECTION = "E0103";
     /// A required `# section` block is absent.
     STRUCTURE_MISSING_SECTION = "E0104";
+    /// A section outside the four-section grammar.
+    STRUCTURE_UNKNOWN_SECTION = "E0105";
 
     /// An element the `# espforge` schema does not know.
     CORE_UNKNOWN_ELEMENT = "E0201";
@@ -99,35 +101,33 @@ codes! {
     UART_INVALID_PERIPHERAL = "E0512";
     /// A `<uart>` pin that is not a GPIO number.
     UART_INVALID_PIN = "E0513";
+    /// `<uart baud_rate="0">`.
+    UART_INVALID_BAUD = "E0521";
     /// A `<wifi>` on a chip with no Wi-Fi radio.
     WIFI_NO_RADIO = "E0514";
     /// A `<wifi>` whose id is missing or malformed.
     WIFI_INVALID_ID = "E0515";
+    /// A pin number larger than the chip has.
+    GPIO_NOT_ON_CHIP = "E0516";
+    /// A claim on a pin wired to the SPI flash or PSRAM bus.
+    GPIO_RESERVED_FLASH = "E0517";
+    /// An output claim on an input-only pin.
+    GPIO_NOT_OUTPUT_CAPABLE = "E0518";
+    /// A chip with no pin capability table.
+    PIN_CAPS_MISSING = "E0519";
+    /// A claim on a strapping pin: the level at boot selects a boot mode.
+    GPIO_STRAPPING = "W0520";
 
     /// An `<led>` that cannot be built.
     COMPONENT_INVALID_LED = "E0601";
     /// A `<button>` that cannot be built.
     COMPONENT_INVALID_BUTTON = "E0602";
-    /// An `<i2c_component>` that cannot be built.
-    COMPONENT_INVALID_I2C = "E0603";
-    /// An `<spi_component>` that cannot be built.
-    COMPONENT_INVALID_SPI = "E0604";
-    /// A `<uart_component>` that cannot be built.
-    COMPONENT_INVALID_UART = "E0605";
     /// A component tag no element implements.
     COMPONENT_UNSUPPORTED = "E0606";
-    /// An `<spi_component cs>` naming a gpio that does not exist.
-    COMPONENT_INVALID_CS = "E0607";
     /// An `<led>` referencing a gpio id that does not exist.
     COMPONENT_UNKNOWN_GPIO = "E0608";
     /// A led on an input pin.
     COMPONENT_WRONG_DIRECTION = "E0609";
-    /// A `<uart_component baud_rate="0">`.
-    COMPONENT_INVALID_BAUD = "E0610";
-    /// A second `<uart_component>` on one `<uart>` port.
-    COMPONENT_UART_USED = "E0612";
-    /// A bus component referring to a bus that does not exist.
-    COMPONENT_UNKNOWN_BUS = "E0613";
     /// A bus component id that cannot become a Rust identifier.
     COMPONENT_INVALID_ID = "E0614";
     /// A recipe component that cannot be built (the recipe's default code).
@@ -147,6 +147,8 @@ codes! {
     COMPONENT_INVALID_ENV = "E0621";
     /// A `<wifi_station>` that cannot be built (missing or invalid attribute).
     COMPONENT_INVALID_WIFI = "E0622";
+    /// An id the generated code already binds (`devices`, `ctx`, `__x`).
+    COMPONENT_RESERVED_ID = "E0623";
 
     /// Two elements of different kinds on one pin.
     CONFLICT_PIN = "E0701";
@@ -162,8 +164,10 @@ codes! {
     CONFLICT_SPI_WIRING = "E0706";
     /// A `<uart>` that puts tx and rx on one pin.
     CONFLICT_UART_WIRING = "E0707";
-    /// Two addressed `<i2c_component>`s on one `<i2c>` bus sharing an address.
+    /// Two devices on one `<i2c>` bus sharing an address.
     CONFLICT_I2C_ADDRESS = "E0708";
+    /// A peripheral the generated runtime already holds (`UART0`).
+    CONFLICT_RUNTIME_HELD = "E0709";
 
     /// A service `network=` reference to an interface that does not exist.
     SERVICE_UNKNOWN_NETWORK = "E0801";
@@ -177,6 +181,8 @@ codes! {
     SERVICE_INVALID = "E0805";
     /// A service tag no element implements.
     SERVICE_UNSUPPORTED = "E0806";
+    /// A service id the generated code already binds (`services`, `ctx`, ...).
+    SERVICE_RESERVED_ID = "E0807";
 
     /// A device's bus reference to a component that does not exist.
     DEVICE_UNKNOWN_COMPONENT = "E0901";
@@ -192,6 +198,10 @@ codes! {
     DEVICE_REQUIRES_BLOCKING = "E0906";
     /// A device that cannot be built: a missing or invalid attribute.
     DEVICE_INVALID = "E0907";
+    /// A device id the generated code already binds (`devices`, `ctx`, ...).
+    DEVICE_RESERVED_ID = "E0908";
+    /// A blocking-only and an async-only driver bound to one bus.
+    DEVICE_BUS_MODE_CONFLICT = "E0909";
 }
 
 #[cfg(test)]
@@ -236,16 +246,16 @@ mod tests {
             assert!(
                 matches!(
                     n,
-                    101..=104
+                    101..=105
                         | 201..=209
                         | 301
                         | 302
                         | 306..=315
-                        | 501..=515
-                        | 601..=622
-                        | 701..=708
-                        | 801..=806
-                        | 901..=907
+                        | 501..=521
+                        | 601..=623
+                        | 701..=709
+                        | 801..=807
+                        | 901..=909
                 ),
                 "{} is outside the codes this slice defines",
                 code.as_str()

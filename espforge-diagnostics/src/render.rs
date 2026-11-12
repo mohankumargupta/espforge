@@ -145,7 +145,7 @@ mod tests {
     use super::*;
     use crate::{DiagCode, Edit, Fix, codes};
 
-    const SRC: &str = "# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# components\n  <led id=\"red-led\" gpio=\"$gpio18\" />\n  <led id=\"other\" gpio=\"$gpio18\" />\n";
+    const SRC: &str = "# peripherals\n  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n# devices\n  <led id=\"red-led\" gpio=\"$gpio18\" />\n  <led id=\"other\" gpio=\"$gpio18\" />\n";
 
     #[test]
     fn one_label_renders_one_snippet_group() {

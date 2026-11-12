@@ -45,6 +45,11 @@ impl Asset {
 pub enum Ownership {
     /// Regenerated every build and tracked in the manifest (drift detection).
     Owned,
+    /// Regenerated every build, but only the keys espforge writes are
+    /// authoritative: every other key the user added is carried over
+    /// (`Cargo.toml`). Tracked in the manifest for information only, never
+    /// used to refuse a write.
+    Merged,
     /// Written only if absent; never tracked, never clobbered.
     SeedOnce,
     /// Not written by espforge at all.
@@ -64,6 +69,13 @@ impl Artifact {
             path: path.into(),
             content: content.into(),
             ownership: Ownership::SeedOnce,
+        }
+    }
+    pub fn merged(path: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            content: content.into(),
+            ownership: Ownership::Merged,
         }
     }
 }

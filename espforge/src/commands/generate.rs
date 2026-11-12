@@ -32,6 +32,10 @@ pub struct GenArgs {
     /// (or set ESPFORGE_RUNTIME_PATH)
     #[arg(long)]
     pub runtime_path: Option<PathBuf>,
+    /// Extra directory of driver manifests (repeatable; `drivers/` beside the
+    /// spec is always read first)
+    #[arg(short = 'D', long = "driver-dir", value_name = "DIR")]
+    pub driver_dir: Vec<PathBuf>,
     #[command(flatten)]
     pub answers: AnswerArgs,
 }
@@ -39,6 +43,9 @@ pub struct GenArgs {
 pub fn run(args: GenArgs) -> ExitCode {
     exit_code(execute(&args).map(|written| {
         report::notes(&written.notes);
+        for driver in &written.drivers {
+            println!("  driver: {driver}");
+        }
         println!(
             "gen: wrote '{}' to {}",
             written.crate_name,
@@ -56,13 +63,10 @@ pub fn execute(args: &GenArgs) -> Result<Written, Failure> {
         Path::new("."),
     )
     .map_err(user)?;
-    project::generate_with(
-        &source,
-        &args.out,
-        &args.answers.overrides(),
-        args.runtime_path.clone(),
-    )
-    .map_err(|e| failed(e, &source))
+    let mut overrides = args.answers.overrides();
+    overrides.driver_dirs = args.driver_dir.clone();
+    project::generate_with(&source, &args.out, &overrides, args.runtime_path.clone())
+        .map_err(|e| failed(e, &source))
 }
 
 #[cfg(test)]
@@ -135,7 +139,12 @@ mod tests {
         let mut args = example_args("01.Basics/helloworld", &out);
         args.answers.chip = Some("esp32s3".into());
         let written = execute(&args).unwrap();
-        assert_eq!(written.notes.len(), 1);
+        assert_eq!(written.notes.len(), 1, "{:?}", written.notes);
+        assert!(
+            written.notes[0].contains("--chip esp32s3"),
+            "{:?}",
+            written.notes
+        );
         let cargo = std::fs::read_to_string(out.join("Cargo.toml")).unwrap();
         assert!(cargo.contains("\"esp32s3\""), "{cargo}");
     }

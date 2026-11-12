@@ -1,0 +1,12 @@
+# espforge
+  <project name="local_driver" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <i2c id="i2c0" sda="6" scl="7" frequency="400kHz" />
+
+# devices
+  <fx_accel id="accel" bus="$i2c0" address="0x10" />
+
+# services

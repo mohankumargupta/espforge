@@ -79,10 +79,13 @@ pub enum PinOrRef<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Issue<'a> {
     /// Not written, or written empty, where the schema says required.
-    Missing { attr: &'static str },
+    ///
+    /// The name borrows from the schema when the attribute was checked
+    /// dynamically, and is a literal when a generated reader produced it.
+    Missing { attr: &'a str },
     /// Written, but not a value of the declared kind.
     Invalid {
-        attr: &'static str,
+        attr: &'a str,
         /// The value as written, so the message can quote it.
         value: &'a str,
     },
@@ -99,11 +102,11 @@ fn span_of(attr: &TagAttribute<'_>) -> Span {
     }
 }
 
-fn missing<'a>(attr: &'static str) -> Issue<'a> {
+fn missing<'a>(attr: &'a str) -> Issue<'a> {
     Issue::Missing { attr }
 }
 
-fn invalid<'a>(attr: &'static str, value: &'a str) -> Issue<'a> {
+fn invalid<'a>(attr: &'a str, value: &'a str) -> Issue<'a> {
     Issue::Invalid { attr, value }
 }
 
@@ -115,10 +118,7 @@ fn shown<'a>(attr: &'a TagAttribute<'a>) -> Spanned<&'a str> {
 }
 
 /// A required identifier: written and non-empty.
-pub fn ident<'a>(
-    node: &'a ParsedNode<'a>,
-    name: &'static str,
-) -> Result<Spanned<&'a str>, Issue<'a>> {
+pub fn ident<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<Spanned<&'a str>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
     if attr.val.is_empty() {
         return Err(missing(name));
@@ -127,10 +127,7 @@ pub fn ident<'a>(
 }
 
 /// A required free text value.
-pub fn text<'a>(
-    node: &'a ParsedNode<'a>,
-    name: &'static str,
-) -> Result<Spanned<&'a str>, Issue<'a>> {
+pub fn text<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<Spanned<&'a str>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
     Ok(shown(attr))
 }
@@ -138,7 +135,7 @@ pub fn text<'a>(
 /// A free text value, defaulted from the schema when absent.
 pub fn text_or<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
     default: &'a str,
 ) -> Result<Spanned<&'a str>, Issue<'a>> {
     match find(node, name) {
@@ -153,13 +150,13 @@ pub fn text_or<'a>(
 /// An optional free text value.
 pub fn opt_text<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
 ) -> Result<Option<Spanned<&'a str>>, Issue<'a>> {
     Ok(find(node, name).map(shown))
 }
 
 /// A required `true` / `false`.
-pub fn flag<'a>(node: &'a ParsedNode<'a>, name: &'static str) -> Result<Spanned<bool>, Issue<'a>> {
+pub fn flag<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<Spanned<bool>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
     flag_value(attr, name)
 }
@@ -167,7 +164,7 @@ pub fn flag<'a>(node: &'a ParsedNode<'a>, name: &'static str) -> Result<Spanned<
 /// A `true` / `false` value, defaulted from the schema when absent.
 pub fn flag_or<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
     default: bool,
 ) -> Result<Spanned<bool>, Issue<'a>> {
     match find(node, name) {
@@ -179,10 +176,7 @@ pub fn flag_or<'a>(
     }
 }
 
-fn flag_value<'a>(
-    attr: &'a TagAttribute<'a>,
-    name: &'static str,
-) -> Result<Spanned<bool>, Issue<'a>> {
+fn flag_value<'a>(attr: &'a TagAttribute<'a>, name: &'a str) -> Result<Spanned<bool>, Issue<'a>> {
     let value = match attr.val {
         "true" => true,
         "false" => false,
@@ -197,7 +191,7 @@ fn flag_value<'a>(
 /// A required `kind="freq"` value, kept as written (`100kHz`).
 pub fn frequency<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
 ) -> Result<Spanned<&'a str>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
     Ok(shown(attr))
@@ -206,7 +200,7 @@ pub fn frequency<'a>(
 /// A `kind="freq"` value, defaulted from the schema when absent.
 pub fn frequency_or<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
     default: &'a str,
 ) -> Result<Spanned<&'a str>, Issue<'a>> {
     text_or(node, name, default)
@@ -215,13 +209,13 @@ pub fn frequency_or<'a>(
 /// An optional `kind="freq"` value.
 pub fn opt_frequency<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
 ) -> Result<Option<Spanned<&'a str>>, Issue<'a>> {
     opt_text(node, name)
 }
 
 /// A required unsigned number.
-pub fn number<'a>(node: &'a ParsedNode<'a>, name: &'static str) -> Result<Spanned<u32>, Issue<'a>> {
+pub fn number<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<Spanned<u32>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
     number_value(attr, name)
 }
@@ -229,7 +223,7 @@ pub fn number<'a>(node: &'a ParsedNode<'a>, name: &'static str) -> Result<Spanne
 /// A required unsigned number with a schema `range`.
 pub fn number_in<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
     low: u32,
     high: u32,
 ) -> Result<Spanned<u32>, Issue<'a>> {
@@ -244,7 +238,7 @@ pub fn number_in<'a>(
 /// An unsigned number, defaulted from the schema when absent.
 pub fn number_or<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
     default: u32,
 ) -> Result<Spanned<u32>, Issue<'a>> {
     match find(node, name) {
@@ -259,7 +253,7 @@ pub fn number_or<'a>(
 /// An unsigned number with a schema `range`, defaulted when absent.
 pub fn number_in_or<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
     low: u32,
     high: u32,
     default: u32,
@@ -277,10 +271,7 @@ pub fn number_in_or<'a>(
     })
 }
 
-fn number_value<'a>(
-    attr: &'a TagAttribute<'a>,
-    name: &'static str,
-) -> Result<Spanned<u32>, Issue<'a>> {
+fn number_value<'a>(attr: &'a TagAttribute<'a>, name: &'a str) -> Result<Spanned<u32>, Issue<'a>> {
     Ok(Spanned {
         value: attr
             .val
@@ -292,7 +283,7 @@ fn number_value<'a>(
 
 fn in_range<'a>(
     attr: &'a TagAttribute<'a>,
-    name: &'static str,
+    name: &'a str,
     low: u32,
     high: u32,
 ) -> Result<u32, Issue<'a>> {
@@ -307,7 +298,7 @@ fn in_range<'a>(
 }
 
 /// A required `0x..` or decimal byte.
-pub fn hex<'a>(node: &'a ParsedNode<'a>, name: &'static str) -> Result<Spanned<u8>, Issue<'a>> {
+pub fn hex<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<Spanned<u8>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
     hex_value(attr, name)
 }
@@ -315,7 +306,7 @@ pub fn hex<'a>(node: &'a ParsedNode<'a>, name: &'static str) -> Result<Spanned<u
 /// An optional `0x..` or decimal byte.
 pub fn opt_hex<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
 ) -> Result<Option<Spanned<u8>>, Issue<'a>> {
     match find(node, name) {
         Some(attr) => Ok(Some(hex_value(attr, name)?)),
@@ -323,7 +314,7 @@ pub fn opt_hex<'a>(
     }
 }
 
-fn hex_value<'a>(attr: &'a TagAttribute<'a>, name: &'static str) -> Result<Spanned<u8>, Issue<'a>> {
+fn hex_value<'a>(attr: &'a TagAttribute<'a>, name: &'a str) -> Result<Spanned<u8>, Issue<'a>> {
     let parsed = match attr
         .val
         .strip_prefix("0x")
@@ -340,10 +331,7 @@ fn hex_value<'a>(attr: &'a TagAttribute<'a>, name: &'static str) -> Result<Spann
 
 /// A required `kind="pin_or_ref"` value: a GPIO number, or anything else as a
 /// `<gpio>` reference.
-pub fn pin_or_ref<'a>(
-    node: &'a ParsedNode<'a>,
-    name: &'static str,
-) -> Result<PinOrRef<'a>, Issue<'a>> {
+pub fn pin_or_ref<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<PinOrRef<'a>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
     let span = span_of(attr);
     Ok(match attr.val.parse::<u8>() {
@@ -353,7 +341,7 @@ pub fn pin_or_ref<'a>(
 }
 
 /// A required GPIO number.
-pub fn pin<'a>(node: &'a ParsedNode<'a>, name: &'static str) -> Result<Spanned<u8>, Issue<'a>> {
+pub fn pin<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<Spanned<u8>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
     Ok(Spanned {
         value: attr
@@ -367,7 +355,7 @@ pub fn pin<'a>(node: &'a ParsedNode<'a>, name: &'static str) -> Result<Spanned<u
 /// An optional GPIO number.
 pub fn opt_pin<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
 ) -> Result<Option<Spanned<u8>>, Issue<'a>> {
     match find(node, name) {
         Some(attr) => Ok(Some(Spanned {
@@ -382,7 +370,7 @@ pub fn opt_pin<'a>(
 }
 
 /// A required `$`-reference to another element.
-pub fn reference<'a>(node: &'a ParsedNode<'a>, name: &'static str) -> Result<Ref<'a>, Issue<'a>> {
+pub fn reference<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<Ref<'a>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
     Ok(Ref::at(attr.val, span_of(attr)))
 }
@@ -390,7 +378,7 @@ pub fn reference<'a>(node: &'a ParsedNode<'a>, name: &'static str) -> Result<Ref
 /// An optional `$`-reference to another element.
 pub fn opt_reference<'a>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
 ) -> Result<Option<Ref<'a>>, Issue<'a>> {
     Ok(find(node, name).map(|attr| Ref::at(attr.val, span_of(attr))))
 }
@@ -402,7 +390,7 @@ pub fn opt_reference<'a>(
 /// disagree.
 pub fn parsed<'a, T: Copy>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
     parse: fn(&str) -> Option<T>,
 ) -> Result<Spanned<T>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
@@ -412,7 +400,7 @@ pub fn parsed<'a, T: Copy>(
 /// A `choices` value, defaulted from the schema when absent.
 pub fn parsed_or<'a, T: Copy>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
     parse: fn(&str) -> Option<T>,
     default: T,
 ) -> Result<Spanned<T>, Issue<'a>> {
@@ -428,7 +416,7 @@ pub fn parsed_or<'a, T: Copy>(
 /// An optional `choices` value.
 pub fn opt_parsed<'a, T: Copy>(
     node: &'a ParsedNode<'a>,
-    name: &'static str,
+    name: &'a str,
     parse: fn(&str) -> Option<T>,
 ) -> Result<Option<Spanned<T>>, Issue<'a>> {
     match find(node, name) {
@@ -439,7 +427,7 @@ pub fn opt_parsed<'a, T: Copy>(
 
 fn parsed_value<'a, T: Copy>(
     attr: &'a TagAttribute<'a>,
-    name: &'static str,
+    name: &'a str,
     parse: fn(&str) -> Option<T>,
 ) -> Result<Spanned<T>, Issue<'a>> {
     Ok(Spanned {
@@ -459,31 +447,28 @@ mod tests {
     #[test]
     fn a_reference_keeps_both_spellings_and_its_span() {
         let n = node(
-            "components",
-            "# components\n  <led id=\"l\" gpio=\"$gpio18\" />\n",
+            "devices",
+            "# devices\n  <led id=\"l\" gpio=\"$gpio18\" />\n",
         );
         let r = reference(&n, "gpio").unwrap();
         assert_eq!(r.raw, "$gpio18");
         assert_eq!(r.name, "gpio18");
-        let written_at = &"# components\n  <led id=\"l\" gpio="[..];
+        let written_at = &"# devices\n  <led id=\"l\" gpio="[..];
         assert_eq!(r.span.start, written_at.len() + 1);
         assert_eq!(r.span.end - r.span.start, "$gpio18".len());
     }
 
     #[test]
     fn missing_identifiers_are_missing_even_when_empty() {
-        let n = node(
-            "components",
-            "# components\n  <led id=\"\" gpio=\"$gpio18\" />\n",
-        );
+        let n = node("devices", "# devices\n  <led id=\"\" gpio=\"$gpio18\" />\n");
         assert_eq!(ident(&n, "id"), Err(Issue::Missing { attr: "id" }));
     }
 
     #[test]
     fn a_bad_flag_reports_the_value_as_written() {
         let n = node(
-            "components",
-            "# components\n  <led id=\"l\" gpio=\"$g\" active_low=\"yes\" />\n",
+            "devices",
+            "# devices\n  <led id=\"l\" gpio=\"$g\" active_low=\"yes\" />\n",
         );
         assert_eq!(
             flag(&n, "active_low"),
@@ -496,8 +481,8 @@ mod tests {
 
     #[test]
     fn defaulted_values_are_anchored_at_the_node() {
-        let src = "# components\n  <led id=\"l\" gpio=\"$g\" />\n";
-        let n = node("components", src);
+        let src = "# devices\n  <led id=\"l\" gpio=\"$g\" />\n";
+        let n = node("devices", src);
         let defaulted = flag_or(&n, "active_low", false).unwrap();
         assert!(!defaulted.value);
         assert_eq!(defaulted.span.start, n.offset);

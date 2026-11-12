@@ -25,3 +25,5 @@ esp-metadata-generated = { workspace = true }
 linkme = { workspace = true }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }
+# `syn` answers one question the rule needs: is this spelling a Rust keyword?
+syn = { workspace = true }

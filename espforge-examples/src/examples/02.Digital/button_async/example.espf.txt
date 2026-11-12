@@ -12,13 +12,9 @@ toggles an LED each time the button is pressed.
   <runtime type="embassy" />
 
 # peripherals
-  <gpio id="gpio7" pin="7" direction="output" />
-  <gpio id="gpio9" pin="9" direction="input" />
-
-# components
-  <led id="red_led" gpio="$gpio7" active_low="false" />
-  <button id="button" gpio="$gpio9" pull_up="true" />
 
 # devices
+  <led id="red_led" pin="7" />
+  <button id="button" pin="9" pull_up="true" />
 
 # services

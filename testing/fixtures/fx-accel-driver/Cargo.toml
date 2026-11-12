@@ -1,0 +1,10 @@
+[package]
+name = "espforge-driver-fx-accel"
+version = "0.1.0"
+edition = "2021"
+description = "Fixture driver package for espforge's project-driver tests"
+license = "MIT"
+
+[dependencies]
+espforge-runtime = { path = "../../../espforge-runtime" }
+esp-hal = { version = "~1.2.2", features = ["esp32c3", "unstable"] }

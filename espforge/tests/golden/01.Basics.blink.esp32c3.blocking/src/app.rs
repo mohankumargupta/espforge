@@ -5,7 +5,7 @@ pub fn setup(ctx: &mut Context) {
 }
 
 pub fn forever(ctx: &mut Context) {
-    let led = component!(ctx, red_led);
+    let led = device!(ctx, red_led);
     led.toggle();
     ctx.delay.delay_ms(1000);
 }

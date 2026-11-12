@@ -21,17 +21,19 @@ fn main() {
     println!("cargo:rerun-if-changed=../espforge-schema/src/espf.schema.kdl");
     println!("cargo:rerun-if-changed=../espforge-schema/src/services.schema.kdl");
     println!("cargo:rerun-if-changed=../espforge-schema/src/lib.rs");
-    println!("cargo:rerun-if-changed=../espforge-drivers/drivers.schema.kdl");
     println!("cargo:rerun-if-changed=../espforge-drivers/src/lib.rs");
+    for (path, _) in espforge_drivers::MANIFESTS {
+        println!("cargo:rerun-if-changed=../{path}");
+    }
 
     // The same composed schema `crate::schema::schema()` parses at runtime: a
     // device element in `espforge-drivers` gets its typed `Attrs` here too.
-    let schema = espforge_schema::load_all(&[
+    let mut sources = vec![
         espforge_schema::SCHEMA_KDL,
         espforge_schema::SERVICES_SCHEMA_KDL,
-        espforge_drivers::DRIVERS_SCHEMA_KDL,
-    ])
-    .unwrap_or_else(|errors: Vec<SchemaError>| {
+    ];
+    sources.extend(espforge_drivers::MANIFESTS.iter().map(|(_, text)| *text));
+    let schema = espforge_schema::load_all(&sources).unwrap_or_else(|errors: Vec<SchemaError>| {
         let mut text = String::from("the composed schema does not load:");
         for error in errors {
             let _ = write!(text, "\n  {}: {}", error.span.start, error.message);

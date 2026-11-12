@@ -16,7 +16,7 @@
 //! | `E03xx` | options and their answers |
 //! | `E04xx` | `$` graph resolution |
 //! | `E05xx` | peripherals |
-//! | `E06xx` | components |
+//! | `E06xx` | pin devices |
 //! | `E07xx` | ownership and conflicts |
 //! | `E08xx` | services and driver routing |
 //!

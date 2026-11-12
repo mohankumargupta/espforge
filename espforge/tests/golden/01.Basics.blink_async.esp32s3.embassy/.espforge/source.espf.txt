@@ -8,11 +8,8 @@ ASYNC BLINK EXAMPLE
   <runtime type="embassy" />
 
 # peripherals
-  <gpio id="gpio18" pin="18" direction="output" />
-
-# components
-  <led id="red_led" gpio="$gpio18" />
 
 # devices
+  <led id="red_led" pin="18" />
 
 # services

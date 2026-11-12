@@ -10,14 +10,11 @@ use winnow::{
     token::{any, take_while},
 };
 
-/// The five sections every ESPF file must contain (empty sections are valid).
-pub const REQUIRED_SECTIONS: [&str; 5] = [
-    "espforge",
-    "peripherals",
-    "components",
-    "devices",
-    "services",
-];
+/// The four sections every ESPF file must contain (empty sections are valid).
+///
+/// Any other section name is a structural error; the retired `# components`
+/// block is not accepted.
+pub const REQUIRED_SECTIONS: [&str; 4] = ["espforge", "peripherals", "devices", "services"];
 
 /// Everything the parser learned about a file.
 pub struct Parsed<'a> {
@@ -28,7 +25,7 @@ pub struct Parsed<'a> {
     pub junk: Vec<JunkSpan>,
     /// Byte offset of each section's `#` header (first definition).
     pub header_offsets: HashMap<String, usize>,
-    /// Located structural errors: duplicate and missing sections.
+    /// Located structural errors: duplicate, unknown and missing sections.
     pub structure_errors: Vec<Diagnostic>,
 }
 
@@ -323,6 +320,16 @@ fn parse_impl<'a>(mut input: &'a str, file: &'a str) -> Parsed<'a> {
                             crate::diag::line_number_for_offset(file, first)
                         ),
                     ));
+                } else if !REQUIRED_SECTIONS.contains(&section_name) {
+                    structure_errors.push(Diagnostic::error(
+                        codes::STRUCTURE_UNKNOWN_SECTION,
+                        header_offset..header_end,
+                        format!("unknown section `# {section_name}`"),
+                        format!(
+                            "the grammar has four sections: {}; move these elements into `# devices`",
+                            REQUIRED_SECTIONS.join(", ")
+                        ),
+                    ));
                 } else {
                     header_offsets.insert(section_name.to_string(), header_offset);
                     sections.insert(section_name.to_string(), nodes);
@@ -360,7 +367,7 @@ fn parse_impl<'a>(mut input: &'a str, file: &'a str) -> Parsed<'a> {
 }
 
 /// Full parser entry point: sections, junk lines, header offsets and the
-/// structural (duplicate / missing section) errors.
+/// structural (duplicate / unknown / missing section) errors.
 pub fn parse_espf<'a>(input: &'a str) -> Parsed<'a> {
     parse_impl(input, input)
 }
@@ -403,19 +410,14 @@ mod tests {
   <i2c  id="i2c0" sda="8" scl="9" frequency="400kHz" />
   <spi  id="spi2" sclk="6" mosi="7" />
 
-# components
-  <i2c_component  id="temp_bus"    i2c="$i2c0" address="0x48" />
-  <spi_component  id="display_bus" spi="$spi2" mode="0" cs="$gpio5" frequency="40MHz" />
-
 # devices
-  <tmp102         id="outdoor_temp" i2c_component="$temp_bus" />
-  <ili9341        id="tft_display"  spi_component="$display_bus" />
+  <tmp102         id="outdoor_temp" bus="$i2c0" address="0x48" />
+  <ili9341        id="tft_display"  bus="$spi2" cs="$gpio5" />
     "#;
 
         let sections = parse_espf_runtime(input);
 
         assert_eq!(sections["peripherals"].len(), 3);
-        assert_eq!(sections["components"].len(), 2);
         assert_eq!(sections["devices"].len(), 2);
 
         let tmp102 = sections["devices"][0].clone();
@@ -615,13 +617,10 @@ mod tests {
         assert_eq!((a.key, a.op), ("a.b", AttrOp::Append));
     }
 
-    const ALL_FIVE: &str = "# espforge\n# peripherals\n# components\n# devices\n# services\n";
-
     #[test]
-    fn all_five_sections_present_is_clean() {
-        let p = parse_espf(ALL_FIVE);
+    fn four_sections_parse_cleanly() {
+        let p = parse_espf("# espforge\n# peripherals\n# devices\n# services\n");
         assert!(p.structure_errors.is_empty(), "{:?}", p.structure_errors);
-        assert!(p.junk.is_empty());
         assert!(
             p.sections["services"].is_empty(),
             "empty sections are valid"
@@ -629,8 +628,18 @@ mod tests {
     }
 
     #[test]
+    fn components_section_is_unknown() {
+        let src = "# espforge\n# peripherals\n# components\n  <led id=\"l\" pin=\"1\" />\n# devices\n# services\n";
+        let p = parse_espf(src);
+        assert_eq!(p.structure_errors.len(), 1, "{:?}", p.structure_errors);
+        assert_eq!(p.structure_errors[0].code, codes::STRUCTURE_UNKNOWN_SECTION);
+        assert_eq!(&src[p.structure_errors[0].primary.clone()], "# components");
+        assert!(!p.sections.contains_key("components"));
+    }
+
+    #[test]
     fn duplicate_section_is_located_and_first_wins() {
-        let src = "# espforge\n# peripherals\n  <gpio id=\"a\" pin=\"1\" />\n# components\n# devices\n# services\n# peripherals\n  <gpio id=\"b\" pin=\"2\" />\n";
+        let src = "# espforge\n# peripherals\n  <gpio id=\"a\" pin=\"1\" />\n# devices\n# services\n# peripherals\n  <gpio id=\"b\" pin=\"2\" />\n";
         let p = parse_espf(src);
         assert_eq!(p.structure_errors.len(), 1, "{:?}", p.structure_errors);
         let e = &p.structure_errors[0];
@@ -656,7 +665,6 @@ mod tests {
         assert_eq!(
             titles,
             [
-                "missing section `# components`",
                 "missing section `# devices`",
                 "missing section `# services`"
             ]
@@ -670,9 +678,9 @@ mod tests {
     }
 
     #[test]
-    fn empty_file_reports_all_five_missing_at_top() {
+    fn empty_file_reports_all_four_missing_at_top() {
         let p = parse_espf("");
-        assert_eq!(p.structure_errors.len(), 5);
+        assert_eq!(p.structure_errors.len(), 4);
         assert!(p.structure_errors.iter().all(|e| e.primary == (0..0)));
         assert!(
             p.structure_errors

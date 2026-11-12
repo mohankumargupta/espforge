@@ -5,5 +5,5 @@ elf = "target/riscv32imc-unknown-none-elf/debug/i2c_example"
 firmware = "target/riscv32imc-unknown-none-elf/debug/i2c_example"
 
 [[chip]]
-name = 'chip'
+name = 'i2cexample'
 binary = 'chip.wasm'

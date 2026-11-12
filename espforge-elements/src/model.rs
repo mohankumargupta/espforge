@@ -1,26 +1,91 @@
 //! The board IR: what the `# espforge` section says, and what lowering built.
 //!
 //! A [`Board`] carries its [`Meta`], the [`ResourceGraph`] of pins it owns and
-//! the components on them. A [`ClaimedPin`] can only be made by
+//! the devices on them. A [`ClaimedPin`] can only be made by
 //! [`ResourceGraph::claim`], so a board that holds one cannot have a pin
 //! conflict: validation and construction are the same act.
+//!
+//! That act is **transactional**: a claim is staged, not immediately permanent.
+//! [`ResourceGraph`] keeps a journal of inverses, so the lowering dispatch can
+//! [`ResourceGraph::checkpoint`] before one element and [`ResourceGraph::rollback`]
+//! when that element fails. Without it, the first pin of a two-pin bus that
+//! conflicts with its second stayed claimed after the error, and every later
+//! element reported a phantom conflict on a pin nobody actually uses. Rolling
+//! back keeps "one error per mistake" true: the claims of a failed element are
+//! never visible to the next one.
 //!
 //! The graph is cut to what the elements need. Buses (`add_bus`, `bus`,
 //! `bus_by_name`) return in phase 3, shared peripherals (`claim_peripheral`) with
 //! the elements that share them, and the bus kinds join [`OwnerKind`] with
-//! their buses. Recipe components share the one [`OwnerKind::Recipe`] variant.
+//! their buses. Pin devices share the one [`OwnerKind::Pin`] variant.
 
 use espforge_diagnostics::Diagnostic;
-use proc_macro2::TokenStream;
+use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote};
 use std::collections::BTreeMap;
 use std::ops::Range;
+
+pub use espforge_schema::{RustExpr, RustPath, RustType};
 
 /// Which async model the generated project uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Runtime {
     Blocking,
     Embassy,
+}
+
+/// How one bus is driven: esp-hal `Blocking` or `Async`.
+///
+/// The scheduler and the bus mode are different decisions. A project may be
+/// `runtime="embassy"` (Wi-Fi needs it) while a display on an I2C bus talks
+/// over a blocking bus, before the executor starts. Phase 4 resolves the mode
+/// per bus from the drivers bound to it instead of from the crate feature.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BusMode {
+    /// esp-hal `Blocking`, shared through a `RefCell`.
+    #[default]
+    Blocking,
+    /// esp-hal `Async`, shared through an `embassy_sync::Mutex`.
+    Async,
+}
+
+/// The bus modes a driver declares it can be used with (its manifest's
+/// `runtime` lines).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeSet {
+    pub blocking: bool,
+    pub asynchronous: bool,
+}
+
+impl RuntimeSet {
+    /// A blocking-only driver: every driver in this phase.
+    pub const BLOCKING: Self = Self {
+        blocking: true,
+        asynchronous: false,
+    };
+
+    pub fn supports(self, mode: BusMode) -> bool {
+        match mode {
+            BusMode::Blocking => self.blocking,
+            BusMode::Async => self.asynchronous,
+        }
+    }
+
+    /// Declares `async` and not `blocking`.
+    pub fn async_only(self) -> bool {
+        self.asynchronous && !self.blocking
+    }
+
+    /// Declares `blocking` and not `async`.
+    pub fn blocking_only(self) -> bool {
+        self.blocking && !self.asynchronous
+    }
+}
+
+impl Default for RuntimeSet {
+    fn default() -> Self {
+        Self::BLOCKING
+    }
 }
 
 /// Where `print!`/log output goes (esp-println's backend).
@@ -107,8 +172,9 @@ pub struct Pin(pub u8);
 pub enum PinUse {
     Input,
     Output,
-    /// A bus pin that both sides drive (I2C SDA/SCL) or that the peripheral
-    /// samples at its own rate (SPI MISO).
+    /// A bus pin that both sides drive (I2C SDA/SCL), a pin the peripheral
+    /// samples at its own rate (SPI MISO), or a driver line that switches
+    /// between driving and reading.
     Bidirectional,
     /// No declared direction (`<gpio>` without `direction`).
     Unspecified,
@@ -127,36 +193,33 @@ impl PinUse {
 
 /// The element kinds that can own a resource. The set is closed on purpose:
 /// adding `<pwm>` adds one variant, not a string tag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OwnerKind {
     Gpio,
-    /// A component built from a recipe; carries its schema tag.
-    Recipe(&'static str),
+    /// A pin device built from a recipe; carries its schema tag.
+    ///
+    /// Owned, not `&'static`: a project manifest's tag belongs to the session
+    /// that composed it.
+    Pin(String),
     I2c,
     Spi,
     Uart,
-    I2cComponent,
-    SpiComponent,
-    UartComponent,
     /// A device driving its auxiliary pins (`<ili9341>`); carries its schema
     /// tag.
-    Device(&'static str),
+    Device(String),
     /// The on-chip Wi-Fi radio (`<wifi>`), which claims the `WIFI` block.
     Wifi,
 }
 
 impl OwnerKind {
     /// The schema tag spelling.
-    pub fn tag(self) -> &'static str {
+    pub fn tag(&self) -> &str {
         match self {
             OwnerKind::Gpio => "gpio",
-            OwnerKind::Recipe(tag) => tag,
+            OwnerKind::Pin(tag) => tag,
             OwnerKind::I2c => "i2c",
             OwnerKind::Spi => "spi",
             OwnerKind::Uart => "uart",
-            OwnerKind::I2cComponent => "i2c_component",
-            OwnerKind::SpiComponent => "spi_component",
-            OwnerKind::UartComponent => "uart_component",
             OwnerKind::Device(tag) => tag,
             OwnerKind::Wifi => "wifi",
         }
@@ -262,6 +325,9 @@ pub enum Bus {
         /// Bus frequency in kHz.
         khz: u32,
         mode: u8,
+        /// Optional chip select for direct raw-bus use. A device declares its
+        /// own `cs` instead, so this is only present on a bus with no driver.
+        cs: Option<ClaimedPin>,
     },
     Uart {
         id: Ident,
@@ -270,7 +336,10 @@ pub enum Bus {
         peripheral: String,
         tx: ClaimedPin,
         rx: ClaimedPin,
-        used_by: Option<Ident>,
+        /// Line speed for direct raw-bus use.
+        baud: u32,
+        /// Framing for direct raw-bus use.
+        framing: Framing,
     },
 }
 
@@ -299,17 +368,105 @@ pub struct PeripheralClash {
     pub incoming: PeripheralClaim,
 }
 
+/// A resource the generated runtime takes before any element is lowered.
+///
+/// The runtime's own `main()` binds things no element can see: the console's
+/// UART and, under embassy, the timer group and interrupt line the scheduler
+/// runs on. Recording them here turns a spec that asks for the same silicon
+/// into a located error instead of two users of one peripheral.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldResource {
+    /// Who holds it, in a diagnostic's words (`the log console`).
+    pub holder: String,
+    /// What the user can do instead, as the second half of the label.
+    pub remedy: String,
+}
+
+/// One element's claim on a peripheral the generated runtime already holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldClash {
+    pub peripheral: String,
+    pub held: HeldResource,
+    /// The claim that was refused.
+    pub owner: Owner,
+}
+
+/// Why a peripheral claim was refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PeripheralRefusal {
+    /// Another element named the same hardware peripheral.
+    Clash(PeripheralClash),
+    /// The generated runtime already holds it.
+    Held(HeldClash),
+}
+
+/// The inverse of one recorded claim, pushed when the claim succeeds.
+///
+/// Kept private to this module: the journal is an implementation detail of
+/// [`ResourceGraph::rollback`], not part of the board IR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Undo {
+    Pin(Pin),
+    Peripheral(String),
+    /// Buses are appended, so their ids are positional and the inverse of an
+    /// append is a pop.
+    Bus,
+}
+
 /// Pins, peripherals and buses: the resources a board owns.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResourceGraph {
     pins: BTreeMap<Pin, Claim>,
     peripherals: BTreeMap<String, PeripheralClaim>,
+    /// Names the generated runtime holds (`UART0`, `TIMG0.timer0`), which no
+    /// element may claim. Not journaled: they are recorded before any element.
+    held: BTreeMap<String, HeldResource>,
     buses: Vec<Bus>,
+    /// Inverses of the claims made so far, oldest first.
+    undo: Vec<Undo>,
 }
 
 impl ResourceGraph {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Index into the undo journal, for a later [`rollback`](Self::rollback).
+    ///
+    /// Take one immediately before lowering a single element, and roll back
+    /// only on that element's error path. Any [`ClaimedPin`] produced after a
+    /// checkpoint belongs to that element and must be dropped with it.
+    pub fn checkpoint(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// Undo every claim recorded since `checkpoint`, newest first.
+    ///
+    /// A checkpoint past the end is a no-op, so rolling back twice is safe.
+    pub fn rollback(&mut self, checkpoint: usize) {
+        while self.undo.len() > checkpoint {
+            match self.undo.pop() {
+                Some(Undo::Pin(pin)) => {
+                    self.pins.remove(&pin);
+                }
+                Some(Undo::Peripheral(peripheral)) => {
+                    self.peripherals.remove(&peripheral);
+                }
+                Some(Undo::Bus) => {
+                    self.buses.pop();
+                }
+                None => break,
+            }
+        }
+    }
+
+    /// Drop the journal: a finished board has no elements left to undo.
+    ///
+    /// Keeps `PartialEq` about the resources a board owns rather than the
+    /// history of how they were claimed.
+    pub fn seal(mut self) -> Self {
+        self.undo.clear();
+        self
     }
 
     /// Claim `pin` for `owner`.
@@ -345,6 +502,7 @@ impl ResourceGraph {
         }
 
         self.pins.insert(pin, incoming.clone());
+        self.undo.push(Undo::Pin(pin));
         Ok(ClaimedPin {
             pin,
             claim: incoming,
@@ -354,24 +512,64 @@ impl ResourceGraph {
     /// Claim a named hardware peripheral (`UART1`, `I2C0`) for `owner`.
     ///
     /// A second claim is the "peripheral clash" case: the board drives at
-    /// most one component per physical peripheral.
+    /// most one device per physical peripheral. A name the generated runtime
+    /// holds ([`Self::hold`]) is refused first, so the runtime's claim cannot
+    /// be overwritten by an element.
     pub fn claim_peripheral(
         &mut self,
         peripheral: impl Into<String>,
         owner: Owner,
         span: Range<usize>,
-    ) -> Result<(), PeripheralClash> {
+    ) -> Result<(), PeripheralRefusal> {
         let peripheral = peripheral.into();
+        if let Some(held) = self.held.get(&peripheral) {
+            return Err(PeripheralRefusal::Held(HeldClash {
+                peripheral,
+                held: held.clone(),
+                owner,
+            }));
+        }
         let incoming = PeripheralClaim { owner, span };
         if let Some(existing) = self.peripherals.get(&peripheral) {
-            return Err(PeripheralClash {
+            return Err(PeripheralRefusal::Clash(PeripheralClash {
                 peripheral,
                 existing: existing.clone(),
                 incoming,
-            });
+            }));
         }
+        self.undo.push(Undo::Peripheral(peripheral.clone()));
         self.peripherals.insert(peripheral, incoming);
         Ok(())
+    }
+
+    /// Record a name the generated runtime holds, before any element lowers.
+    ///
+    /// Not journaled: what the runtime takes follows from the project meta, and
+    /// no element would undo it. A later claim on the name is
+    /// [`PeripheralRefusal::Held`].
+    pub fn hold(
+        &mut self,
+        resource: impl Into<String>,
+        holder: impl Into<String>,
+        remedy: impl Into<String>,
+    ) {
+        self.held.insert(
+            resource.into(),
+            HeldResource {
+                holder: holder.into(),
+                remedy: remedy.into(),
+            },
+        );
+    }
+
+    /// What holds `resource`, if the generated runtime does.
+    pub fn held(&self, resource: &str) -> Option<&HeldResource> {
+        self.held.get(resource)
+    }
+
+    /// Every runtime-held resource, in name order.
+    pub fn held_resources(&self) -> impl Iterator<Item = (&str, &HeldResource)> {
+        self.held.iter().map(|(name, held)| (name.as_str(), held))
     }
 
     /// Append a bus and return its id. Bus ids are positional and assigned in
@@ -379,6 +577,7 @@ impl ResourceGraph {
     pub fn add_bus(&mut self, bus: Bus) -> BusId {
         let id = BusId(self.buses.len());
         self.buses.push(bus);
+        self.undo.push(Undo::Bus);
         id
     }
 
@@ -420,16 +619,18 @@ impl ResourceGraph {
     }
 }
 
-/// The `direction` a `<gpio>` declared.
+/// The `direction` a `<gpio>` declared, or a device's pin needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     Output,
     Input,
+    /// A line the driver switches between driving and reading.
+    Bidirectional,
 }
 
 /// A lowered `<gpio>`: an id, a pin, and the declared direction, if any.
 ///
-/// It claims nothing; the first component that uses the pin does, as in the
+/// It claims nothing; the first device that uses the pin does, as in the
 /// legacy lowering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GpioDecl {
@@ -464,163 +665,177 @@ pub struct Framing {
     pub stop_bits: StopBits,
 }
 
-/// One line per component variant generates [`Component::id`] and the
-/// [`Lowered`](crate::Lowered) forwarding, so adding a component is its own
-/// file plus its own line here.
-macro_rules! component_enum {
-    ($($variant:ident($ty:ty)),* $(,)?) => {
-        /// A component in the board.
-        #[derive(Debug, Clone, PartialEq, Eq)]
-        pub enum Component {
-            $($variant($ty)),*
-        }
-
-        impl Component {
-            /// The component's id.
-            pub fn id(&self) -> &Ident {
-                match self {
-                    $(Component::$variant(c) => crate::element::Lowered::id(c),)*
-                }
-            }
-        }
-
-        impl crate::element::Lowered for Component {
-            fn id(&self) -> &Ident {
-                self.id()
-            }
-
-            fn emit(&self, board: &Board, cx: &mut crate::element::EmitCx) {
-                match self {
-                    $(Component::$variant(c) => c.emit(board, cx),)*
-                }
-            }
-
-            fn overlay_attr(&self, attr: &str) -> Option<String> {
-                match self {
-                    $(Component::$variant(c) => c.overlay_attr(attr),)*
-                }
-            }
-        }
-    };
+/// A GPIO-backed device lowered from `# devices` (`<led>`, `<button>`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinDevice {
+    pub id: Ident,
+    /// The schema tag, which names the recipe that built this.
+    pub tag: String,
+    pub pin: ClaimedPin,
+    /// The Rust type, resolved from the schema.
+    pub runtime: RustPath,
+    /// The direction-specific configuration the recipe read.
+    pub kind: PinDeviceKind,
 }
 
-component_enum! {
-    Recipe(crate::components::recipe::RecipeComponent),
-    I2c(crate::components::i2c::I2cComponent),
-    Spi(crate::components::spi::SpiComponent),
-    Uart(crate::components::uart::UartComponent),
-    WifiStation(crate::components::wifi_station::WifiStationComponent),
+/// The configuration a pin recipe reads from its boolean attributes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinDeviceKind {
+    Output { active_low: bool },
+    Input { pull_up: bool },
 }
 
-impl Component {
-    /// The schema tag of the element this component came from.
-    ///
-    /// A recipe carries its own tag; the hand-written components are fixed. A
-    /// device's recipe compares this against the component kind it declares it
-    /// accepts, so a display on the wrong bus is a refusal rather than emitted
-    /// code that does not compile.
-    pub fn tag(&self) -> &'static str {
+/// A device lowered from `# devices`.
+///
+/// The transport split and the typed IR made the bus variant smaller but did
+/// not lift the `large_enum_variant` note: `BusDevice` is still 592 bytes
+/// against 168 for `PinDevice`, because the driver record itself is large.
+/// That remaining size is recorded here rather than silenced with an `allow`;
+/// boxing the record is a separate change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Device {
+    /// A GPIO-backed device such as an LED or button.
+    Pin(PinDevice),
+    /// A driver bound to an I2C or SPI bus.
+    Bus(BusDevice),
+}
+
+impl Device {
+    /// The device's id.
+    pub fn id(&self) -> &Ident {
         match self {
-            Component::Recipe(component) => component.tag,
-            Component::I2c(_) => "i2c_component",
-            Component::Spi(_) => "spi_component",
-            Component::Uart(_) => "uart_component",
-            Component::WifiStation(_) => "wifi_station",
+            Device::Pin(device) => &device.id,
+            Device::Bus(device) => &device.id,
         }
     }
 
-    /// The I2C address this component declares, if any.
-    ///
-    /// A device's recipe compares its `needs_address` against this, so a part
-    /// that needs an `I2cDevice` is refused at lowering, not by `rustc`.
-    pub fn address(&self) -> Option<u8> {
+    /// The schema tag of the element this device came from.
+    pub fn tag(&self) -> &str {
         match self {
-            Component::I2c(component) => component.address,
-            _ => None,
+            Device::Pin(device) => &device.tag,
+            Device::Bus(device) => &device.tag,
+        }
+    }
+
+    pub fn as_pin(&self) -> Option<&PinDevice> {
+        match self {
+            Device::Pin(device) => Some(device),
+            Device::Bus(_) => None,
+        }
+    }
+
+    pub fn as_bus(&self) -> Option<&BusDevice> {
+        match self {
+            Device::Bus(device) => Some(device),
+            Device::Pin(_) => None,
         }
     }
 }
 
-/// A service in the board: software that rides on a network component, not a
-/// pin. Lowered after the components, so its `network=` can refer to one.
+impl crate::element::Lowered for Device {
+    fn id(&self) -> &Ident {
+        self.id()
+    }
+
+    fn emit(&self, board: &Board, cx: &mut crate::element::EmitCx) {
+        match self {
+            Device::Pin(device) => device.emit(board, cx),
+            Device::Bus(device) => device.emit(board, cx),
+        }
+    }
+
+    fn overlay_attr(&self, attr: &str) -> Option<String> {
+        match self {
+            Device::Pin(device) => device.overlay_attr(attr),
+            Device::Bus(_) => None,
+        }
+    }
+}
+
+/// A service in the board: software that rides on a network provider, not a
+/// pin. Lowered after the devices, so its `network=` can refer to one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Service {
+    /// The `<wifi_station>` provider.
+    WifiStation(crate::services::wifi_station::WifiStationService),
+    /// A service built from a `service_recipe`.
+    Protocol(ProtocolService),
+}
+
+/// A service built from a `service_recipe`.
 ///
 /// Every `service_recipe` lowers to this shape. The type, the constructor, the
 /// config fields and the feature are strings the schema itself supplied, so
 /// adding a service edits the runtime and the schema, never this file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Service {
+pub struct ProtocolService {
     pub id: Ident,
     /// The schema tag, which names the recipe that built this.
-    pub tag: &'static str,
-    /// The component whose network stack the service rides on.
+    pub tag: String,
+    /// The service provider whose network stack the service rides on.
     pub network: Ident,
     /// The `espforge-runtime` feature the generated project names.
     pub feature: String,
     /// The `Services` field type.
-    pub ty: String,
+    pub ty: RustType,
     /// The Rust path of the constructor.
-    pub new: String,
+    pub new: RustPath,
+    /// The `static` storage type the constructor takes first, if the service
+    /// owns mutable state (`espforge_runtime::HttpClientStorage`).
+    pub storage: Option<RustType>,
     /// The config struct passed to `new`, if the recipe declares one.
-    pub config: Option<String>,
+    pub config: Option<RustType>,
     /// The heap the service needs in `main.rs`, in bytes.
     pub heap_bytes: Option<u32>,
     /// `(field, expression)` pairs, in config-struct declaration order.
-    pub config_fields: Vec<(String, String)>,
+    pub config_fields: Vec<(String, RustExpr)>,
     /// The Rust expressions passed to `new` after the config.
-    pub extra_args: Vec<String>,
+    pub extra_args: Vec<RustExpr>,
 }
 
-impl Service {
+impl ProtocolService {
     /// The service's id.
     pub fn id(&self) -> &Ident {
         &self.id
     }
 }
 
-impl crate::element::Lowered for Service {
+impl crate::element::Lowered for ProtocolService {
     fn id(&self) -> &Ident {
         &self.id
     }
 
     fn emit(&self, _board: &Board, cx: &mut crate::element::EmitCx) {
         let name = format_ident!("{}", self.id.rust_name());
-        let ty: TokenStream = self
-            .ty
-            .parse()
-            .expect("a service field type is a Rust type expression");
-        let new: TokenStream = self
-            .new
-            .parse()
-            .expect("a service constructor is a Rust path");
+        let ty = &self.ty;
+        let new = &self.new;
+        // A service with mutable state gets its own generated `static`, passed
+        // as the constructor's first argument (and a comma, only when present).
+        let storage = self.storage.as_ref().map(|ty| {
+            let name = format_ident!("__{}_STORAGE", self.id.rust_name().to_uppercase());
+            cx.module_item(quote! {
+                static #name: #ty = #ty::new();
+            });
+            quote! { &#name, }
+        });
         let stack = crate::services::network_stack(&self.network);
-        let extra: Vec<TokenStream> = self
-            .extra_args
-            .iter()
-            .map(|arg| {
-                arg.parse()
-                    .expect("a service argument is a Rust expression")
-            })
-            .collect();
+        let extra: Vec<&RustExpr> = self.extra_args.iter().collect();
 
         let init = match &self.config {
             Some(config) => {
-                let config_ty: TokenStream =
-                    config.parse().expect("a service config is a Rust path");
                 let fields: Vec<TokenStream> = self
                     .config_fields
                     .iter()
                     .map(|(field, expr)| {
                         let field = format_ident!("{field}");
-                        let value: TokenStream = expr
-                            .parse()
-                            .expect("a service config value is a Rust expression");
-                        quote! { #field: #value, }
+                        quote! { #field: #expr, }
                     })
                     .collect();
                 quote! {
                     #new(
+                        #storage
                         #stack,
-                        #config_ty {
+                        #config {
                             #(#fields)*
                         },
                         #(#extra),*
@@ -628,125 +843,506 @@ impl crate::element::Lowered for Service {
                 }
             }
             None => quote! {
-                #new(#stack, #(#extra),*)
+                #new(#storage #stack, #(#extra),*)
             },
         };
 
         cx.service_field(quote! {
             pub #name: #ty,
         });
+        // Build into a local first: a client borrows its provider
+        // (`home.stack()`) and a struct literal evaluates its fields in source
+        // order, so moving the provider before the client is constructed
+        // would borrow a moved value.
+        cx.service_prelude(quote! {
+            let #name = #init;
+        });
         cx.service_init(quote! {
-            #name: #init,
+            #name: #name,
         });
     }
 }
 
-/// A device in the board: a driver for a specific part, bound to the component
-/// it is attached to and (for auxiliary lines) to `<gpio>` peripherals.
+impl Service {
+    pub fn id(&self) -> &Ident {
+        match self {
+            Service::WifiStation(service) => &service.id,
+            Service::Protocol(service) => &service.id,
+        }
+    }
+
+    /// The `espforge-runtime` feature this service needs, if any.
+    pub fn feature(&self) -> Option<&str> {
+        match self {
+            Service::WifiStation(_) => None,
+            Service::Protocol(service) => Some(service.feature.as_str()),
+        }
+    }
+
+    /// The heap this service needs, if any.
+    pub fn heap_bytes(&self) -> Option<u32> {
+        match self {
+            Service::WifiStation(_) => None,
+            Service::Protocol(service) => service.heap_bytes,
+        }
+    }
+}
+
+impl crate::element::Lowered for Service {
+    fn id(&self) -> &Ident {
+        self.id()
+    }
+
+    fn emit(&self, board: &Board, cx: &mut crate::element::EmitCx) {
+        match self {
+            Service::WifiStation(service) => service.emit(board, cx),
+            Service::Protocol(service) => service.emit(board, cx),
+        }
+    }
+}
+
+/// When a device is brought up.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Init {
+    /// Built and initialised in `Devices::new`, before `app::setup`.
+    #[default]
+    Boot,
+    /// Built after boot, when the app calls `Deferred::init`.
+    Deferred,
+}
+
+/// A device's own SPI transfer configuration: the mode and clock it needs,
+/// applied by its endpoint before every transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpiConfig {
+    /// Clock in kHz.
+    pub khz: u32,
+    /// SPI mode, `0..=3`.
+    pub mode: u8,
+}
+
+/// Which level asserts an SPI device's chip select.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CsPolarity {
+    #[default]
+    ActiveLow,
+    ActiveHigh,
+}
+
+/// One constructor argument a deferred device stores in its factory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FactoryArg {
+    /// A value recomputed after boot: a mapped spelling (`Oled128x64`) or the
+    /// address the lowerer consumed.
+    Constant(RustExpr),
+    /// A control line built during `Devices::new` and moved into the factory.
+    Pin {
+        name: String,
+        optional: bool,
+        /// The wrapper the factory's field stores.
+        direction: Direction,
+    },
+}
+
+/// A bus-backed device: a driver for a specific part, plus one concrete bus
+/// transport.
 ///
 /// Every `device_recipe` lowers to this shape, and a hand-written `Element`
 /// can build one too, so a driver that needs its own Rust file still emits its
 /// `Devices` field and initialiser the same way. The recipe is data: the type,
 /// the constructor and the arguments are strings the schema itself supplied.
+///
+/// The transport is a sum, not a set of independent optionals: an I2C device
+/// has an address and the fields emission reads are the ones its transport
+/// says are meaningful.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Device {
+pub struct BusDevice {
     pub id: Ident,
     /// The schema tag, which names the recipe that built this.
-    pub tag: &'static str,
-    /// The `<i2c_component>` / `<spi_component>` whose handle it drives.
-    pub bus_component: Ident,
+    pub tag: String,
+    /// Everything that is independent of the bus kind.
+    pub driver: Driver,
+    /// The bus and the part's connection to it.
+    pub transport: BusTransport,
+}
+
+/// The codegen and lifecycle data every bus device has.
+///
+/// Every Rust fragment the recipe supplied is a parsed node, so emission
+/// quotes it and never reparses schema text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Driver {
     /// The `espforge-drivers` feature the generated project names.
     pub feature: String,
     /// Crates the generated project must name because of this driver.
     pub deps: Vec<String>,
     /// The `Devices` field type, its value slots already filled.
-    pub ty: String,
+    pub ty: RustType,
     /// The Rust path of the constructor.
-    pub new: String,
-    /// Whether the device takes the bus component by value.
-    pub takes_bus: bool,
-    /// The `expect` message when that bus was already taken.
-    pub taken: Option<String>,
+    pub new: RustPath,
     /// The auxiliary pins it claimed, with the argument each one fills.
     pub pins: Vec<(String, ClaimedPin)>,
     /// The Rust expressions passed to the constructor after the bus.
-    pub args: Vec<String>,
+    pub args: Vec<RustExpr>,
+    /// The same arguments as [`Self::args`], split into constants a deferred
+    /// factory can recompute and pins it must store.
+    pub factory_args: Vec<FactoryArg>,
+    /// The bus modes the driver's manifest declares it supports.
+    pub runtimes: RuntimeSet,
+    /// When the device is brought up.
+    pub init: Init,
+    /// The async half of the recipe, when the driver declares one.
+    pub async_ty: Option<RustType>,
+    /// The async constructor.
+    pub async_new: Option<RustPath>,
+    /// The `espforge-drivers` feature the async type needs.
+    pub async_feature: Option<String>,
+    /// The external crate implementing this driver, when its manifest declares
+    /// a `crate` block. `None` means the bundled `espforge-drivers` feature.
+    pub package: Option<espforge_schema::PackageRef>,
+    /// Crates the driver's public types come from (`embedded-graphics`).
+    pub expose: Vec<espforge_schema::Expose>,
+    /// Every crate the manifest names, including the implementation package.
+    /// The emitter writes one deduplicated line per package.
+    pub dependencies: Vec<espforge_schema::Dependency>,
+    /// The manifest file this driver's element was read from, when it is not a
+    /// bundled one. A package's relative `path` resolves against it.
+    pub manifest: Option<String>,
 }
 
-impl Device {
+/// The transports a bus device can actually emit.
+///
+/// Each variant is one concrete connection: an I2C part has an address, an SPI
+/// part owns a chip select, and a UART part owns the whole port. A UART port
+/// has exactly one peer, so lowering refuses a second device on it rather than
+/// emitting two builders for one peripheral.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BusTransport {
+    I2c(I2cTransport),
+    Spi(SpiTransport),
+    Uart(UartTransport),
+}
+
+impl BusTransport {
+    /// The bus this device binds to.
+    pub fn bus(&self) -> BusId {
+        match self {
+            BusTransport::I2c(transport) => transport.bus,
+            BusTransport::Spi(transport) => transport.bus,
+            BusTransport::Uart(transport) => transport.bus,
+        }
+    }
+
+    /// The endpoint type for the resolved bus mode. An async device falls back
+    /// to its blocking endpoint only when the driver declared no async one.
+    pub fn endpoint(&self, asynchronous: bool) -> Option<&RustType> {
+        let (blocking, async_endpoint) = match self {
+            BusTransport::I2c(transport) => (
+                transport.endpoint.as_ref(),
+                transport.async_endpoint.as_ref(),
+            ),
+            BusTransport::Spi(transport) => (
+                transport.endpoint.as_ref(),
+                transport.async_endpoint.as_ref(),
+            ),
+            BusTransport::Uart(transport) => (
+                transport.endpoint.as_ref(),
+                transport.async_endpoint.as_ref(),
+            ),
+        };
+        if asynchronous {
+            async_endpoint.or(blocking)
+        } else {
+            blocking
+        }
+    }
+}
+
+/// A device on an I2C bus: the address is part of the connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct I2cTransport {
+    pub bus: BusId,
+    /// The I2C address the device declares (`address="0x3C"`).
+    pub address: u8,
+    /// The endpoint type a deferred factory stores (blocking half).
+    pub endpoint: Option<RustType>,
+    /// The endpoint type a deferred async factory stores.
+    pub async_endpoint: Option<RustType>,
+}
+
+/// A device on a UART port.
+///
+/// A UART is point to point, so there is no address and no chip select: the
+/// device owns the port the `<uart>` declared. The endpoint types are the ones
+/// the recipe names, so a deferred factory can store the port it was built
+/// with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UartTransport {
+    pub bus: BusId,
+    /// The endpoint type a deferred factory stores (blocking half).
+    pub endpoint: Option<RustType>,
+    /// The endpoint type a deferred async factory stores.
+    pub async_endpoint: Option<RustType>,
+}
+
+/// A device on an SPI bus: it owns its chip select and its own transfer mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpiTransport {
+    pub bus: BusId,
+    /// The chip select the device owns (`cs="9"`).
+    pub cs: ClaimedPin,
+    /// The device's own SPI mode and clock, when its recipe declares
+    /// `spi_config`.
+    pub spi_config: Option<SpiConfig>,
+    /// The level that asserts this device's chip select.
+    pub cs_polarity: CsPolarity,
+    /// The endpoint type a deferred factory stores (blocking half).
+    pub endpoint: Option<RustType>,
+    /// The endpoint type a deferred async factory stores.
+    pub async_endpoint: Option<RustType>,
+}
+
+impl BusDevice {
     /// The device's id.
     pub fn id(&self) -> &Ident {
         &self.id
     }
 
-    /// Whether this device consumes `component`'s handle, so that component
-    /// emits its field as an `Option` the device takes at construction.
-    pub fn takes(&self, component: &Ident) -> bool {
-        self.takes_bus && self.bus_component.raw == component.raw
+    /// The bus this device binds to.
+    pub fn bus(&self) -> BusId {
+        self.transport.bus()
     }
 }
 
-impl crate::element::Lowered for Device {
+impl crate::element::Lowered for BusDevice {
     fn id(&self) -> &Ident {
         &self.id
     }
 
-    fn emit(&self, _board: &Board, cx: &mut crate::element::EmitCx) {
-        let name = format_ident!("{}", self.id.rust_name());
-        let ty: TokenStream = self
-            .ty
-            .parse()
-            .expect("a device field type is a Rust type expression");
-        let new: TokenStream = self
-            .new
-            .parse()
-            .expect("a device constructor is a Rust path");
-        let bus = format_ident!("{}", self.bus_component.rust_name());
-        let bus = if self.takes_bus {
-            let taken = self
-                .taken
-                .as_deref()
-                .unwrap_or("the device's bus was already taken");
-            quote! { components.#bus.take().expect(#taken) }
+    fn emit(&self, board: &Board, cx: &mut crate::element::EmitCx) {
+        let BusDevice {
+            id,
+            tag,
+            driver,
+            transport,
+        } = self;
+        let name = format_ident!("{}", id.rust_name());
+        let name_text = id.rust_name();
+        // A dual-mode driver on an embassy project resolves its bus async; the
+        // device then takes the async type and is always deferred.
+        let async_bus = board.bus_mode(transport.bus()) == BusMode::Async;
+        let ty = if async_bus {
+            driver.async_ty.as_ref().unwrap_or(&driver.ty)
         } else {
-            quote! { components.#bus }
+            &driver.ty
         };
-        let args: Vec<TokenStream> = self
-            .args
-            .iter()
-            .map(|arg| arg.parse().expect("a device argument is a Rust expression"))
-            .collect();
+        let new = if async_bus {
+            driver.async_new.as_ref().unwrap_or(&driver.new)
+        } else {
+            &driver.new
+        };
+        let deferred = async_bus || driver.init == Init::Deferred;
+        let mut args: Vec<TokenStream> = driver.args.iter().map(|arg| quote! { #arg }).collect();
 
-        cx.device_field(quote! {
-            pub #name: #ty,
-        });
-        cx.device_init(quote! {
-            #name: #new(#bus, #(#args),*),
-        });
-        // The same note the hand-written display carried: the pins were
-        // claimed through `<gpio>` references, so no other element has them.
-        if !self.pins.is_empty() {
-            let pins = self
-                .pins
-                .iter()
-                .map(|(_, pin)| format!("GPIO{}", pin.pin().0))
-                .collect::<Vec<_>>()
-                .join("/");
-            cx.safety_comment(
-                format!("{name}: {}(", self.new),
-                format!("SAFETY: espforge checked that no other component uses {pins}."),
-            );
+        // Build the bus and the device's own handle inside `Devices::new`, so
+        // the bus exists exactly once and nothing is exposed through a
+        // separate field the app could move out from under the device.
+        //
+        // The panel address is a constructor argument, not something the
+        // endpoint rewrites: the driver's own `I2c` calls reach the address it
+        // asks for, so a second part on the same bus is addressable too.
+        let handle = match transport {
+            BusTransport::I2c(i2c) => {
+                let address = Literal::u8_unsuffixed(i2c.address);
+                args.insert(0, quote! { #address });
+                crate::bus_emit::i2c_device(cx, board, i2c.bus)
+            }
+            BusTransport::Spi(spi) => {
+                // A config-declaring recipe applies its own mode and clock;
+                // every other part inherits the bus boot values.
+                let (config_khz, config_mode) = spi
+                    .spi_config
+                    .map(|config| (config.khz, config.mode))
+                    .unwrap_or_else(|| match board.resources.bus(spi.bus) {
+                        Some(Bus::Spi { khz, mode, .. }) => (*khz, *mode),
+                        _ => unreachable!("an SPI transport names an SPI bus"),
+                    });
+                crate::bus_emit::spi_device(
+                    cx,
+                    board,
+                    spi.bus,
+                    spi.cs.pin().0,
+                    config_khz,
+                    config_mode,
+                    spi.cs_polarity,
+                )
+            }
+            // A UART port has one peer, so the device takes the whole port and
+            // emission builds it once: lowering already refused a second bind.
+            BusTransport::Uart(uart) => crate::bus_emit::uart_device(cx, board, uart.bus),
+        };
+
+        // A device constructor is fallible, and the error carries the element
+        // id so a boot log names the part that did not answer.
+        let device = Literal::string(id.raw.as_str());
+        let fallible = quote! {
+            .map_err(|kind| espforge_runtime::DeviceError { device: #device, kind })?
+        };
+
+        if deferred {
+            // A deferred device stores a factory. The endpoint and its control
+            // lines are built now; the driver constructor and its I/O run when
+            // the app calls `init()`.
+            let factory = format_ident!("{}", factory_name(&name_text));
+            let endpoint_ty = transport.endpoint(async_bus).unwrap_or_else(|| {
+                panic!(
+                    "deferred device `<{}>` has no `endpoint` in its device_recipe",
+                    tag
+                )
+            });
+
+            let mut fields = vec![quote! { endpoint: #endpoint_ty }];
+            let mut pin_inits = Vec::new();
+            let mut call_args = vec![quote! { self.endpoint }];
+            for (arg, expression) in driver.factory_args.iter().zip(args.iter()) {
+                match arg {
+                    FactoryArg::Pin {
+                        name,
+                        optional,
+                        direction,
+                    } => {
+                        let field = format_ident!("pin_{}", name);
+                        let field_ty = match direction {
+                            Direction::Output => quote! { esp_hal::gpio::Output<'static> },
+                            Direction::Input => quote! { esp_hal::gpio::Input<'static> },
+                            Direction::Bidirectional => {
+                                quote! { espforge_runtime::Bidirectional }
+                            }
+                        };
+                        let field_ty = if *optional {
+                            quote! { Option<#field_ty> }
+                        } else {
+                            field_ty
+                        };
+                        fields.push(quote! { #field: #field_ty });
+                        pin_inits.push(quote! { #field: #expression });
+                        call_args.push(quote! { self.#field });
+                    }
+                    FactoryArg::Constant(_) => call_args.push(expression.clone()),
+                }
+            }
+
+            let factory_impl = if async_bus {
+                quote! {
+                    impl espforge_runtime::AsyncDeferredInit for #factory {
+                        type Device = #ty;
+
+                        fn init(
+                            self,
+                        ) -> impl core::future::Future<
+                            Output = Result<Self::Device, espforge_runtime::DeviceError>,
+                        > {
+                            async move {
+                                #new(#(#call_args),*)
+                                    .await
+                                    .map_err(|kind| espforge_runtime::DeviceError { device: #device, kind })
+                            }
+                        }
+                    }
+                }
+            } else {
+                quote! {
+                    impl espforge_runtime::DeferredInit for #factory {
+                        type Device = #ty;
+
+                        fn init(self) -> Result<Self::Device, espforge_runtime::DeviceError> {
+                            #new(#(#call_args),*)
+                                .map_err(|kind| espforge_runtime::DeviceError { device: #device, kind })
+                        }
+                    }
+                }
+            };
+
+            cx.module_item(quote! {
+                /// Built during `Devices::new`, initialised after boot.
+                pub struct #factory {
+                    #(#fields,)*
+                }
+
+                #factory_impl
+            });
+
+            let factory_expr = quote! {
+                #factory {
+                    endpoint: #handle,
+                    #(#pin_inits,)*
+                }
+            };
+
+            // Every device on an embassy board shares one access shape, so
+            // `device!` can always await a lock: an async bus (always
+            // deferred) and a synchronous part on the same board differ only
+            // in the deferred flavour stored inside the mutex.
+            if async_bus {
+                cx.device_field(quote! {
+                    pub #name: espforge_runtime::AsyncMutex<
+                        espforge_runtime::AsyncDeferred<#factory>,
+                    >,
+                });
+                cx.device_init(quote! {
+                    #name: espforge_runtime::AsyncMutex::new(
+                        espforge_runtime::AsyncDeferred::new(#factory_expr),
+                    ),
+                });
+            } else if board.meta.runtime == Runtime::Embassy {
+                cx.device_field(quote! {
+                    pub #name: espforge_runtime::AsyncMutex<
+                        espforge_runtime::Deferred<#factory>,
+                    >,
+                });
+                cx.device_init(quote! {
+                    #name: espforge_runtime::AsyncMutex::new(
+                        espforge_runtime::Deferred::new(#factory_expr),
+                    ),
+                });
+            } else {
+                cx.device_field(quote! {
+                    pub #name: espforge_runtime::Deferred<#factory>,
+                });
+                cx.device_init(quote! {
+                    #name: espforge_runtime::Deferred::new(#factory_expr),
+                });
+            }
+            return;
+        }
+
+        if board.meta.runtime == Runtime::Embassy {
+            cx.device_field(quote! {
+                pub #name: espforge_runtime::AsyncMutex<#ty>,
+            });
+            cx.device_init(quote! {
+                #name: espforge_runtime::AsyncMutex::new(
+                    #new(#handle, #(#args),*) #fallible
+                ),
+            });
+        } else {
+            cx.device_field(quote! {
+                pub #name: #ty,
+            });
+            cx.device_init(quote! {
+                #name: #new(#handle, #(#args),*) #fallible,
+            });
         }
     }
 }
 
 /// Everything the emitters need: the project settings, the resources it owns,
-/// the components on them, the devices over those and the services.
+/// the pin devices and bus devices on them, and the services.
 #[derive(Debug, Clone)]
 pub struct Board {
     pub meta: Meta,
     pub resources: ResourceGraph,
-    pub components: Vec<Component>,
+    /// Pin devices (`<led>`, `<button>`) and bus devices.
     pub devices: Vec<Device>,
     pub services: Vec<Service>,
     /// Warnings collected while lowering. Warnings never stop the build, so
@@ -766,7 +1362,7 @@ impl Board {
     pub fn service_features(&self) -> Vec<&str> {
         self.services
             .iter()
-            .map(|service| service.feature.as_str())
+            .filter_map(Service::feature)
             .fold(Vec::new(), |mut out, feature| {
                 if !out.contains(&feature) {
                     out.push(feature);
@@ -777,10 +1373,7 @@ impl Board {
 
     /// The largest heap any service needs (`embedded-tls` scratch), in bytes.
     pub fn max_service_heap(&self) -> Option<u32> {
-        self.services
-            .iter()
-            .filter_map(|service| service.heap_bytes)
-            .max()
+        self.services.iter().filter_map(Service::heap_bytes).max()
     }
 
     /// The driver features the project needs, in declaration order and without
@@ -791,7 +1384,22 @@ impl Board {
     pub fn driver_features(&self) -> Vec<&str> {
         self.devices
             .iter()
-            .map(|device| device.feature.as_str())
+            .filter_map(Device::as_bus)
+            // An external package names its own crate in `Cargo.toml`; its
+            // feature belongs to that crate, not to `espforge-drivers`.
+            .filter(|device| device.driver.package.is_none())
+            .map(|device| {
+                let asynchronous = self.bus_mode(device.bus()) == BusMode::Async;
+                if asynchronous {
+                    device
+                        .driver
+                        .async_feature
+                        .as_deref()
+                        .unwrap_or(&device.driver.feature)
+                } else {
+                    device.driver.feature.as_str()
+                }
+            })
             .fold(Vec::new(), |mut out, feature| {
                 if !out.contains(&feature) {
                     out.push(feature);
@@ -800,13 +1408,54 @@ impl Board {
             })
     }
 
+    /// The mode one bus is driven in, resolved from the drivers bound to it.
+    ///
+    /// A blocking-only driver forces a blocking bus; an async-only one forces
+    /// an async bus (a mix is refused by lowering as `E0909`). A bus no device
+    /// binds to follows the scheduler, because it is exposed as a direct raw
+    /// handle: an embassy project's `<i2c>` is async, a blocking project's is
+    /// blocking.
+    pub fn bus_mode(&self, bus: BusId) -> BusMode {
+        let mut bound = false;
+        let mut every_supports_async = true;
+        for device in self
+            .devices
+            .iter()
+            .filter_map(Device::as_bus)
+            .filter(|device| device.bus() == bus)
+        {
+            bound = true;
+            if device.driver.runtimes.async_only() {
+                return BusMode::Async;
+            }
+            if !device.driver.runtimes.asynchronous {
+                every_supports_async = false;
+            }
+        }
+        if bound {
+            // A dual-mode driver follows the project's scheduler: an embassy
+            // project can await its transfers, a blocking one keeps the bus
+            // blocking. A blocking-only device on the bus keeps it blocking.
+            if every_supports_async && self.meta.runtime == Runtime::Embassy {
+                BusMode::Async
+            } else {
+                BusMode::Blocking
+            }
+        } else if self.meta.runtime == Runtime::Embassy {
+            BusMode::Async
+        } else {
+            BusMode::Blocking
+        }
+    }
+
     /// Crates the declared drivers need the project to name, in declaration
     /// order and without duplicates (`embedded-graphics` for a display). A
     /// device whose recipe names no dependency adds none.
     pub fn driver_deps(&self) -> Vec<&str> {
         self.devices
             .iter()
-            .flat_map(|device| device.deps.iter().map(String::as_str))
+            .filter_map(Device::as_bus)
+            .flat_map(|device| device.driver.deps.iter().map(String::as_str))
             .fold(Vec::new(), |mut out, dep| {
                 if !out.contains(&dep) {
                     out.push(dep);
@@ -815,11 +1464,146 @@ impl Board {
             })
     }
 
-    /// Whether a device takes this component's handle: the component then
-    /// emits its field as an `Option` the device takes at construction.
-    pub fn takes_component(&self, id: &Ident) -> bool {
-        self.devices.iter().any(|device| device.takes(id))
+    /// The external driver packages this board uses, one per package name.
+    ///
+    /// Two devices from one crate share one dependency line, so
+    /// `Cargo.toml` names each package once.
+    pub fn driver_packages(&self) -> Vec<&espforge_schema::PackageRef> {
+        self.devices
+            .iter()
+            .filter_map(Device::as_bus)
+            .filter_map(|device| device.driver.package.as_ref())
+            .fold(Vec::new(), |mut out, package| {
+                if !out
+                    .iter()
+                    .any(|known: &&espforge_schema::PackageRef| known.package == package.package)
+                {
+                    out.push(package);
+                }
+                out
+            })
     }
+
+    /// Every dependency the board's drivers name, deduplicated by package.
+    ///
+    /// A v2 manifest names its full dependency set; a v1 element is converted
+    /// from `crate`, `expose` and the bundled `deps` list. Two drivers naming
+    /// one package with different sources are refused here, with both manifest
+    /// paths, rather than letting Cargo silently pick one.
+    pub fn driver_dependencies(&self) -> Result<Vec<espforge_schema::Dependency>, String> {
+        let mut out: Vec<espforge_schema::Dependency> = Vec::new();
+        let mut from: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        for device in self.devices.iter().filter_map(Device::as_bus) {
+            let mut dependencies = device.driver.dependencies.clone();
+            if dependencies.is_empty() {
+                if let Some(package) = &device.driver.package {
+                    dependencies.push(espforge_schema::Dependency::from_package(package));
+                }
+                dependencies.extend(
+                    device
+                        .driver
+                        .expose
+                        .iter()
+                        .map(espforge_schema::Dependency::from_expose),
+                );
+                for dep in &device.driver.deps {
+                    if !dependencies.iter().any(|known| &known.package == dep) {
+                        dependencies.push(espforge_schema::Dependency {
+                            package: dep.clone(),
+                            version: None,
+                            path: None,
+                            git: None,
+                            rev: None,
+                            features: Vec::new(),
+                            default_features: true,
+                        });
+                    }
+                }
+            }
+            let manifest = device
+                .driver
+                .manifest
+                .clone()
+                .unwrap_or_else(|| format!("bundled <{}>", device.tag));
+            for dependency in dependencies {
+                match out
+                    .iter_mut()
+                    .find(|known| known.package == dependency.package)
+                {
+                    None => {
+                        from.insert(dependency.package.clone(), manifest.clone());
+                        out.push(dependency);
+                    }
+                    Some(existing) => {
+                        let first = from
+                            .get(&dependency.package)
+                            .map(String::as_str)
+                            .unwrap_or("?");
+                        if !existing.same_source(&dependency) {
+                            let mut detail = String::new();
+                            if let (Some(kept), Some(wanted)) =
+                                (&existing.version, &dependency.version)
+                            {
+                                detail = format!(
+                                    "\n   '{first}' requires `{kept}`, '{manifest}' requires \
+                                     `{wanted}`"
+                                );
+                            }
+                            return Err(format!(
+                                "DRIVER_DEPENDENCY_CONFLICT: `{}` is named by '{first}' and \
+                                 '{manifest}' with different sources{detail}\n   fix: use one \
+                                 source, narrow a requirement, or rename one crate",
+                                dependency.package
+                            ));
+                        }
+                        // A compatible second sighting only widens the line:
+                        // the stricter requirement, every feature, and default
+                        // features while both want them.
+                        existing.absorb(&dependency);
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// The crates the board's drivers expose to app code, one per name.
+    pub fn expose_deps(&self) -> Vec<&espforge_schema::Expose> {
+        self.devices
+            .iter()
+            .filter_map(Device::as_bus)
+            .flat_map(|device| device.driver.expose.iter())
+            .fold(Vec::new(), |mut out, expose| {
+                if !out
+                    .iter()
+                    .any(|known: &&espforge_schema::Expose| known.package == expose.package)
+                {
+                    out.push(expose);
+                }
+                out
+            })
+    }
+}
+
+/// The generated factory type for one deferred device: `oled` -> `OledFactory`.
+fn factory_name(id: &str) -> String {
+    let mut out = String::new();
+    let mut upper = true;
+    for ch in id.chars() {
+        if ch == '_' {
+            upper = true;
+            continue;
+        }
+        if upper {
+            out.extend(ch.to_uppercase());
+            upper = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push_str("Factory");
+    out
 }
 
 #[cfg(test)]
@@ -844,6 +1628,64 @@ mod tests {
         }
     }
 
+    fn dependency(package: &str, version: Option<&str>) -> espforge_schema::Dependency {
+        espforge_schema::Dependency {
+            package: package.into(),
+            version: version.map(str::to_string),
+            path: None,
+            git: None,
+            rev: None,
+            features: Vec::new(),
+            default_features: true,
+        }
+    }
+
+    #[test]
+    fn near_versions_of_one_crate_are_one_source() {
+        assert!(
+            dependency("embedded-graphics", Some("0.8.1"))
+                .same_source(&dependency("embedded-graphics", Some("0.8.2")))
+        );
+        assert!(
+            !dependency("embedded-graphics", Some("0.8.1"))
+                .same_source(&dependency("embedded-graphics", Some("0.9.0")))
+        );
+    }
+
+    #[test]
+    fn a_missing_version_is_compatible_with_any_version() {
+        assert!(
+            dependency("embedded-graphics", None)
+                .same_source(&dependency("embedded-graphics", Some("0.8.1")))
+        );
+    }
+
+    #[test]
+    fn a_different_revision_is_a_different_source() {
+        let mut left = dependency("esp-hal", Some("1.2.2"));
+        let mut right = dependency("esp-hal", Some("1.2.2"));
+        left.git = Some("https://example.invalid/hal".into());
+        left.rev = Some("aaa".into());
+        right.git = left.git.clone();
+        right.rev = Some("bbb".into());
+        assert!(!left.same_source(&right));
+    }
+
+    #[test]
+    fn absorbing_keeps_the_stricter_requirement_and_both_feature_sets() {
+        let mut left = dependency("embedded-graphics", Some("0.8.1"));
+        left.features = vec!["font".into()];
+        let mut right = dependency("embedded-graphics", Some("0.8.2"));
+        right.features = vec!["font".into(), "fixed".into()];
+        right.default_features = false;
+
+        left.absorb(&right);
+
+        assert_eq!(left.version.as_deref(), Some("0.8.2"));
+        assert_eq!(left.features, ["font", "fixed"]);
+        assert!(!left.default_features);
+    }
+
     /// `<led ...>` at `at` as the diagnostics corpus would see it.
     fn led_claim(
         g: &mut ResourceGraph,
@@ -853,7 +1695,7 @@ mod tests {
     ) -> Result<ClaimedPin, Conflict> {
         g.claim(
             Pin(pin),
-            owner(OwnerKind::Recipe("led"), name, at + 1),
+            owner(OwnerKind::Pin("led".into()), name, at + 1),
             at..at + 4 + name.len(),
             PinUse::Output,
         )
@@ -884,7 +1726,7 @@ mod tests {
         let p = led_claim(&mut g, 18, "red-led", 40).unwrap();
 
         assert_eq!(p.pin(), Pin(18));
-        assert_eq!(p.owner().kind, OwnerKind::Recipe("led"));
+        assert_eq!(p.owner().kind, OwnerKind::Pin("led".into()));
         assert_eq!(p.owner().id.raw, "red-led");
         assert_eq!(p.owner().id.span, 41..48);
         assert_eq!(p.claim().span, 40..51);
@@ -909,6 +1751,34 @@ mod tests {
     }
 
     #[test]
+    fn a_runtime_held_peripheral_cannot_be_claimed() {
+        let mut g = ResourceGraph::new();
+        g.hold("UART0", "the log console", "use another UART");
+        let refusal = g
+            .claim_peripheral("UART0", owner(OwnerKind::Uart, "gps", 10), 10..30)
+            .expect_err("the console has it");
+        let PeripheralRefusal::Held(clash) = refusal else {
+            panic!("a held resource is not an element clash");
+        };
+        assert_eq!(clash.peripheral, "UART0");
+        assert_eq!(clash.held.holder, "the log console");
+        assert_eq!(g.peripheral_claims().count(), 0, "nothing is recorded");
+    }
+
+    #[test]
+    fn held_resources_are_listed_by_name() {
+        let mut g = ResourceGraph::new();
+        g.hold("TIMG0.timer0", "the embassy tick", "use another timer");
+        g.hold("UART0", "the log console", "use another UART");
+        assert_eq!(
+            g.held_resources().map(|(name, _)| name).collect::<Vec<_>>(),
+            ["TIMG0.timer0", "UART0"]
+        );
+        assert_eq!(g.held("UART0").unwrap().holder, "the log console");
+        assert!(g.held("UART1").is_none());
+    }
+
+    #[test]
     fn opposite_directions_are_a_direction_clash() {
         let mut g = ResourceGraph::new();
         led_claim(&mut g, 18, "red_led", 10).unwrap();
@@ -922,7 +1792,7 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(conflict.kind, ConflictKind::Direction);
-        assert_eq!(conflict.existing.owner.kind, OwnerKind::Recipe("led"));
+        assert_eq!(conflict.existing.owner.kind, OwnerKind::Pin("led".into()));
         assert_eq!(conflict.incoming.owner.kind, OwnerKind::Gpio);
     }
 
@@ -956,14 +1826,14 @@ mod tests {
                 conflict.existing.owner.kind,
                 conflict.existing.owner.id.raw.as_str()
             ),
-            (OwnerKind::Recipe("led"), "red_led")
+            (OwnerKind::Pin("led".into()), "red_led")
         );
         assert_eq!(
             (
                 conflict.incoming.owner.kind,
                 conflict.incoming.owner.id.raw.as_str()
             ),
-            (OwnerKind::Recipe("led"), "other")
+            (OwnerKind::Pin("led".into()), "other")
         );
     }
 
@@ -984,13 +1854,12 @@ mod tests {
         let board = Board {
             meta: meta("blink"),
             resources,
-            components: Vec::new(),
             devices: Vec::new(),
             services: Vec::new(),
             warnings: Vec::new(),
         };
 
-        assert!(board.components.is_empty());
+        assert!(board.devices.is_empty());
         assert_eq!(board.resources.claim_of(Pin(18)).unwrap().span, 10..21);
     }
 }

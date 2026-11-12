@@ -10,7 +10,7 @@ use espforge_diagnostics::codes;
 use linkme::distributed_slice;
 
 use crate::attrs::Issue;
-use crate::element::{Element, LowerCx, Reported};
+use crate::element::{Element, LowerCx, Reported, Section};
 use crate::generated::spi::Attrs;
 use crate::model::{Bus, Owner, OwnerKind, Pin, PinUse};
 use crate::peripherals::parse_khz;
@@ -23,12 +23,12 @@ pub struct Spi;
 static SPI: &dyn Element = &Spi;
 
 impl Element for Spi {
-    fn tag(&self) -> &'static str {
+    fn tag(&self) -> &str {
         "spi"
     }
 
-    fn lower(&self, node: &ParsedNode<'_>, cx: &mut LowerCx) -> Result<(), Reported> {
-        let id = cx.ident(node);
+    fn lower(&self, node: &ParsedNode<'_>, cx: &mut LowerCx<'_>) -> Result<(), Reported> {
+        let id = cx.checked_ident(node, Section::Peripherals)?;
         if id.raw != "spi2" {
             return Err(cx.report(
                 codes::SPI_INVALID_ID,
@@ -59,7 +59,14 @@ impl Element for Spi {
         let sclk = claim_bus_pin(cx, attrs.sclk.value, owner.clone(), span.clone())?;
         let mosi = claim_bus_pin(cx, attrs.mosi.value, owner.clone(), span.clone())?;
         let miso = match attrs.miso {
-            Some(miso) => Some(claim_bus_pin(cx, miso.value, owner, span)?),
+            Some(miso) => Some(claim_bus_pin(cx, miso.value, owner.clone(), span.clone())?),
+            None => None,
+        };
+        let cs = match attrs.cs {
+            Some(cs) => Some(
+                cx.claim_pin(Pin(cs.value), owner, span, PinUse::Unspecified)
+                    .map_err(|refusal| refusal.report(cx))?,
+            ),
             None => None,
         };
 
@@ -71,24 +78,25 @@ impl Element for Spi {
             miso,
             khz,
             mode: attrs.mode.value as u8,
+            cs,
         });
         Ok(())
     }
 }
 
 fn claim_bus_pin(
-    cx: &mut LowerCx,
+    cx: &mut LowerCx<'_>,
     pin: u8,
     owner: Owner,
     span: std::ops::Range<usize>,
 ) -> Result<crate::model::ClaimedPin, Reported> {
     cx.claim_pin(Pin(pin), owner, span, PinUse::Bidirectional)
-        .map_err(|conflict| cx.report_conflict(&conflict))
+        .map_err(|refusal| refusal.report(cx))
 }
 
 /// This element's wording for a schema-level problem: `mode` keeps its own
 /// title, everything else is a pin problem.
-fn describe(cx: &mut LowerCx, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
+fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
     let id = node.id;
     match issue {
         Issue::Invalid {

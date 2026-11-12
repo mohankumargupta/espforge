@@ -1,12 +1,15 @@
 // The `# services` half of the schema: the network clients and the NTP
 // client, kept beside the core vocabulary in `espf.schema.kdl`.
 //
-// A service is software over an interface: it owns no pin, and every element
-// here carries a `service_recipe` instead of a Rust element file. The recipe
-// names the attribute holding the network reference, the runtime feature, the
-// config struct and its constructor, and one `field` or `arg` per remaining
-// attribute. Filling those slots is `espforge-elements`'s job, and the lowerer
-// knows no tag.
+// A service is software over an interface: it owns no pin, and the network
+// clients carry a `service_recipe` instead of a Rust element file. A provider
+// (today `<wifi_station>`, hand-written in `espf.schema.kdl`) declares
+// `provides "network"`, and every client's `network=` attribute says
+// `to="network"`: the reference resolves by that capability, not by the
+// provider's tag. The recipe names the attribute holding the network reference,
+// the runtime feature, the config struct and its constructor, and one `field`
+// or `arg` per remaining attribute. Filling those slots is
+// `espforge-elements`'s job, and the lowerer knows no tag.
 //
 // `espforge-schema::load_all` composes this file with `espf.schema.kdl`, and
 // `espforge-schema::schema()` is the composed pair already parsed. The
@@ -17,7 +20,7 @@ element "http_client" section="services" {
     summary "Async HTTP client over an established network interface"
     description "Provides outgoing HTTP/1.1 requests (GET, POST, PUT, DELETE) using edge-http."
     attr "id" kind="ident" required=#true
-    attr "network" kind="ref" to="wifi_station" required=#true {
+    attr "network" kind="ref" to="network" required=#true {
         help "The network component providing TCP/IP connectivity."
     }
     attr "rx_buffer_size" kind="u32" default="2048" {
@@ -29,11 +32,20 @@ element "http_client" section="services" {
     attr "timeout_ms" kind="u32" default="10000" {
         help "Socket connection and read/write timeout in milliseconds."
     }
+    attr "connections" kind="u32" default="1" {
+        help "Requests this client can have in flight at once, 1 to 4. Each one owns a connection buffer and a TCP socket pool, so every slot costs about 7 KiB of static RAM."
+    }
     service_recipe {
         network "network"
         feature "http-client"
         type "espforge_runtime::HttpClient"
-        new "espforge_runtime::HttpClient::new"
+        new "espforge_runtime::HttpClient::new_in"
+        // A const field is the `::<value>` the type, the constructor and the
+        // storage take, not a config member.
+        field "connections" const=#true range="1..=4"
+        // One storage per `<http_client>`: the generated project declares the
+        // `static` this constructor fills.
+        storage "espforge_runtime::HttpClientStorage"
         config "espforge_runtime::HttpClientConfig"
         field "rx_buffer_size" as="rx_buffer_size as usize" min=512
         field "tx_buffer_size" as="tx_buffer_size as usize"
@@ -41,7 +53,8 @@ element "http_client" section="services" {
     }
     example "minimal" #"<http_client id="client" network="$home" />"#
     example "custom buffers" #"<http_client id="client" network="$home" rx_buffer_size="4096" timeout_ms="5000" />"#
-    see_also "components/wifi_station"
+    example "two requests at a time" #"<http_client id="client" network="$home" connections="2" />"#
+    see_also "services/wifi_station"
     see_also "services/https_client"
 }
 
@@ -49,7 +62,7 @@ element "https_client" section="services" {
     summary "Async TLS 1.3 encrypted HTTPS client over an established network interface"
     description "Provides outgoing HTTPS requests with TLS 1.3 (embedded-tls)."
     attr "id" kind="ident" required=#true
-    attr "network" kind="ref" to="wifi_station" required=#true {
+    attr "network" kind="ref" to="network" required=#true {
         help "The network component providing TCP/IP connectivity."
     }
     attr "rx_buffer_size" kind="u32" default="4096" {
@@ -79,7 +92,7 @@ element "https_client" section="services" {
     }
     example "secure client" #"<https_client id="secure_client" network="$home" />"#
     example "insecure for development" #"<https_client id="dev_client" network="$home" insecure="true" />"#
-    see_also "components/wifi_station"
+    see_also "services/wifi_station"
     see_also "services/http_client"
 }
 
@@ -87,7 +100,7 @@ element "ws_client" section="services" {
     summary "Async WebSocket client over an established network interface"
     description "Provides outgoing RFC 6455 WebSocket connections (ws://) using edge-ws and edge-http."
     attr "id" kind="ident" required=#true
-    attr "network" kind="ref" to="wifi_station" required=#true {
+    attr "network" kind="ref" to="network" required=#true {
         help "The network component providing TCP/IP connectivity."
     }
     attr "rx_buffer_size" kind="u32" default="2048" {
@@ -111,7 +124,7 @@ element "ws_client" section="services" {
     }
     example "minimal" #"<ws_client id="ws" network="$home" />"#
     example "custom buffers" #"<ws_client id="ws" network="$home" rx_buffer_size="4096" tx_buffer_size="2048" timeout_ms="15000" />"#
-    see_also "components/wifi_station"
+    see_also "services/wifi_station"
     see_also "services/wss_client"
     see_also "services/http_client"
 }
@@ -120,7 +133,7 @@ element "wss_client" section="services" {
     summary "Async TLS 1.3 encrypted WebSocket client over an established network interface"
     description "Provides outgoing secure RFC 6455 WebSocket connections (wss://) using edge-ws over embedded-tls."
     attr "id" kind="ident" required=#true
-    attr "network" kind="ref" to="wifi_station" required=#true {
+    attr "network" kind="ref" to="network" required=#true {
         help "The network component providing TCP/IP connectivity."
     }
     attr "rx_buffer_size" kind="u32" default="4096" {
@@ -150,7 +163,7 @@ element "wss_client" section="services" {
     }
     example "secure client" #"<wss_client id="secure_ws" network="$home" />"#
     example "insecure for development" #"<wss_client id="dev_ws" network="$home" insecure="true" />"#
-    see_also "components/wifi_station"
+    see_also "services/wifi_station"
     see_also "services/ws_client"
     see_also "services/https_client"
 }
@@ -159,7 +172,7 @@ element "ntp" section="services" {
     summary "Async SNTP client for wall-clock time synchronization"
     description "Queries NTP/SNTPv4 servers (RFC 5905) over an established network interface using sntpc."
     attr "id" kind="ident" required=#true
-    attr "network" kind="ref" to="wifi_station" required=#true {
+    attr "network" kind="ref" to="network" required=#true {
         help "The network interface component providing UDP/IP connectivity."
     }
     attr "server" kind="str" default="pool.ntp.org" {
@@ -183,6 +196,6 @@ element "ntp" section="services" {
     }
     example "minimal" #"<ntp id="clock" network="$home" />"#
     example "custom server and timeout" #"<ntp id="clock" network="$home" server="time.google.com" timeout_ms="3000" />"#
-    see_also "components/wifi_station"
+    see_also "services/wifi_station"
     see_also "services/http_client"
 }

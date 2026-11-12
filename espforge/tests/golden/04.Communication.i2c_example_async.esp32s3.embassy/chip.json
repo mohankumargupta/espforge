@@ -1,5 +1,5 @@
 {
-  "name": "chip",
+  "name": "i2cexampleasync",
   "author": "Raspberry Pi",
   "pins": [
     "SDA",

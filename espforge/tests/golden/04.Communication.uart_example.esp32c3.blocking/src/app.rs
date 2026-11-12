@@ -3,7 +3,7 @@ use crate::Context;
 
 pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
-    let uart = component!(ctx, uart1_wokwi_chip);
+    let uart = device!(ctx, uart1);
 
     uart.write_str("Hello\n").expect("uart write failed");
     logger.info("UART ready; type a line terminated by newline");
@@ -12,7 +12,7 @@ pub fn setup(ctx: &mut Context) {
 pub fn forever(ctx: &mut Context) {
     let logger = ctx.logger;
     let delay = ctx.delay;
-    let uart = component!(ctx, uart1_wokwi_chip);
+    let uart = device!(ctx, uart1);
 
     // Line reading is backed by esp-hal's `read_buffered` + `\n` scan (§20.5).
     // `read_line` fills `buf` until a newline (or it is full) and returns the

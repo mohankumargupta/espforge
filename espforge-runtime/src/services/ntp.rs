@@ -7,13 +7,16 @@
 //! source ([`NtpTimestampGenerator`] over [`Instant`]) — and the DNS lookup
 //! that turns the configured host name into a socket address.
 //!
-//! There is no RTC on the board, so the timestamp source counts from boot:
-//! round-trip delay stays correct, and the server's own transmit timestamp is
-//! what becomes the reported Unix time. `sntpc` reconstructs the NTP era
-//! around that boot-relative pivot, which is right while the real Unix time is
-//! within half an era (2^31 seconds) of 1970 — that is, through 2038.
+//! There is no RTC on the board, so [`NtpClient::sync`] anchors the server's
+//! Unix time to the monotonic clock, and [`NtpClient::now`] reads it back
+//! without touching the network. Before the first sync, `sntpc` reconstructs
+//! the NTP era around a pivot derived from the firmware's build time
+//! ([`crate::clock::era_hint`]), not from boot: a firmware flashed in 2040
+//! resolves era 1 even if it has never seen a server.
 
 use core::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
+use crate::clock::{Clock, ClockError, UnixTime, era_hint, era_start_unix};
 
 use embassy_net::Stack;
 use embassy_net::dns::DnsQueryType;
@@ -74,16 +77,45 @@ pub struct NtpTimestamp {
     pub offset_us: i64,
 }
 
-/// A handle to the board's SNTP client. `Copy`, so it can sit on `Services`.
-#[derive(Clone, Copy)]
+/// A handle to the board's SNTP client and the wall clock it writes.
+///
+/// Not `Copy`: the clock owns its anchor. `service!(ctx, clock)` borrows it,
+/// and [`clock`](Self::clock) hands the clock to code that never talks SNTP.
 pub struct NtpClient {
     stack: Stack<'static>,
     config: NtpConfig,
+    clock: Clock,
 }
 
 impl NtpClient {
     pub fn new(stack: Stack<'static>, config: NtpConfig) -> Self {
-        Self { stack, config }
+        Self {
+            stack,
+            config,
+            clock: Clock::new(),
+        }
+    }
+
+    /// Query the server, and on success make that time readable from
+    /// [`now`](Self::now).
+    ///
+    /// A failed or timed-out query leaves the previous anchor (or its absence)
+    /// untouched.
+    pub async fn sync(&self) -> Result<NtpTimestamp, NtpError> {
+        let time = self.get_time().await?;
+        self.clock
+            .set(UnixTime::new(time.unix_seconds, time.microseconds));
+        Ok(time)
+    }
+
+    /// The last synced time plus monotonic elapsed time, with no network I/O.
+    pub fn now(&self) -> Result<UnixTime, ClockError> {
+        self.clock.now()
+    }
+
+    /// The clock this client writes, for a task that only reads the time.
+    pub fn clock(&self) -> &Clock {
+        &self.clock
     }
 
     /// Query the configured server for the current network time.
@@ -125,7 +157,14 @@ impl NtpClient {
         socket.bind(0).map_err(|_| NtpError::Socket)?;
 
         let socket = EmbassyNtpSocket { socket };
-        let context = NtpContext::new(EmbassyTimestampGen::new());
+        // `sntpc` picks the era nearest this pivot. A synced clock is exact;
+        // before the first sync the firmware's build era is the best available
+        // answer, and the anchor corrects it on the first successful query.
+        let pivot = match self.clock.now() {
+            Ok(time) => time.seconds,
+            Err(_) => era_start_unix(era_hint()),
+        };
+        let context = NtpContext::new(EmbassyTimestampGen::new(pivot));
         let result = get_time(server, &socket, context)
             .await
             .map_err(map_error)?;
@@ -218,12 +257,15 @@ impl NtpUdpSocket for EmbassyNtpSocket<'_> {
 #[derive(Clone, Copy)]
 struct EmbassyTimestampGen {
     start: Instant,
+    /// The Unix second the pivot represents; elapsed time is added on top.
+    epoch: u64,
 }
 
 impl EmbassyTimestampGen {
-    fn new() -> Self {
+    fn new(epoch: u64) -> Self {
         Self {
             start: Instant::now(),
+            epoch,
         }
     }
 }
@@ -236,7 +278,7 @@ impl NtpTimestampGenerator for EmbassyTimestampGen {
     }
 
     fn timestamp_sec(&self) -> u64 {
-        Instant::now().duration_since(self.start).as_secs()
+        self.epoch + Instant::now().duration_since(self.start).as_secs()
     }
 
     fn timestamp_subsec_micros(&self) -> u32 {

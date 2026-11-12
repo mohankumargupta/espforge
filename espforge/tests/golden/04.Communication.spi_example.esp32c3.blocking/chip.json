@@ -1,5 +1,5 @@
 {
-  "name": "chip",
+  "name": "spiexample",
   "author": "Raspberry Pi",
   "pins": [
     "MISO",

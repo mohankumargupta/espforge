@@ -2,7 +2,7 @@
 //!
 //! An [`Element`] owns one schema tag. It reads that tag's generated
 //! [`Attrs`](crate::generated), reports problems through [`LowerCx`], and
-//! pushes a [`Component`] whose [`Lowered`] implementation emits its own Rust
+//! pushes a [`Device`] whose [`Lowered`] implementation emits its own Rust
 //! through [`EmitCx`]. Nothing here knows the name of a single element.
 //!
 //! Diagnostics are collected, not returned at the first one, like the core
@@ -12,38 +12,101 @@
 use std::ops::Range;
 
 use espf::context::ParsedNode;
+use espforge_diagnostics::codes;
 use espforge_diagnostics::{DiagCode, Diagnostic};
+use espforge_schema::Schema;
 use proc_macro2::TokenStream;
 use quote::format_ident;
 
 use crate::model::{
-    Board, Bus, BusId, ClaimedPin, Component, Conflict, ConflictKind, Device, GpioDecl, Ident,
-    Meta, Owner, PeripheralClash, Pin, PinUse, ResourceGraph, Service,
+    Board, Bus, BusId, ClaimedPin, Conflict, ConflictKind, Device, GpioDecl, Ident, Meta, Owner,
+    PeripheralRefusal, Pin, PinUse, ResourceGraph, Service,
 };
+
+/// The names the generated code already binds, so an id that matches one of
+/// them would produce a `rustc` error in `main.rs`/`lib.rs` instead of a
+/// located diagnostic.
+///
+/// The list is the contract between this check and the emitter: a new local in
+/// `main()` or a new `Context` field must be added here, and a test in
+/// `espforge-emit` fails until it is.
+pub const RESERVED_IDENTS: &[&str] = &[
+    // `main()` locals and `Context` fields.
+    "registry",
+    "peripherals",
+    "logger",
+    "delay",
+    "ctx",
+    "devices",
+    "services",
+    "spawner",
+    // Crate items and the `app.rs` contract.
+    "app",
+    "main",
+    "setup",
+    "forever",
+    "Context",
+    "CTX",
+];
+
+/// Which `# section` an element was lowered from.
+///
+/// Only the reserved-id check reads it: each section family has its own code,
+/// so a reader can tell a device id from a service id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    Peripherals,
+    Devices,
+    Services,
+}
+
+impl Section {
+    /// The code a reserved id in this section reports.
+    fn reserved_id_code(self) -> DiagCode {
+        match self {
+            // Peripherals have no reserved-id family of their own: `<gpio>` ids
+            // are never bound as fields, so they reuse the legacy diagnostics code.
+            Section::Peripherals => codes::COMPONENT_RESERVED_ID,
+            Section::Services => codes::SERVICE_RESERVED_ID,
+            Section::Devices => codes::DEVICE_RESERVED_ID,
+        }
+    }
+
+    /// The word the diagnostic uses for this section.
+    fn noun(self) -> &'static str {
+        match self {
+            Section::Peripherals => "peripheral",
+            Section::Devices => "device",
+            Section::Services => "service",
+        }
+    }
+}
 
 /// One element tag: reads its node and lowers it onto the board.
 pub trait Element: Sync {
     /// The schema tag this element implements (`gpio`). It must name an
     /// element in `espf.schema.kdl`.
-    fn tag(&self) -> &'static str;
+    fn tag(&self) -> &str;
 
     /// Read `node` and record what it lowers to in `cx`. A failure has
     /// already been pushed into `cx` and is reported through [`Reported`].
-    fn lower(&self, node: &ParsedNode<'_>, cx: &mut LowerCx) -> Result<(), Reported>;
+    ///
+    /// `'s` is the schema lifetime: the element looks its own definition up in
+    /// the context, which is why the context's schema must outlive the call.
+    fn lower<'s>(&self, node: &ParsedNode<'_>, cx: &mut LowerCx<'s>) -> Result<(), Reported>;
 }
 
-/// A lowered component: it can name itself, emit its Rust, and answer the
+/// A lowered element: it can name itself, emit its Rust, and answer the
 /// overlay's `{{ <id>.<attr> }}` tokens.
 pub trait Lowered {
-    /// The component's id.
+    /// The element's id.
     fn id(&self) -> &Ident;
 
-    /// Add this component's `Components` field, initialiser and `SAFETY`
-    /// note to `cx`.
+    /// Add this element's `Devices` or `Services` field and initialiser to `cx`.
     fn emit(&self, board: &Board, cx: &mut EmitCx);
 
     /// The value of `{{ <id>.<attr> }}` in an example overlay, if this
-    /// component can answer `attr`.
+    /// element can answer `attr`.
     fn overlay_attr(&self, _attr: &str) -> Option<String> {
         None
     }
@@ -56,49 +119,83 @@ pub trait Lowered {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Reported;
 
+/// Why a pin claim was refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PinRefusal {
+    /// Another element owns the pin, or owns it for the opposite direction.
+    Conflict(Conflict),
+    /// The chip cannot do this on that pin. The diagnostic is already pushed.
+    Capability,
+}
+
+impl PinRefusal {
+    /// Push the refusal into `cx` and return the marker that stops the element.
+    pub fn report(self, cx: &mut LowerCx<'_>) -> Reported {
+        match self {
+            PinRefusal::Conflict(conflict) => cx.report_conflict(&conflict),
+            PinRefusal::Capability => Reported,
+        }
+    }
+}
+
 /// The lowering context: everything an element reads and everything it records.
-pub struct LowerCx {
+///
+/// It carries the schema this run lowers against, borrowed from the [`Session`]
+/// that composed it — never a process global. A recipe element resolves its own
+/// definition through [`Self::schema`], so two sessions own two different
+/// definitions of one tag.
+///
+/// [`Session`]: crate::schema::Session
+pub struct LowerCx<'s> {
+    /// The schema this run lowers against: the bundled files plus the project's
+    /// own drivers.
+    schema: &'s Schema,
     errors: Vec<Diagnostic>,
     /// Warnings, kept apart from `errors` so they never stop lowering.
     warnings: Vec<Diagnostic>,
     gpios: Vec<GpioDecl>,
     resources: ResourceGraph,
-    components: Vec<Component>,
     devices: Vec<Device>,
     services: Vec<Service>,
-    /// `<gpio>` ids named by an `<spi_component cs>` reference: a chip select
-    /// that names its own declaration is not a second user of that pin.
-    cs_gpios: Vec<String>,
     /// `<wifi>` radio ids and the station riding on each, in source order.
     radios: Vec<(String, Option<String>)>,
-    /// Ids of components that provide an embassy-net stack (`<wifi_station>`),
-    /// the things a service's `network=` reference can name.
-    networks: Vec<String>,
+    /// Interfaces each service provides, as `(interface, id)`
+    /// (`provides "network"`): the things a service's `network=` reference can
+    /// name. A tag is not recorded here — the reference resolves by capability.
+    providers: Vec<(String, String)>,
     /// The chip and runtime the board is built for. A few element rules need
     /// them (a chip without a radio, a service under the blocking runtime).
     chip: String,
     runtime: crate::model::Runtime,
 }
 
-impl Default for LowerCx {
+impl Default for LowerCx<'static> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LowerCx {
+impl LowerCx<'static> {
+    /// The context for the bundled schema, which is what tests and hand-built
+    /// boards lower against.
     pub fn new() -> Self {
+        Self::with_schema(crate::schema::schema())
+    }
+}
+
+impl<'s> LowerCx<'s> {
+    /// The context for one run's schema.
+    pub fn with_schema(schema: &'s Schema) -> Self {
         Self {
+            schema,
             errors: Vec::new(),
             warnings: Vec::new(),
             gpios: Vec::new(),
             resources: ResourceGraph::default(),
-            components: Vec::new(),
             devices: Vec::new(),
             services: Vec::new(),
-            cs_gpios: Vec::new(),
             radios: Vec::new(),
-            networks: Vec::new(),
+            providers: Vec::new(),
             chip: String::new(),
             runtime: crate::model::Runtime::Blocking,
         }
@@ -118,6 +215,11 @@ impl LowerCx {
     /// The async model the board is built for.
     pub fn runtime(&self) -> crate::model::Runtime {
         self.runtime
+    }
+
+    /// The schema this run lowers against.
+    pub fn schema(&self) -> &'s Schema {
+        self.schema
     }
 
     /// Record a located problem and return the marker an element uses to stop.
@@ -171,18 +273,20 @@ impl LowerCx {
         }
     }
 
-    /// Record a component that provides an embassy-net stack: the target of a
-    /// service's `network=` reference.
-    pub fn add_network(&mut self, id: impl Into<String>) {
-        self.networks.push(id.into());
+    /// Record that `id` provides `interface` (`provides "network"`), so a
+    /// service's `network=` reference resolves by capability, not by tag.
+    pub fn add_provider(&mut self, interface: &str, id: impl Into<String>) {
+        self.providers.push((interface.to_string(), id.into()));
     }
 
-    /// Whether `name` is a component a service can take as its network.
-    pub fn has_network_provider(&self, name: &str) -> bool {
-        self.networks.iter().any(|network| network == name)
+    /// Whether `name` is a service that provides `interface`.
+    pub fn has_provider(&self, interface: &str, name: &str) -> bool {
+        self.providers
+            .iter()
+            .any(|(provided, id)| provided == interface && id == name)
     }
 
-    /// The `<gpio>` a component refers to by id.
+    /// The `<gpio>` a device refers to by id.
     pub fn gpio(&self, name: &str) -> Option<&GpioDecl> {
         self.gpios.iter().find(|gpio| gpio.id.raw == name)
     }
@@ -218,28 +322,58 @@ impl LowerCx {
         self.resources.buses()
     }
 
-    /// Claim a physical peripheral name (`UART1`).
+    /// Claim a physical peripheral name (`UART1`), reporting a refusal.
+    ///
+    /// Two refusals, two wordings: another element with the same name is the
+    /// legacy `peripheral clash`, underlined at the first claim; a name the
+    /// generated runtime holds is a located error on the element that cannot
+    /// have it, naming the holder and the way out.
     pub fn claim_peripheral(
         &mut self,
         peripheral: impl Into<String>,
         owner: Owner,
         span: Range<usize>,
-    ) -> Result<(), PeripheralClash> {
-        self.resources.claim_peripheral(peripheral, owner, span)
+    ) -> Result<(), Reported> {
+        let refusal = match self
+            .resources
+            .claim_peripheral(peripheral, owner, span.clone())
+        {
+            Ok(()) => return Ok(()),
+            Err(refusal) => refusal,
+        };
+        Err(match refusal {
+            PeripheralRefusal::Clash(clash) => self.report(
+                codes::CONFLICT_PERIPHERAL,
+                clash.existing.span.clone(),
+                "peripheral clash",
+                format!(
+                    "{} and {} both use {}",
+                    element_name(&clash.existing.owner),
+                    element_name(&clash.incoming.owner),
+                    clash.peripheral
+                ),
+            ),
+            PeripheralRefusal::Held(clash) => self.report(
+                codes::CONFLICT_RUNTIME_HELD,
+                span,
+                format!("{} is held by {}", clash.peripheral, clash.held.holder),
+                format!(
+                    "{} cannot use it; {}",
+                    element_name(&clash.owner),
+                    clash.held.remedy
+                ),
+            ),
+        })
     }
 
-    /// Remember that an `<spi_component>` chip select names this `<gpio>`.
-    pub fn record_cs_gpio(&mut self, id: String) {
-        self.cs_gpios.push(id);
-    }
-
-    pub fn cs_gpios(&self) -> &[String] {
-        &self.cs_gpios
-    }
-
-    /// Every lowered component, in source order.
-    pub fn components(&self) -> &[Component] {
-        &self.components
+    /// Record a resource the generated runtime already holds (`UART0`).
+    pub fn hold(
+        &mut self,
+        resource: impl Into<String>,
+        holder: impl Into<String>,
+        remedy: impl Into<String>,
+    ) {
+        self.resources.hold(resource, holder, remedy);
     }
 
     /// Whether anything has been reported so far.
@@ -247,27 +381,96 @@ impl LowerCx {
         !self.errors.is_empty()
     }
 
-    /// Claim `pin` for `owner`. A failure carries both sides of the conflict
-    /// so the element can keep its own wording.
+    /// Index into the claim journal, taken immediately before one element's
+    /// lowering call. See [`ResourceGraph::checkpoint`].
+    pub fn checkpoint(&self) -> usize {
+        self.resources.checkpoint()
+    }
+
+    /// Undo every claim made since `checkpoint`, newest first.
+    pub fn rollback(&mut self, checkpoint: usize) {
+        self.resources.rollback(checkpoint);
+    }
+
+    /// Claim `pin` for `owner`, after the chip's own pin rules.
+    ///
+    /// A refusal is either the graph's conflict (both sides carried, so the
+    /// element can keep its own wording) or a hardware capability problem,
+    /// which is reported here and leaves no claim behind.
     pub fn claim_pin(
         &mut self,
         pin: Pin,
         owner: Owner,
         span: Range<usize>,
         need: PinUse,
-    ) -> Result<ClaimedPin, Conflict> {
-        self.resources.claim(pin, owner, span, need)
+    ) -> Result<ClaimedPin, PinRefusal> {
+        if self.check_pin_caps(pin, &span, need) {
+            return Err(PinRefusal::Capability);
+        }
+        self.resources
+            .claim(pin, owner, span, need)
+            .map_err(PinRefusal::Conflict)
+    }
+
+    /// Apply the chip's pin table to one claim, reporting what it forbids.
+    ///
+    /// Returns whether the claim was refused. The checks run before the graph
+    /// records anything, so a refused pin is never left claimed and there is
+    /// nothing for the element's rollback to undo.
+    fn check_pin_caps(&mut self, pin: Pin, span: &Range<usize>, need: PinUse) -> bool {
+        let Some(caps) = crate::pin_caps::caps(&self.chip) else {
+            self.report(
+                codes::PIN_CAPS_MISSING,
+                span.clone(),
+                format!("no pin table for chip `{}`", self.chip),
+                "espforge does not know this chip's pins, and will not guess",
+            );
+            return true;
+        };
+        if pin.0 >= caps.pins {
+            self.report(
+                codes::GPIO_NOT_ON_CHIP,
+                span.clone(),
+                format!("GPIO{} does not exist on {}", pin.0, self.chip),
+                format!("this chip has GPIO0..GPIO{}", caps.pins - 1),
+            );
+            return true;
+        }
+        if caps.flash.contains(&pin.0) {
+            self.report(
+                codes::GPIO_RESERVED_FLASH,
+                span.clone(),
+                format!("GPIO{} is reserved for SPI flash on {}", pin.0, self.chip),
+                "this pin is wired to the flash/PSRAM bus; pick another GPIO",
+            );
+            return true;
+        }
+        if matches!(need, PinUse::Output | PinUse::Bidirectional)
+            && caps.input_only.contains(&pin.0)
+        {
+            self.report(
+                codes::GPIO_NOT_OUTPUT_CAPABLE,
+                span.clone(),
+                format!("GPIO{} is input-only on {}", pin.0, self.chip),
+                "drive this pin as an input, or pick an output-capable GPIO",
+            );
+            return true;
+        }
+        if caps.strapping.contains(&pin.0) {
+            self.warn(
+                codes::GPIO_STRAPPING,
+                span.clone(),
+                format!("GPIO{} is a strapping pin on {}", pin.0, self.chip),
+                "its level at boot selects a boot mode; check the board before driving it",
+            );
+        }
+        false
     }
 
     /// Report a refused pin claim in the corpus wording.
     pub fn report_conflict(&mut self, conflict: &Conflict) -> Reported {
         let report = conflict_diagnostic(conflict);
         self.report(report.code, report.span, report.message, report.label)
-    }
-
-    /// Record a lowered component.
-    pub fn push(&mut self, component: Component) {
-        self.components.push(component);
     }
 
     /// Record a lowered device.
@@ -291,6 +494,9 @@ impl LowerCx {
     }
 
     /// The node's id, with the span of the id attribute's value.
+    ///
+    /// Raw: it says nothing about whether the id can be bound in generated
+    /// code. Elements that do bind it call [`Self::checked_ident`].
     pub fn ident(&self, node: &ParsedNode<'_>) -> Ident {
         let span = node
             .get_attr_spanned("id")
@@ -299,14 +505,55 @@ impl LowerCx {
         Ident::new(node.id, span)
     }
 
+    /// [`Self::ident`], or one diagnostic when the id names something the
+    /// generated code already binds.
+    ///
+    /// Three spellings are refused: a name from [`RESERVED_IDENTS`], a leading
+    /// `__` (the prefix the generated storage statics use), and a Rust 2024
+    /// keyword. The diagnostic points at the id value, not the node, so the fix
+    /// is a rename of exactly that text. An id that is not an identifier at all
+    /// is left to the section's own rule, which already words it for its
+    /// section (a `9led` reads as an invalid device id, not a reserved one).
+    pub fn checked_ident(
+        &mut self,
+        node: &ParsedNode<'_>,
+        section: Section,
+    ) -> Result<Ident, Reported> {
+        let id = self.ident(node);
+        let name = id.rust_name();
+        let problem = if RESERVED_IDENTS.contains(&name.as_str()) {
+            Some(format!(
+                "`{name}` is a name the generated code binds; rename the id"
+            ))
+        } else if name.starts_with("__") {
+            Some(
+                "ids starting with `__` are reserved for the generated storage; rename the id"
+                    .to_string(),
+            )
+        } else if is_rust_ident(&name) && syn::parse_str::<syn::Ident>(&name).is_err() {
+            Some(format!("`{name}` is a Rust keyword; rename the id"))
+        } else {
+            None
+        };
+
+        match problem {
+            Some(label) => Err(self.report(
+                section.reserved_id_code(),
+                id.span.clone(),
+                format!("reserved {} id", section.noun()),
+                format!("<{} id=\"{}\">: {label}", node.tag_name, id.raw),
+            )),
+            None => Ok(id),
+        }
+    }
+
     /// Finish lowering. Every collected problem is returned together; a board
     /// is only built when there are none.
     pub fn into_board(self, meta: Meta) -> Result<Board, Vec<Diagnostic>> {
         if self.errors.is_empty() {
             Ok(Board {
                 meta,
-                resources: self.resources,
-                components: self.components,
+                resources: self.resources.seal(),
                 devices: self.devices,
                 services: self.services,
                 warnings: self.warnings,
@@ -326,7 +573,21 @@ impl LowerCx {
 pub struct MainCtx {
     pub registry: proc_macro2::Ident,
     pub spawner: proc_macro2::Ident,
-    pub components: proc_macro2::Ident,
+    pub services: proc_macro2::Ident,
+}
+
+impl MainCtx {
+    /// The `main()` locals this context names, as written.
+    ///
+    /// The emitter's drift test checks each one against [`RESERVED_IDENTS`]: a
+    /// new local that is not reserved there lets a user id collide with it.
+    pub fn names(&self) -> [String; 3] {
+        [
+            self.registry.to_string(),
+            self.spawner.to_string(),
+            self.services.to_string(),
+        ]
+    }
 }
 
 impl Default for MainCtx {
@@ -334,7 +595,7 @@ impl Default for MainCtx {
         Self {
             registry: format_ident!("registry"),
             spawner: format_ident!("spawner"),
-            components: format_ident!("components"),
+            services: format_ident!("services"),
         }
     }
 }
@@ -342,27 +603,27 @@ impl Default for MainCtx {
 /// The emission context: a plain collector with no knowledge of any element.
 #[derive(Debug, Default)]
 pub struct EmitCx {
-    fields: Vec<TokenStream>,
-    inits: Vec<TokenStream>,
-    prelude: Vec<TokenStream>,
+    module_items: Vec<TokenStream>,
     once: std::collections::BTreeSet<String>,
-    safety: Vec<(String, Vec<String>)>,
     device_fields: Vec<TokenStream>,
     device_inits: Vec<TokenStream>,
     service_fields: Vec<TokenStream>,
     service_inits: Vec<TokenStream>,
+    /// Statements `Services::new` runs before `Self { .. }`, in board order:
+    /// a provider's local (`let home = …;`) so its clients can call
+    /// `home.stack()` without an intermediate provider field.
+    service_prelude: Vec<TokenStream>,
     startup: Vec<TokenStream>,
+    /// Statements `Devices::new` runs before `Self { .. }`.
+    device_prelude: Vec<TokenStream>,
     main: MainCtx,
 }
 
 /// What an [`EmitCx`] collected, in board order.
 pub struct EmitParts {
-    pub fields: Vec<TokenStream>,
-    pub inits: Vec<TokenStream>,
-    /// Statements printed before `Self { .. }`, in first-use order.
-    pub prelude: Vec<TokenStream>,
-    /// `(anchor, lines)` pairs for the emit crate to turn into comment blocks.
-    pub safety: Vec<(String, Vec<String>)>,
+    /// Module-scope items the elements own (the generated `static` storage), in
+    /// board order. They outlive `Devices::new`, so they cannot live in it.
+    pub module_items: Vec<TokenStream>,
     /// One field of the generated `Devices` struct.
     pub device_fields: Vec<TokenStream>,
     /// One initialiser inside `Devices::new`.
@@ -371,8 +632,13 @@ pub struct EmitParts {
     pub service_fields: Vec<TokenStream>,
     /// One initialiser inside `Services::new`.
     pub service_inits: Vec<TokenStream>,
+    /// Statements `Services::new` runs before `Self { .. }`, in board order.
+    pub service_prelude: Vec<TokenStream>,
     /// Statements for `main()` after the scheduler starts, in first-use order.
     pub startup: Vec<TokenStream>,
+    /// Statements `Devices::new` runs before `Self { .. }`, in board order:
+    /// a device's bus is built here, inside `Devices::new`.
+    pub device_prelude: Vec<TokenStream>,
 }
 
 impl EmitCx {
@@ -385,6 +651,25 @@ impl EmitCx {
         Self {
             main,
             ..Self::default()
+        }
+    }
+
+    /// One statement `Devices::new` runs before `Self { .. }`.
+    pub fn device_prelude(&mut self, statement: TokenStream) {
+        self.device_prelude.push(statement);
+    }
+
+    /// A statement `Devices::new` runs before `Self { .. }`, emitted once per
+    /// key. Returns whether this call inserted it.
+    ///
+    /// The bus builder is the caller: two devices on one bus share one `let`,
+    /// and a bus with no device is never built.
+    pub fn device_once(&mut self, key: &str, statement: TokenStream) -> bool {
+        if self.first(key) {
+            self.device_prelude.push(statement);
+            true
+        } else {
+            false
         }
     }
 
@@ -413,60 +698,61 @@ impl EmitCx {
         self.service_inits.push(init);
     }
 
+    /// One statement `Services::new` runs before `Self { .. }`.
+    pub fn service_prelude(&mut self, statement: TokenStream) {
+        self.service_prelude.push(statement);
+    }
+
     /// A statement for `main()` after the scheduler starts, in first-use order.
     pub fn startup(&mut self, statement: TokenStream) {
         self.startup.push(statement);
     }
 
-    /// One field of the generated `Components` struct.
+    /// One field of the generated `Devices` struct.
+    ///
+    /// A bus handle, an addressed endpoint and a driver are all constructed
+    /// devices.
     pub fn field(&mut self, field: TokenStream) {
-        self.fields.push(field);
+        self.device_fields.push(field);
     }
 
-    /// One initialiser inside `Components::new`.
+    /// One initialiser inside `Devices::new`.
     pub fn init(&mut self, init: TokenStream) {
-        self.inits.push(init);
+        self.device_inits.push(init);
+    }
+
+    /// A module-scope item: generated storage statics, which must outlive the
+    /// constructor that fills them.
+    pub fn module_item(&mut self, item: TokenStream) {
+        self.module_items.push(item);
     }
 
     /// A statement that must appear before `Self { .. }`, emitted at most once
-    /// per key, in first-use order. Returns whether this call inserted it, so
-    /// the caller can also emit the matching safety note exactly once.
+    /// per key, in first-use order. Returns whether this call inserted it.
     ///
     /// The SPI prelude is the caller: two devices on one bus must not build
     /// the bus twice, and a bus with no device must not be built at all.
     pub fn once(&mut self, key: &str, statement: TokenStream) -> bool {
-        if self.once.insert(key.to_string()) {
-            self.prelude.push(statement);
-            true
-        } else {
-            false
-        }
+        self.device_once(key, statement)
     }
 
-    /// A `// SAFETY: ...` line to place before `anchor` in the printed file.
-    pub fn safety_comment(&mut self, anchor: impl Into<String>, line: impl Into<String>) {
-        self.safety.push((anchor.into(), vec![line.into()]));
-    }
-
-    /// Several comment lines, kept in order, before `anchor`.
-    pub fn safety_block(&mut self, anchor: impl Into<String>, lines: &[&str]) {
-        self.safety.push((
-            anchor.into(),
-            lines.iter().map(|line| (*line).to_string()).collect(),
-        ));
+    /// Mark `key` as seen, and report whether this is the first time. Unlike
+    /// [`Self::once`] it prints nothing, so a consumed bus can own the
+    /// statement itself and still keep its module items unique.
+    pub fn first(&mut self, key: &str) -> bool {
+        self.once.insert(key.to_string())
     }
 
     pub fn into_parts(self) -> EmitParts {
         EmitParts {
-            fields: self.fields,
-            inits: self.inits,
-            prelude: self.prelude,
-            safety: self.safety,
+            module_items: self.module_items,
             device_fields: self.device_fields,
             device_inits: self.device_inits,
             service_fields: self.service_fields,
             service_inits: self.service_inits,
+            service_prelude: self.service_prelude,
             startup: self.startup,
+            device_prelude: self.device_prelude,
         }
     }
 }
@@ -478,6 +764,11 @@ pub struct ConflictReport {
     pub message: &'static str,
     pub label: String,
     pub span: Range<usize>,
+}
+
+/// One element's name in a claim diagnostic: `<uart id="gps">`.
+fn element_name(owner: &Owner) -> String {
+    format!("<{} id=\"{}\">", owner.kind.tag(), owner.id.raw)
 }
 
 /// The legacy wording for a refused claim, kept with the graph so every
@@ -548,33 +839,13 @@ fn pin_conflict(conflict: &Conflict) -> ConflictReport {
     let existing = &conflict.existing;
     let incoming = &conflict.incoming;
     let (code, message, label, span) = match (&existing.owner.kind, &incoming.owner.kind) {
-        (Recipe(a), Recipe(b)) if a == b => (
+        (Pin(a), Pin(b)) if a == b => (
             espforge_diagnostics::codes::CONFLICT_PIN_USED,
             "pin already used",
             format!(
                 "{} and {} both use GPIO{pin}",
                 display(&existing.owner, true),
                 display(&incoming.owner, false)
-            ),
-            incoming.span.clone(),
-        ),
-        (SpiComponent, SpiComponent) => (
-            espforge_diagnostics::codes::CONFLICT_PIN_USED,
-            "cs pin already used",
-            format!(
-                "{} and {} both use GPIO{pin}",
-                display(&existing.owner, true),
-                display(&incoming.owner, true)
-            ),
-            incoming.span.clone(),
-        ),
-        (Spi, SpiComponent) => (
-            espforge_diagnostics::codes::CONFLICT_PIN,
-            "pin conflict",
-            format!(
-                "{}'s cs and {} both use GPIO{pin}",
-                display(&incoming.owner, false),
-                display(&existing.owner, false)
             ),
             incoming.span.clone(),
         ),
@@ -595,7 +866,7 @@ fn pin_conflict(conflict: &Conflict) -> ConflictReport {
                 i2c.span.clone(),
             )
         }
-        (_, Recipe(_)) => (
+        (_, Pin(_)) => (
             espforge_diagnostics::codes::CONFLICT_PIN,
             "pin conflict",
             format!(
@@ -605,7 +876,7 @@ fn pin_conflict(conflict: &Conflict) -> ConflictReport {
             ),
             incoming.span.clone(),
         ),
-        (Recipe(_), _) => (
+        (Pin(_), _) => (
             espforge_diagnostics::codes::CONFLICT_PIN,
             "pin conflict",
             format!(
@@ -643,7 +914,7 @@ fn display(owner: &Owner, slug: bool) -> String {
     format!("<{} id=\"{id}\">", owner.kind.tag())
 }
 
-/// The Rust-identifier rule every component id must satisfy.
+/// The Rust-identifier rule every device id must satisfy.
 pub fn is_rust_ident(text: &str) -> bool {
     !text.is_empty()
         && !text.starts_with(|c: char| c.is_ascii_digit())
@@ -663,7 +934,11 @@ mod tests {
         assert!(cx.once("spi3_bus", quote! { let b = 2; }));
 
         let parts = cx.into_parts();
-        let statements: Vec<String> = parts.prelude.iter().map(ToString::to_string).collect();
+        let statements: Vec<String> = parts
+            .device_prelude
+            .iter()
+            .map(ToString::to_string)
+            .collect();
         assert_eq!(statements, ["let a = 1 ;", "let b = 2 ;"]);
     }
 }

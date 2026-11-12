@@ -10,8 +10,6 @@ HELLO WORLD EXAMPLE
   <options defaults="true" />
 # peripherals
 
-# components
-
 # devices
 
 # services

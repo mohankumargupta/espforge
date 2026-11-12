@@ -1,0 +1,54 @@
+driver "ssd1306" {
+    format_version 2
+    summary "SSD1306 monochrome OLED display (0.96\" / 1.3\")"
+    description "Drives an I2C SSD1306 OLED panel in buffered graphics mode. Declares both bus modes: a blocking project gets `Ssd1306Display`, an embassy project the async type."
+    category "display"
+
+    dependency "embedded-graphics" { version "0.8.1" }
+
+    bus "i2c" {
+        address allowed="0x08..=0x77"
+    }
+
+    codegen {
+        feature "ssd1306"
+        runtime "blocking" {
+            type "espforge_drivers::Ssd1306Display<{size}>"
+            constructor "espforge_drivers::Ssd1306Display::new({bus_device}, {address}, {size}, {rotation})"
+            endpoint "espforge_drivers::I2cEndpoint"
+        }
+        runtime "async" {
+            feature "ssd1306-async"
+            type "espforge_drivers::AsyncSsd1306Display<{size}>"
+            constructor "espforge_drivers::AsyncSsd1306Display::new({bus_device}, {address}, {size}, {rotation})"
+            endpoint "espforge_drivers::AsyncI2cEndpoint"
+        }
+        map "size" {
+            "128x64" { type "espforge_drivers::Oled128x64" }
+            "128x32" { type "espforge_drivers::Oled128x32" }
+        }
+        map "rotation" {
+            "0" { expr "espforge_drivers::DisplayRotation::Rotate0" }
+            "90" { expr "espforge_drivers::DisplayRotation::Rotate90" }
+            "180" { expr "espforge_drivers::DisplayRotation::Rotate180" }
+            "270" { expr "espforge_drivers::DisplayRotation::Rotate270" }
+        }
+    }
+
+    attr "size" kind="choice" default="128x64" {
+        choices "128x64" "128x32"
+        help "Pixel dimensions of the OLED panel."
+    }
+    attr "rotation" kind="choice" default="0" {
+        choices "0" "90" "180" "270"
+        help "Display rotation in degrees clockwise."
+    }
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "boot builds the panel before setup; deferred builds it when the app calls init()."
+    }
+
+    example "minimal" #"<ssd1306 id="oled" bus="$i2c0" address="0x3C" />"#
+    example "custom size and rotation" #"<ssd1306 id="oled" bus="$i2c0" address="0x3C" size="128x32" rotation="180" />"#
+    see_also "peripherals/i2c"
+}

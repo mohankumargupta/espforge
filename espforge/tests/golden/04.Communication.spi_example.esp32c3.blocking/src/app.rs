@@ -6,12 +6,11 @@ use crate::Context;
 
 pub fn setup(ctx: &mut Context) {
     let logger = ctx.logger;
-    let spi = component!(ctx, spi_tester);
+    let spi = device!(ctx, spi2);
 
     logger.info("SPI Example");
 
-    // A device owns its own chip-select pin (design §20.5): the backend wraps
-    // the shared `SpiBus` in a `SpiDevice` with the CS from the component spec.
+    // The raw SPI device owns the chip-select line declared by `<spi cs="9">`.
     // Full-duplex SPI reads and writes simultaneously, so we use
     // `TransferInPlace` to send 0x03 and read the response in one transaction.
     let mut buffer = [0x03u8, 0x00];

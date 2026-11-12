@@ -3,18 +3,18 @@
 use embedded_graphics::{
     Pixel, draw_target::DrawTarget, geometry::Size, prelude::OriginDimensions,
 };
-use esp_hal::Blocking;
 use esp_hal::gpio::{Level, Output};
-use espforge_runtime::SpiDevice;
+use espforge_runtime::DeviceErrorKind;
 
 pub use sky_ili9341::{ColorOrder, Orientation};
 
+/// The SPI endpoint the generated wiring builds: the shared bus plus the
+/// panel's own chip select, configuration and polarity.
+pub type SpiEndpoint = espforge_runtime::ConfiguredSpiDevice;
+
 /// An ILI9341 color TFT panel on an SPI device.
-///
-/// The display owns its SPI device: the `<spi_component>` it was declared with
-/// is taken out of `Components` when `Devices::new` runs.
 pub struct Ili9341Display {
-    display: sky_ili9341::Display<sky_ili9341::SpiInterface<SpiDevice<Blocking>, Output<'static>>>,
+    display: sky_ili9341::Display<sky_ili9341::SpiInterface<SpiEndpoint, Output<'static>>>,
     backlight: Option<Output<'static>>,
 }
 
@@ -25,26 +25,26 @@ impl Ili9341Display {
     /// (the schema makes `reset="$<gpio>"` mandatory for `<ili9341>`). The
     /// optional `backlight` is switched on after init.
     pub fn new(
-        spi_device: SpiDevice<Blocking>,
+        spi_device: SpiEndpoint,
         dc: Output<'static>,
         mut reset: Output<'static>,
         backlight: Option<Output<'static>>,
         orientation: Orientation,
         color_order: ColorOrder,
-    ) -> Self {
+    ) -> Result<Self, DeviceErrorKind> {
         let interface = sky_ili9341::SpiInterface::new(spi_device, dc);
         let mut delay = esp_hal::delay::Delay::new();
         let display = sky_ili9341::Builder::new(interface)
             .orientation(orientation)
             .color_order(color_order)
             .init(&mut reset, &mut delay)
-            .expect("ILI9341 TFT initialization failed");
+            .map_err(|_| DeviceErrorKind::Init)?;
 
         let mut backlight = backlight;
         if let Some(pin) = backlight.as_mut() {
             pin.set_high();
         }
-        Self { display, backlight }
+        Ok(Self { display, backlight })
     }
 
     /// Turn the backlight on or off, when the panel has a controllable one.

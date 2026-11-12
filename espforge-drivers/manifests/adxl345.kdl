@@ -1,0 +1,35 @@
+driver "adxl345" {
+    format_version 2
+    summary "Analog Devices ADXL345 three-axis accelerometer"
+    description "Reads three axes over SPI. Its own mode 3 and 5MHz (5000kHz) clock are applied before each transaction, so it shares a controller with a display running a different configuration."
+    category "sensor"
+
+    bus "spi" {
+        mode 3
+        frequency "5000kHz"
+    }
+
+    codegen {
+        feature "adxl345"
+        runtime "blocking" {
+            type "espforge_drivers::Adxl345"
+            constructor "espforge_drivers::Adxl345::new({bus_device})"
+            endpoint "espforge_drivers::Adxl345Endpoint"
+        }
+        runtime "async" {
+            feature "adxl345-async"
+            type "espforge_drivers::AsyncAdxl345"
+            constructor "espforge_drivers::AsyncAdxl345::new({bus_device})"
+            endpoint "espforge_drivers::AsyncAdxl345Endpoint"
+        }
+    }
+
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "boot builds the sensor before setup; deferred builds it when the app calls init()."
+    }
+
+    example "minimal" #"<adxl345 id="accel" bus="$spi2" cs="10" />"#
+    example "slow clock" #"<adxl345 id="accel" bus="$spi2" cs="10" frequency="1000kHz" />"#
+    see_also "peripherals/spi"
+}

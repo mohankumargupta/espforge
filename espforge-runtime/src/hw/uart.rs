@@ -8,6 +8,9 @@
 //! Line buffering uses esp-hal's `read_buffered` plus a `\n` scan; the buffer
 //! is caller-provided.
 
+// Only the blocking port parks its hardware in a `RefCell`; the async one uses
+// an embassy mutex.
+#[cfg(not(feature = "embassy"))]
 use core::cell::RefCell;
 #[cfg(feature = "embassy")]
 use esp_hal::Async;

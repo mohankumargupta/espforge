@@ -70,6 +70,7 @@ impl AnswerArgs {
             console: self.console.map(Console::from),
             defaults: self.defaults,
             options: self.options.clone(),
+            driver_dirs: Vec::new(),
         }
     }
 }

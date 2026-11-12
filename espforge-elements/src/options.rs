@@ -616,7 +616,7 @@ options {
 
     fn file(chip: &str, runtime: &str, extra_espforge: &str, peripherals: &str) -> String {
         format!(
-            "# espforge\n  <project name=\"t\" />\n  <chip type=\"{chip}\" />\n  <runtime type=\"{runtime}\" />\n{extra_espforge}# peripherals\n{peripherals}# components\n# devices\n# services\n"
+            "# espforge\n  <project name=\"t\" />\n  <chip type=\"{chip}\" />\n  <runtime type=\"{runtime}\" />\n{extra_espforge}# peripherals\n{peripherals}# devices\n# services\n"
         )
     }
 

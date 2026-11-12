@@ -1,0 +1,20 @@
+==================
+SSD1306 ASYNC EXAMPLE
+
+An embassy project whose panel is driven over an async I2C bus. The device is
+initialised after boot (`AsyncDeferred`), lives in an `AsyncMutex`, and
+`device!` yields its guard. There is no blocking I2C bus in the wiring.
+==================
+
+# espforge
+  <project name="ssd1306_async" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <i2c id="i2c0" sda="6" scl="7" frequency="400kHz" />
+
+# devices
+  <ssd1306 id="oled" bus="$i2c0" address="0x3C" size="128x64" />
+
+# services

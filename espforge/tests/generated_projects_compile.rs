@@ -161,6 +161,25 @@ const CASES: &[Case] = &[
         runtime: Runtime::Embassy,
         inline: None,
     },
+    // Two HTTP slots: the `::<2>` the recipe bakes into the types is a const
+    // argument of real types, not just emitted text.
+    Case {
+        example: "05.Networking/http_client",
+        chip: "esp32c3",
+        runtime: Runtime::Embassy,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"http_two_slots\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"embassy\" />\n\
+             # peripherals\n\
+             \x20 <wifi id=\"radio\" />\n\
+             # devices\n\
+             # services\n\
+             \x20 <wifi_station id=\"home\" wifi=\"$radio\" ssid=\"Wokwi-GUEST\" auth=\"open\" />\n\
+             \x20 <http_client id=\"client\" network=\"$home\" connections=\"2\" />\n",
+        ),
+    },
     Case {
         example: "05.Networking/https_client",
         chip: "esp32c3",
@@ -198,8 +217,8 @@ const CASES: &[Case] = &[
         inline: None,
     },
     // Multi-drop: a display and a sensor on one `<i2c>`, each at its own
-    // address. It is the only case that takes two `I2cDevice`s on one
-    // controller through `rustc`; the display's app supplies the logic.
+    // address. It is the only case that takes two devices on one controller
+    // through `rustc`; the display's app supplies the logic.
     Case {
         example: "06.Displays/ssd1306",
         chip: "esp32c3",
@@ -211,12 +230,9 @@ const CASES: &[Case] = &[
              \x20 <runtime type=\"blocking\" />\n\
              # peripherals\n\
              \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" frequency=\"400kHz\" />\n\
-             # components\n\
-             \x20 <i2c_component id=\"display_bus\" i2c=\"$i2c0\" address=\"0x3C\" />\n\
-             \x20 <i2c_component id=\"sensor_bus\" i2c=\"$i2c0\" address=\"0x62\" />\n\
              # devices\n\
-             \x20 <ssd1306 id=\"oled\" i2c_component=\"$display_bus\" size=\"128x64\" />\n\
-             \x20 <scd4x id=\"air\" i2c_component=\"$sensor_bus\" />\n\
+             \x20 <ssd1306 id=\"oled\" bus=\"$i2c0\" address=\"0x3C\" size=\"128x64\" />\n\
+             \x20 <scd4x id=\"air\" bus=\"$i2c0\" address=\"0x62\" />\n\
              # services\n",
         ),
     },

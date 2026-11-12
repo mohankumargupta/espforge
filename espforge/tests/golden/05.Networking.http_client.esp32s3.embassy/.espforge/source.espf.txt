@@ -14,10 +14,8 @@ unencrypted HTTP/1.1 over the station's network stack.
 # peripherals
   <wifi id="radio" />
 
-# components
-  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
-
 # devices
 
 # services
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
   <http_client id="client" network="$home" />

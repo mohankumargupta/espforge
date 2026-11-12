@@ -3,7 +3,7 @@
 //! [`plan::FilePlan`] is the single list of emitted files and their owners;
 //! [`generate`] walks it and asks one backend per [`plan::Source`] for the
 //! content. [`equiv`] is the semantic comparator used while debugging a golden
-//! diff, and [`comments`] puts back the comments `syn` cannot carry.
+//! diff.
 
 use anyhow::{Context, Result};
 use espforge_elements::{Board, Meta, ResolvedOptions};
@@ -15,7 +15,6 @@ use plan::{FilePlan, Source};
 
 pub mod cargo;
 pub mod chip;
-pub mod comments;
 pub mod config;
 pub mod diagram;
 pub mod equiv;
@@ -74,7 +73,7 @@ mod tests {
     use espforge_elements::{Answers, Console, DerivedInputs, Runtime, resolve};
 
     /// A project with no hardware: enough for the dispatcher and the data
-    /// backends, which do not read components.
+    /// backends, which do not read devices.
     fn hello() -> (Board, Meta, ResolvedOptions) {
         let meta = Meta {
             name: "hello world".into(),
@@ -87,7 +86,6 @@ mod tests {
         let board = Board {
             meta: meta.clone(),
             resources: espforge_elements::ResourceGraph::default(),
-            components: Vec::new(),
             devices: Vec::new(),
             services: Vec::new(),
             warnings: Vec::new(),
@@ -108,7 +106,7 @@ mod tests {
             let file = plan.get(&artifact.path).unwrap();
             assert_eq!(artifact.ownership, file.ownership, "{}", artifact.path);
         }
-        assert_eq!(plan.get("Cargo.toml").unwrap().ownership, Ownership::Owned);
+        assert_eq!(plan.get("Cargo.toml").unwrap().ownership, Ownership::Merged);
         assert_eq!(
             plan.get(".cargo/config.toml").unwrap().ownership,
             Ownership::SeedOnce
