@@ -3,64 +3,44 @@
 //! * [`codegen`]        - the typed backends: every emitted file
 //! * [`project`]        - overlay layering and `README.txt`
 //! * [`runtime_source`] - published vs local `espforge-runtime`
-//! * [`manifest`]       - ownership manifest for drift detection
 //!
 //! IO boundary: [`generate_from_board`] is pure (in-memory `Artifact`/`Asset`
 //! in, data out; no `std::fs`, no `std::process`). Only [`write`] /
 //! [`write_assets`] / [`write_all`] touch disk.
 //!
+//! The output directory is disposable: everything in it is rewritten on every
+//! build. The files a user controls live next to the `.espf` and reach the
+//! generator as [`OverlayFile`]s.
+//!
 //! Host-only: never depend on `espforge-runtime` from this crate.
 
 pub mod artifact;
 pub mod codegen;
-pub mod manifest;
 pub mod project;
 pub mod runtime_source;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use espforge_elements::{Board, Meta, ResolvedOptions};
 use std::fs;
 use std::path::Path;
 
-pub use artifact::{Artifact, Asset, Ownership};
+pub use artifact::{Artifact, Asset};
 pub use project::OverlayFile;
 pub use runtime_source::RuntimeSource;
 
-/// A machine-owned file was edited since espforge wrote it, so the write
-/// refuses instead of clobbering the user's change.
-///
-/// Typed (rather than a bare `bail!` message) so the caller's exit-code
-/// decision is a `downcast_ref`, not a substring match.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManifestDrift {
-    /// The artifact path, as it appears in the manifest.
-    pub path: String,
-}
-
-impl std::fmt::Display for ManifestDrift {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "refusing to overwrite edited file `{}` (drift detected). \
-             Restore it or delete it to regenerate.",
-            self.path
-        )
-    }
-}
-
-impl std::error::Error for ManifestDrift {}
-
-/// Everything a build writes: text files and binary assets.
+/// Everything a build writes: text files and binary assets, plus what the
+/// caller may want to tell the user about.
 #[derive(Debug, Clone, Default)]
 pub struct Generated {
     pub artifacts: Vec<Artifact>,
     pub assets: Vec<Asset>,
+    /// One line per overlay decision worth reporting (a managed `Cargo.toml`
+    /// key the user's `Cargo.extra.toml` tried to change).
+    pub warnings: Vec<String>,
 }
 
 /// The project for `board`: every file from the typed backends
-/// ([`codegen::generate`]), then the example overlay, then `README.txt` and
-/// `.espforge/manifest.json` -- so the manifest describes what is actually
-/// written.
+/// ([`codegen::generate`]), the project's overlay files, then `README.txt`.
 ///
 /// Pure: no filesystem access.
 pub fn generate_from_board(
@@ -73,94 +53,44 @@ pub fn generate_from_board(
     let mut rendered = project::Rendered {
         artifacts: codegen::generate(board, core, resolved, runtime_source)?,
         assets: Vec::new(),
+        warnings: Vec::new(),
     };
     project::layer_overlay(board, resolved, &mut rendered, overlay)?;
     finish(rendered, core)
 }
 
-/// Add the README and the ownership manifest to a rendered project.
+/// Add the README to a rendered project.
 fn finish(rendered: project::Rendered, core: &Meta) -> Result<Generated> {
     let mut artifacts = rendered.artifacts;
     let assets = rendered.assets;
-    artifacts.push(project::readme(&core.crate_name(), &artifacts, &assets));
-    let manifest = manifest::emit_manifest(&artifacts, env!("CARGO_PKG_VERSION"))?;
-    artifacts.push(manifest);
-    Ok(Generated { artifacts, assets })
+    artifacts.push(project::readme(&core.crate_name()));
+    Ok(Generated {
+        artifacts,
+        assets,
+        warnings: rendered.warnings,
+    })
 }
 
-/// What a write did that the caller may want to tell the user about.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct WriteReport {
-    /// `Merged` files whose managed keys had been edited: the generated value
-    /// was restored. One line per key, in file order.
-    pub warnings: Vec<String>,
-}
-
-/// Write artifacts into `out_dir`, respecting ownership:
+/// Write artifacts into `out_dir`, overwriting whatever is there.
 ///
 /// Impure: creates directories and writes files under `out_dir`.
-/// - `Owned` files are overwritten, unless the previous manifest shows the
-///   file was edited since we wrote it (drift): then we refuse.
-/// - `Merged` files are regenerated, but only the keys espforge writes are
-///   replaced; every other key is carried over, so a user-added dependency is
-///   never drift. A managed key the user edited is restored, with a warning.
-/// - `SeedOnce` files are written only if absent.
-/// - `NotOwned` files are never written.
-pub fn write(out_dir: &Path, artifacts: &[Artifact]) -> Result<WriteReport> {
-    let prev = manifest::read_prev_manifest(out_dir)?;
-    let mut report = WriteReport::default();
+pub fn write(out_dir: &Path, artifacts: &[Artifact]) -> Result<()> {
     for a in artifacts {
-        if a.ownership == Ownership::NotOwned {
-            continue;
-        }
         let path = out_dir.join(&a.path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        match a.ownership {
-            Ownership::SeedOnce => {
-                if !path.exists() {
-                    fs::write(&path, &a.content)?;
-                }
-            }
-            Ownership::Owned => {
-                if let Some(prev_sum) = prev.get(&a.path) {
-                    if let Ok(existing) = fs::read_to_string(&path) {
-                        if manifest::checksum(&existing) != *prev_sum && existing != a.content {
-                            return Err(ManifestDrift {
-                                path: a.path.clone(),
-                            }
-                            .into());
-                        }
-                    }
-                }
-                fs::write(&path, &a.content)?;
-            }
-            Ownership::Merged => {
-                let previous = fs::read_to_string(&path).ok();
-                let merged = codegen::cargo::merge(previous.as_deref(), &a.content)
-                    .with_context(|| format!("merging `{}`", a.path))?;
-                report.warnings.extend(merged.warnings);
-                fs::write(&path, merged.content)?;
-            }
-            Ownership::NotOwned => {}
-        }
+        fs::write(&path, &a.content)?;
     }
-    Ok(report)
+    Ok(())
 }
 
-/// Write binary assets into `out_dir`: `SeedOnce` only if absent, `Owned`
-/// always overwritten (assets are not drift-tracked), `NotOwned` never.
+/// Write binary assets into `out_dir`, overwriting whatever is there.
 ///
 /// Impure: creates directories and writes files under `out_dir`.
 pub fn write_assets(out_dir: &Path, assets: &[Asset]) -> Result<()> {
     for a in assets {
         let path = out_dir.join(&a.path);
-        match a.ownership {
-            Ownership::NotOwned => continue,
-            Ownership::SeedOnce if path.exists() => continue,
-            _ => {}
-        }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -172,10 +102,9 @@ pub fn write_assets(out_dir: &Path, assets: &[Asset]) -> Result<()> {
 /// Convenience: [`write`] then [`write_assets`].
 ///
 /// Impure: writes under `out_dir`.
-pub fn write_all(out_dir: &Path, generated: &Generated) -> Result<WriteReport> {
-    let report = write(out_dir, &generated.artifacts)?;
-    write_assets(out_dir, &generated.assets)?;
-    Ok(report)
+pub fn write_all(out_dir: &Path, generated: &Generated) -> Result<()> {
+    write(out_dir, &generated.artifacts)?;
+    write_assets(out_dir, &generated.assets)
 }
 
 #[cfg(test)]
@@ -255,7 +184,6 @@ mod tests {
             "wokwi.toml",
             "diagram.json",
             "README.txt",
-            ".espforge/manifest.json",
         ] {
             assert!(paths.contains(&p), "missing {p} in {paths:?}");
         }
@@ -272,27 +200,11 @@ mod tests {
     }
 
     #[test]
-    fn manifest_records_the_template_version_and_owned_files() {
-        let g = generate_with(None);
-        let v: serde_json::Value =
-            serde_json::from_str(&find(&g, ".espforge/manifest.json").content).unwrap();
-        assert_eq!(v["template_version"], env!("CARGO_PKG_VERSION"));
-        assert!(v["files"].get("Cargo.toml").is_some());
-        assert!(v["files"].get("README.txt").is_some());
-        assert!(v["files"].get(".espforge/manifest.json").is_none());
-        assert!(
-            v["files"].get(".cargo/config.toml").is_none(),
-            "seed-once files are not tracked"
-        );
-    }
-
-    #[test]
-    fn write_all_creates_files_and_manifest() {
+    fn write_all_creates_files() {
         let dir = tempfile::tempdir().unwrap();
         write_all(dir.path(), &generate_with(None)).unwrap();
         assert!(dir.path().join("src/lib.rs").is_file());
         assert!(dir.path().join("README.txt").is_file());
-        assert!(dir.path().join(".espforge/manifest.json").is_file());
     }
 
     #[test]
@@ -302,81 +214,20 @@ mod tests {
         write(dir.path(), &generate_with(None).artifacts).unwrap();
     }
 
+    /// `build/` is disposable: an edited generated file is simply rewritten.
     #[test]
-    fn edited_owned_file_is_refused() {
+    fn an_edited_generated_file_is_overwritten() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), &generate_with(None).artifacts).unwrap();
         fs::write(dir.path().join("src/lib.rs"), "// my edit").unwrap();
-        let err = write(dir.path(), &generate_with(None).artifacts).unwrap_err();
-        assert!(err.to_string().contains("drift"));
-    }
-
-    /// WS-E: a dependency the user added is not drift, and survives.
-    #[test]
-    fn a_user_dependency_survives_a_rebuild() {
-        let dir = tempfile::tempdir().unwrap();
         write(dir.path(), &generate_with(None).artifacts).unwrap();
-        let cargo = dir.path().join("Cargo.toml");
-        let text = fs::read_to_string(&cargo).unwrap().replace(
-            "static_cell = \"2.1.1\"",
-            "static_cell = \"2.1.1\"\nserde = \"1\"",
-        );
-        fs::write(&cargo, &text).unwrap();
-
-        let report = write(dir.path(), &generate_with(None).artifacts).unwrap();
-        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
         assert!(
-            fs::read_to_string(&cargo)
+            fs::read_to_string(dir.path().join("src/lib.rs"))
                 .unwrap()
-                .contains("serde = \"1\""),
-            "the user's dependency was dropped"
-        );
-    }
-
-    /// WS-E: a managed key the user edited is regenerated, with one warning
-    /// naming the key.
-    #[test]
-    fn an_edited_managed_key_is_restored_with_a_warning() {
-        let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), &generate_with(None).artifacts).unwrap();
-        let cargo = dir.path().join("Cargo.toml");
-        let edited = fs::read_to_string(&cargo)
-            .unwrap()
-            .replace("~1.2.2", "0.1.0");
-        fs::write(&cargo, &edited).unwrap();
-
-        let report = write(dir.path(), &generate_with(None).artifacts).unwrap();
-        assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
-        assert!(
-            report.warnings[0].contains("dependencies.esp-hal.version"),
-            "{:?}",
-            report.warnings
-        );
-        let restored = fs::read_to_string(&cargo).unwrap();
-        assert!(restored.contains("~1.2.2"), "{restored}");
-    }
-
-    /// WS-E: a `Cargo.toml` the user broke is a named error, not an overwrite.
-    #[test]
-    fn a_malformed_cargo_toml_is_refused_by_name() {
-        let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), &generate_with(None).artifacts).unwrap();
-        fs::write(dir.path().join("Cargo.toml"), "[package").unwrap();
-        let err = write(dir.path(), &generate_with(None).artifacts).unwrap_err();
-        let message = format!("{err:#}");
-        assert!(message.contains("Cargo.toml"), "{message}");
-        assert!(message.contains("not valid TOML"), "{message}");
-    }
-
-    #[test]
-    fn edited_seed_once_file_is_left_alone() {
-        let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), &generate_with(None).artifacts).unwrap();
-        fs::write(dir.path().join("rust-toolchain.toml"), "# mine").unwrap();
-        write(dir.path(), &generate_with(None).artifacts).unwrap();
-        assert_eq!(
-            fs::read_to_string(dir.path().join("rust-toolchain.toml")).unwrap(),
-            "# mine"
+                .contains("pub mod")
+                || fs::read_to_string(dir.path().join("src/lib.rs"))
+                    .unwrap()
+                    .contains("espforge")
         );
     }
 }

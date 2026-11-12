@@ -272,16 +272,15 @@ fn every_declared_cell_is_byte_identical_to_its_golden() {
         let out = dir.path().join("project");
         generate_cell(cell, &out);
 
-        // The 12 emitted artifacts plus `src/app.rs`, the copy of the ESPF
-        // source, and (for an example with a custom Wokwi chip) the seeded
+        // The 11 emitted artifacts plus `src/app.rs`, the copy of the ESPF
+        // source, and (for an example with a custom Wokwi chip) the copied
         // `chip.json` / `chip.wasm`.
-        const BASE_FILES: [&str; 14] = [
+        const BASE_FILES: [&str; 13] = [
             "build.rs",
             "Cargo.toml",
             ".cargo/config.toml",
             ".cargo/esp-config.toml",
             "diagram.json",
-            ".espforge/manifest.json",
             ".espforge/source.espf.txt",
             "README.txt",
             "rust-toolchain.toml",

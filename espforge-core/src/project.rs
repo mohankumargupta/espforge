@@ -1,5 +1,5 @@
 //! Turning a validated spec into files on disk: read the user's directory,
-//! generate, write with ownership, and write the app logic.
+//! generate, write the project, and write the app logic.
 //!
 //! This is where a failure is classified. The binary must know whether a
 //! problem is the user's (exit 1, already explained) or ours (exit 2, please
@@ -9,9 +9,9 @@
 use std::path::{Path, PathBuf};
 
 use espforge_diagnostics::Diagnostic;
-use espforge_emit::ManifestDrift;
 use espforge_emit::OverlayFile;
 use espforge_emit::codegen::overlay::OverlayError;
+use espforge_emit::project::{ChipError, OverlayFileError};
 
 use crate::answers::Overrides;
 use crate::drivers::{self, UsedDriver};
@@ -98,6 +98,21 @@ pub fn generate_with(
     Ok(written)
 }
 
+/// Why rendering failed: an overlay file the user wrote that cannot be used is
+/// the user's input, not an internal failure.
+fn overlay_error(e: anyhow::Error) -> ProjectError {
+    if let Some(overlay) = e.downcast_ref::<OverlayError>() {
+        return ProjectError::User(overlay.to_string());
+    }
+    if let Some(chip) = e.downcast_ref::<ChipError>() {
+        return ProjectError::User(chip.to_string());
+    }
+    if let Some(extra) = e.downcast_ref::<OverlayFileError>() {
+        return ProjectError::User(extra.to_string());
+    }
+    ProjectError::Internal(e)
+}
+
 /// The directory a project's `drivers/` and lock live beside.
 fn source_dir(source: &Source) -> &Path {
     source.dir.as_deref().unwrap_or_else(|| Path::new("."))
@@ -177,35 +192,25 @@ pub fn write_checked(
         &runtime,
         &overlay,
     )
-    .map_err(|e| match e.downcast_ref::<OverlayError>() {
-        // A placeholder espforge does not support is the example's (the
-        // user's) input, not an internal failure.
-        Some(overlay) => ProjectError::User(overlay.to_string()),
-        None => ProjectError::Internal(e),
-    })?;
+    .map_err(overlay_error)?;
 
-    let report = espforge_emit::write_all(out, &generated).map_err(|e| {
-        match e.downcast_ref::<ManifestDrift>() {
-            // The user edited a machine-owned file.
-            Some(drift) => ProjectError::User(drift.to_string()),
-            None => ProjectError::Internal(e),
-        }
-    })?;
+    espforge_emit::write_all(out, &generated)?;
 
     // The user's app logic is copied verbatim on every build.
     std::fs::create_dir_all(out.join("src"))?;
     std::fs::write(out.join("src").join("app.rs"), app)?;
 
-    // Keep the ESPF source that produced this build next to the manifest, so the
+    // Keep the ESPF source that produced this build in the output, so the
     // generated project always carries the exact document it came from.
+    std::fs::create_dir_all(out.join(".espforge"))?;
     std::fs::write(out.join(".espforge").join("source.espf.txt"), &source.text)?;
 
     let mut notes = checked.notes.clone();
     notes.extend(
-        report
+        generated
             .warnings
-            .into_iter()
-            .map(|warning| format!("warning: Cargo.toml: {warning}")),
+            .iter()
+            .map(|warning| format!("warning: {warning}")),
     );
     Ok(Written {
         crate_name: checked.meta.crate_name(),
@@ -240,7 +245,6 @@ mod tests {
             "src/bin/main.rs",
             "src/app.rs",
             "README.txt",
-            ".espforge/manifest.json",
             ".espforge/source.espf.txt",
         ] {
             assert!(out.join(f).is_file(), "missing {f}");
@@ -261,18 +265,21 @@ mod tests {
         );
     }
 
+    /// `build/` is disposable: rebuilding overwrites whatever is there.
     #[test]
-    fn rebuilding_is_fine_but_edited_owned_files_are_refused() {
+    fn rebuilding_overwrites_edited_generated_files() {
         let source = resolve_source(None, Some("01.Basics/helloworld"), Path::new(".")).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("out");
         generate(&source, &out).unwrap();
         generate(&source, &out).unwrap();
         std::fs::write(out.join("src/lib.rs"), "// mine").unwrap();
-        assert!(matches!(
-            generate(&source, &out),
-            Err(ProjectError::User(_))
-        ));
+        generate(&source, &out).unwrap();
+        assert!(
+            !std::fs::read_to_string(out.join("src/lib.rs"))
+                .unwrap()
+                .contains("// mine")
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ use proc_macro2::Literal;
 use proc_macro2::TokenStream;
 use quote::format_ident;
 
-use crate::artifact::{Artifact, Ownership};
+use crate::artifact::Artifact;
 
 /// Every Rust artifact, in a deterministic order.
 ///
@@ -28,26 +28,10 @@ use crate::artifact::{Artifact, Ownership};
 pub fn generate(board: &Board, meta: &Meta, opts: &ResolvedOptions) -> Result<Vec<Artifact>> {
     let parts = collect(board);
     Ok(vec![
-        Artifact {
-            path: "build.rs".into(),
-            content: build_rs(meta)?,
-            ownership: Ownership::Owned,
-        },
-        Artifact {
-            path: "src/bin/main.rs".into(),
-            content: main(board, &parts, meta, opts)?,
-            ownership: Ownership::Owned,
-        },
-        Artifact {
-            path: "src/generated.rs".into(),
-            content: generated(&parts, meta)?,
-            ownership: Ownership::Owned,
-        },
-        Artifact {
-            path: "src/lib.rs".into(),
-            content: lib(meta, !parts.device_fields.is_empty())?,
-            ownership: Ownership::Owned,
-        },
+        Artifact::new("build.rs", build_rs(meta)?),
+        Artifact::new("src/bin/main.rs", main(board, &parts, meta, opts)?),
+        Artifact::new("src/generated.rs", generated(&parts, meta)?),
+        Artifact::new("src/lib.rs", lib(meta, !parts.device_fields.is_empty())?),
     ])
 }
 

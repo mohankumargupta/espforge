@@ -3,9 +3,14 @@
 //!
 //! Discovery takes the directory it looks in, never `$PWD`: the binary passes
 //! `.`, tests pass a scratch directory. App logic and overlay files come from
-//! the example (embedded) or from next to the file, including a custom Wokwi
-//! chip: `chip.json` and `chip.wasm` always, and the `chip/` Zig sources only
-//! when `keep-zig-source` is on.
+//! the example (embedded) or from next to the file.
+//!
+//! Everything a user controls lives there, beside the `.espf`: the Wokwi setup
+//! (`diagram.json`, `wokwi.toml`, a custom chip's `chip.json` / `chip.wasm`,
+//! and the `chip/` Zig sources under `keep-zig-source`), the build settings
+//! (`rust-toolchain.toml`, `.cargo/config.toml`, `.cargo/esp-config.toml`),
+//! a partition table (`partitions.csv`), and `Cargo.extra.toml` for extra
+//! manifest keys. The generated project is disposable output.
 
 use anyhow::Result;
 use espforge_emit::RuntimeSource;
@@ -110,16 +115,30 @@ pub fn resolve_source(
     }
 }
 
-/// Files next to a `.espf` that customise the generated Wokwi setup.
-const OVERLAY_FILES: [&str; 4] = ["diagram.json", "wokwi.toml", "chip.json", "chip.wasm"];
+/// Files next to a `.espf` that override the generated project.
+const OVERLAY_FILES: [&str; 9] = [
+    "Cargo.extra.toml",
+    ".cargo/config.toml",
+    ".cargo/esp-config.toml",
+    "chip.json",
+    "chip.wasm",
+    "diagram.json",
+    "partitions.csv",
+    "rust-toolchain.toml",
+    "wokwi.toml",
+];
 
 /// Whether an overlay path is one the render accepts.
 fn is_overlay_file(path: &str, keep_zig: bool) -> bool {
     OVERLAY_FILES.contains(&path) || (keep_zig && path.starts_with("chip/"))
 }
 
-/// The example files the render may layer on top. `keep_zig` decides whether
-/// the optional `chip/` source tree comes along.
+/// The overlay files the render layers on top, in a stable order. `keep_zig`
+/// decides whether the optional `chip/` source tree comes along.
+///
+/// A plain `esp-config.toml` beside the `.espf` is read as
+/// `.cargo/esp-config.toml`, so not having a hidden `.cargo/` directory is not
+/// a reason to miss the setting.
 pub fn overlay_files(src: &Source, keep_zig: bool) -> Result<Vec<(String, Vec<u8>)>, String> {
     if let Some(ex) = src.example {
         return Ok(ex
@@ -140,6 +159,16 @@ pub fn overlay_files(src: &Source, keep_zig: bool) -> Result<Vec<(String, Vec<u8
             out.push((
                 name.to_string(),
                 std::fs::read(&p).map_err(|e| format!("cannot read {}: {e}", p.display()))?,
+            ));
+        }
+    }
+    if !out.iter().any(|(path, _)| path == ".cargo/esp-config.toml") {
+        let alias = dir.join("esp-config.toml");
+        if alias.is_file() {
+            out.push((
+                ".cargo/esp-config.toml".to_string(),
+                std::fs::read(&alias)
+                    .map_err(|e| format!("cannot read {}: {e}", alias.display()))?,
             ));
         }
     }
@@ -290,7 +319,7 @@ mod tests {
         assert!(src.dir.is_none());
         assert!(src.example.is_some());
         let overlays = overlay_files(&src, false).unwrap();
-        assert!(overlays.is_empty(), "helloworld has no Wokwi overlay file");
+        assert!(overlays.is_empty(), "helloworld has no overlay file");
         assert!(
             String::from_utf8(app_logic(&src).unwrap())
                 .unwrap()
@@ -302,6 +331,72 @@ mod tests {
     fn a_short_example_name_resolves_to_its_category_key() {
         let src = resolve_source(None, Some("blink"), Path::new(".")).unwrap();
         assert_eq!(src.name, "embedded:01.Basics/blink");
+    }
+
+    /// Every user-controlled file beside the `.espf` is read, including the
+    /// ones under `.cargo/`, and nothing else is.
+    #[test]
+    fn the_overlay_set_covers_the_build_settings_and_the_spec_is_not_one() {
+        let dir = scratch();
+        let file = write_hello(dir.path());
+        std::fs::create_dir_all(dir.path().join(".cargo")).unwrap();
+        for (path, body) in [
+            ("partitions.csv", "nvs, data, nvs, , 0x6000,\n"),
+            ("Cargo.extra.toml", "[dependencies]\nserde = \"1\"\n"),
+            ("rust-toolchain.toml", "[toolchain]\nchannel = \"esp\"\n"),
+            (".cargo/config.toml", "[build]\n"),
+            (".cargo/esp-config.toml", "[env]\n"),
+            ("diagram.json", "{}"),
+        ] {
+            std::fs::write(dir.path().join(path), body).unwrap();
+        }
+        let src = from_file(&file).unwrap();
+        let paths: Vec<String> = overlay_files(&src, false)
+            .unwrap()
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                "Cargo.extra.toml",
+                ".cargo/config.toml",
+                ".cargo/esp-config.toml",
+                "diagram.json",
+                "partitions.csv",
+                "rust-toolchain.toml",
+            ]
+        );
+        assert!(
+            paths.iter().all(|p| !p.ends_with(".espf")),
+            "the spec is not an overlay: {paths:?}"
+        );
+    }
+
+    /// `esp-config.toml` at the project root is the same file as
+    /// `.cargo/esp-config.toml`; the dotted form wins when both exist.
+    #[test]
+    fn a_root_esp_config_toml_is_the_cargo_one() {
+        let dir = scratch();
+        let file = write_hello(dir.path());
+        std::fs::write(dir.path().join("esp-config.toml"), "[env]\n").unwrap();
+        let src = from_file(&file).unwrap();
+        let paths: Vec<String> = overlay_files(&src, false)
+            .unwrap()
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect();
+        assert_eq!(paths, vec![".cargo/esp-config.toml"]);
+
+        // The canonical path is not read twice.
+        std::fs::create_dir_all(dir.path().join(".cargo")).unwrap();
+        std::fs::write(dir.path().join(".cargo/esp-config.toml"), "[env]\n").unwrap();
+        let paths: Vec<String> = overlay_files(&src, false)
+            .unwrap()
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect();
+        assert_eq!(paths, vec![".cargo/esp-config.toml"]);
     }
 
     #[test]

@@ -1,17 +1,20 @@
-//! The project as a whole: layering an example's files over the generated set
-//! ([`layer_overlay`], [`OverlayFile`], [`Rendered`]) and the `README.txt`
-//! ([`readme`]).
+//! The project as a whole: layering the project's overlay files over the
+//! generated set ([`layer_overlay`], [`OverlayFile`], [`Rendered`]) and the
+//! `README.txt` ([`readme`]).
 //!
 //! The generated files themselves come from [`crate::codegen`]; this module is
-//! what happens after them and before the ownership manifest.
+//! what happens after them. Every file the user controls lives next to the
+//! `.espf` and arrives here as a [`OverlayFile`], so `build/` stays disposable
+//! output: nothing in it is ever read back.
 
 use anyhow::{Context as _, Result};
 use espforge_elements::{Board, ResolvedOptions};
 
-use crate::artifact::{Artifact, Asset, Ownership};
+use crate::artifact::{Artifact, Asset};
 use crate::codegen;
 
-/// One file of an example, with its path relative to the example directory.
+/// One overlay file from the project directory, with its path relative to the
+/// `.espf`.
 #[derive(Debug, Clone, Copy)]
 pub struct OverlayFile<'a> {
     pub path: &'a str,
@@ -36,14 +39,33 @@ impl std::fmt::Display for ChipError {
 
 impl std::error::Error for ChipError {}
 
+/// A user overlay file that cannot be used: `Cargo.extra.toml` that is not
+/// valid TOML, or an overlay that is not valid UTF-8.
+#[derive(Debug)]
+pub struct OverlayFileError {
+    /// The overlay file, as the user named it (`Cargo.extra.toml`).
+    pub file: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for OverlayFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "`{}`: {}", self.file, self.message)
+    }
+}
+
+impl std::error::Error for OverlayFileError {}
+
 /// Everything a render produces: text files and binary assets.
 #[derive(Debug, Clone, Default)]
 pub struct Rendered {
     pub artifacts: Vec<Artifact>,
     pub assets: Vec<Asset>,
+    /// Overlay decisions worth reporting to the user.
+    pub warnings: Vec<String>,
 }
 
-/// Layer an example's files over an already-generated project:
+/// Layer the project's overlay files over an already-generated project:
 ///
 /// * `diagram.json` / `wokwi.toml` replace the generated ones, with their
 ///   `{{ board }}`, `{{ serialMonitor }}`, `{{ chip }}` and
@@ -51,13 +73,19 @@ pub struct Rendered {
 ///   only apply when the `wokwi` option emitted the generated versions.
 /// * `chip.json` and `chip.wasm` are always copied (when `wokwi` is on);
 ///   the `chip/` source directory only when `keep-zig-source` is on. An
-///   example without `chip/` makes that a no-op. These are seed-once, so
-///   rebuilding a chip locally is never clobbered.
+///   example without `chip/` makes that a no-op.
 ///   A seeded chip also appends a `[[chip]]` section (see
 ///   [`codegen::wokwi::chip_section`]) to the emitted `wokwi.toml`, whichever
-///   one was emitted: the generated one or the example's own. Its name comes
+///   one was emitted: the generated one or the project's own. Its name comes
 ///   from `chip.json`, must be a legal part suffix, and every `chip-*` part in
 ///   the diagram has to name the same chip (see [`check_chip_parts`]).
+/// * `partitions.csv`, `rust-toolchain.toml`, `.cargo/config.toml` and
+///   `.cargo/esp-config.toml` replace the generated files of the same names.
+///   A `partitions.csv` also puts `--partition-table partitions.csv` on the
+///   espflash runner, unless the user replaced `.cargo/config.toml` outright.
+/// * `Cargo.extra.toml` is merged into the generated `Cargo.toml` (see
+///   [`codegen::cargo::merge`]): its dependencies, patches, profiles and lints
+///   are added, and espforge's own keys stay authoritative.
 /// * Everything else (`example.espf.txt`, `app/`, ...) is the CLI's business
 ///   and ignored here.
 pub fn layer_overlay(
@@ -91,6 +119,8 @@ pub fn layer_overlay(
     }
 
     let mut have_chip = false;
+    let mut have_partitions = false;
+    let mut own_cargo_config = false;
     for f in overlay {
         match f.path {
             "diagram.json" | "wokwi.toml" => {
@@ -106,10 +136,21 @@ pub fn layer_overlay(
             }
             "chip.json" | "chip.wasm" if wokwi => {
                 have_chip = true;
-                // TODO:need to update docs
-                own(f, artifacts, assets);
+                put(f, artifacts, assets);
             }
-            p if p.starts_with("chip/") && wokwi && keep_zig => seed(f, artifacts, assets),
+            p if p.starts_with("chip/") && wokwi && keep_zig => put(f, artifacts, assets),
+            "partitions.csv" => {
+                have_partitions = true;
+                put(f, artifacts, assets);
+            }
+            ".cargo/config.toml" => {
+                own_cargo_config = true;
+                put(f, artifacts, assets);
+            }
+            "rust-toolchain.toml" | ".cargo/esp-config.toml" => put(f, artifacts, assets),
+            "Cargo.extra.toml" => {
+                merge_cargo_extra(f, artifacts, &mut rendered.warnings)?;
+            }
             _ => {}
         }
     }
@@ -126,6 +167,49 @@ pub fn layer_overlay(
         check_chip_parts(&a.content, name)?;
     }
 
+    // A project with its own partition table is flashed with it. A user who
+    // replaced `.cargo/config.toml` owns the runner line themselves.
+    if have_partitions
+        && !own_cargo_config
+        && let Some(a) = artifacts
+            .iter_mut()
+            .find(|a| a.path == ".cargo/config.toml")
+    {
+        a.content = codegen::config::with_partition_table(&a.content)?;
+    }
+
+    Ok(())
+}
+
+/// Merge the user's `Cargo.extra.toml` into the generated `Cargo.toml`.
+///
+/// The generated document stays authoritative for the keys espforge writes;
+/// everything else in the extra file is kept. The extra file itself is never
+/// written to the output.
+fn merge_cargo_extra(
+    f: &OverlayFile,
+    artifacts: &mut [Artifact],
+    warnings: &mut Vec<String>,
+) -> Result<()> {
+    let text = std::str::from_utf8(f.contents).map_err(|_| OverlayFileError {
+        file: f.path.to_string(),
+        message: "is not valid UTF-8".to_string(),
+    })?;
+    let Some(cargo) = artifacts.iter_mut().find(|a| a.path == "Cargo.toml") else {
+        return Ok(());
+    };
+    let merged =
+        codegen::cargo::merge(Some(text), &cargo.content).map_err(|e| OverlayFileError {
+            file: f.path.to_string(),
+            message: format!("{e:#}"),
+        })?;
+    cargo.content = merged.content;
+    warnings.extend(
+        merged
+            .warnings
+            .into_iter()
+            .map(|warning| format!("Cargo.extra.toml: {warning}")),
+    );
     Ok(())
 }
 
@@ -158,84 +242,39 @@ fn check_chip_parts(diagram: &str, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Copy an overlay file as owned: text becomes an artifact (tracked in manifest),
-/// binary an asset (overwritten on update).
-fn own(f: &OverlayFile, artifacts: &mut Vec<Artifact>, assets: &mut Vec<Asset>) {
+/// Put an overlay file in place: text becomes an artifact, binary (and anything
+/// `.wasm`) an asset. An existing file with the same path is replaced.
+fn put(f: &OverlayFile, artifacts: &mut Vec<Artifact>, assets: &mut Vec<Asset>) {
     match std::str::from_utf8(f.contents) {
         Ok(text) if !f.path.ends_with(".wasm") => {
-            artifacts.push(Artifact::owned(f.path, text));
+            match artifacts.iter_mut().find(|a| a.path == f.path) {
+                Some(a) => a.content = text.to_string(),
+                None => artifacts.push(Artifact::new(f.path, text)),
+            }
         }
-        _ => assets.push(Asset::owned(f.path, f.contents)),
+        _ => match assets.iter_mut().find(|a| a.path == f.path) {
+            Some(a) => a.bytes = f.contents.to_vec(),
+            None => assets.push(Asset::new(f.path, f.contents)),
+        },
     }
 }
 
-/// Copy an overlay file as seed-once: text becomes an artifact, binary (and
-/// anything `.wasm`) an asset.
-fn seed(f: &OverlayFile, artifacts: &mut Vec<Artifact>, assets: &mut Vec<Asset>) {
-    match std::str::from_utf8(f.contents) {
-        Ok(text) if !f.path.ends_with(".wasm") => {
-            artifacts.push(Artifact::seed_once(f.path, text));
-        }
-        _ => assets.push(Asset::seed_once(f.path, f.contents)),
-    }
-}
-
-/// `README.txt`: says what is machine-owned and what is yours.
-pub fn readme(project_name: &str, artifacts: &[Artifact], assets: &[Asset]) -> Artifact {
-    let select = |wanted: Ownership| -> Vec<&str> {
-        artifacts
-            .iter()
-            .filter(|a| a.ownership == wanted)
-            .map(|a| a.path.as_str())
-            .chain(
-                assets
-                    .iter()
-                    .filter(|a| a.ownership == wanted)
-                    .map(|a| a.path.as_str()),
-            )
-            .collect()
-    };
-    let mut owned = select(Ownership::Owned);
-    let mut merged = select(Ownership::Merged);
-    let mut seeded = select(Ownership::SeedOnce);
-    owned.push("README.txt");
-    owned.sort_unstable();
-    merged.sort_unstable();
-    seeded.sort_unstable();
-    let list = |v: &[&str]| {
-        if v.is_empty() {
-            "  (none)".to_string()
-        } else {
-            v.iter()
-                .map(|p| format!("  - {p}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
-    };
-    Artifact::owned(
+/// `README.txt`: says where the project's source of truth is.
+pub fn readme(project_name: &str) -> Artifact {
+    Artifact::new(
         "README.txt",
         format!(
             "espforge generated project: {project_name}\n\
 ==========================================\n\
 \n\
 SOURCE OF TRUTH\n\
-  This directory is GENERATED from an .espf file. Edit the .espf (and your\n\
-  src/app.rs next to it), then re-run `espforge build`.\n\
-\n\
-MACHINE-OWNED (do not edit; regenerated every build):\n\
-{}\n\
-\n\
-MERGED (regenerated, but the keys you add are kept; managed keys are restored):\n\
-{}\n\
-\n\
-SEEDED ONCE (written the first time, then yours; never overwritten):\n\
-{}\n\
+  This directory is GENERATED and disposable: delete it, or `rm -rf build`,\n\
+  at any time. Edit the .espf, your src/app.rs, and the optional overlay files\n\
+  next to it (diagram.json, wokwi.toml, partitions.csv, rust-toolchain.toml,\n\
+  .cargo/*.toml, Cargo.extra.toml), then re-run `espforge build`.\n\
 \n\
 REGENERATE:\n\
-  espforge build <your.espf> --out <this dir>\n",
-            list(&owned),
-            list(&merged),
-            list(&seeded)
+  espforge build <your.espf> --out <this dir>\n"
         ),
     )
 }
@@ -265,6 +304,7 @@ mod tests {
         let mut rendered = Rendered {
             artifacts,
             assets: Vec::new(),
+            warnings: Vec::new(),
         };
         layer_overlay(board, opts, &mut rendered, overlay).unwrap();
         rendered
@@ -294,6 +334,7 @@ mod tests {
         let mut rendered = Rendered {
             artifacts,
             assets: Vec::new(),
+            warnings: Vec::new(),
         };
         layer_overlay(board, opts, &mut rendered, overlay).expect_err("the layer must fail")
     }
@@ -321,6 +362,7 @@ mod tests {
         let mut rendered = Rendered {
             artifacts,
             assets: Vec::new(),
+            warnings: Vec::new(),
         };
         let err = layer_overlay(&board, &opts, &mut rendered, &overlay).unwrap_err();
         assert!(
@@ -370,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn chip_json_and_wasm_are_always_seeded_but_zig_source_is_optional() {
+    fn chip_json_and_wasm_are_copied_but_zig_source_is_optional() {
         let (board, opts) = board_case();
         let overlay = overlay_files(&[
             ("chip.json", br#"{"name": "chip"}"#),
@@ -474,24 +516,126 @@ mod tests {
     }
 
     #[test]
-    fn readme_lists_owned_and_seeded_files() {
+    fn a_project_rust_toolchain_and_cargo_config_replace_the_generated_ones() {
         let (board, opts) = board_case();
-        let rendered = generated(&board, &opts, &[]);
-        let readme = readme("hello_world", &rendered.artifacts, &rendered.assets);
-        assert!(readme.content.contains("README.txt"));
-        assert!(readme.content.contains("  - rust-toolchain.toml"));
-        // `Cargo.toml` is merged, so it is listed as such, not as machine-owned.
-        let merged = readme
-            .content
-            .split("MERGED")
-            .nth(1)
-            .and_then(|rest| rest.split("SEEDED ONCE").next())
-            .unwrap_or_else(|| panic!("no merged section: {}", readme.content));
-        assert!(merged.contains("  - Cargo.toml"), "{merged}");
+        let overlay = overlay_files(&[
+            (
+                "rust-toolchain.toml",
+                b"[toolchain]\nchannel = \"nightly\"\n",
+            ),
+            (".cargo/esp-config.toml", b"[env]\nESP_LOG=\"debug\"\n"),
+        ]);
+        let rendered = generated(&board, &opts, &overlay);
         assert!(
-            readme.content.contains("MACHINE-OWNED"),
-            "the lists stay distinct: {}",
-            readme.content
+            file(&rendered, "rust-toolchain.toml")
+                .content
+                .contains("nightly")
         );
+        assert!(
+            file(&rendered, ".cargo/esp-config.toml")
+                .content
+                .contains("ESP_LOG=\"debug\"")
+        );
+        // No duplicate artifacts: the generated ones were replaced.
+        assert_eq!(
+            rendered
+                .artifacts
+                .iter()
+                .filter(|a| a.path == "rust-toolchain.toml")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_custom_partition_table_is_copied_and_reaches_the_runner() {
+        let (board, opts) = board_case();
+        let overlay = overlay_files(&[(
+            "partitions.csv",
+            b"# Name, Type, SubType, Offset, Size, Flags\nnvs, data, nvs, , 0x6000,\n",
+        )]);
+        let rendered = generated(&board, &opts, &overlay);
+        assert!(file(&rendered, "partitions.csv").content.contains("nvs"));
+        let config = &file(&rendered, ".cargo/config.toml").content;
+        assert!(
+            config.contains("--partition-table partitions.csv"),
+            "{config}"
+        );
+    }
+
+    #[test]
+    fn a_project_cargo_config_keeps_its_own_runner() {
+        let (board, opts) = board_case();
+        let overlay = overlay_files(&[
+            (
+                ".cargo/config.toml",
+                b"[target.riscv32imc-unknown-none-elf]\nrunner = \"probe-rs run --chip=esp32c3\"\n",
+            ),
+            ("partitions.csv", b"nvs, data, nvs, , 0x6000,\n"),
+        ]);
+        let rendered = generated(&board, &opts, &overlay);
+        let config = &file(&rendered, ".cargo/config.toml").content;
+        assert_eq!(
+            config,
+            "[target.riscv32imc-unknown-none-elf]\nrunner = \"probe-rs run --chip=esp32c3\"\n"
+        );
+    }
+
+    #[test]
+    fn cargo_extra_merges_into_the_generated_manifest() {
+        let (board, opts) = board_case();
+        let overlay = overlay_files(&[(
+            "Cargo.extra.toml",
+            b"[dependencies]\nserde = \"1\"\n\n[patch.crates-io]\nfoo = { path = \"../foo\" }\n",
+        )]);
+        let rendered = generated(&board, &opts, &overlay);
+        let cargo = &file(&rendered, "Cargo.toml").content;
+        assert!(cargo.contains("serde = \"1\""), "{cargo}");
+        assert!(cargo.contains("static_cell"), "managed keys stay: {cargo}");
+        assert!(cargo.contains("[patch.crates-io]"), "{cargo}");
+        assert!(
+            rendered
+                .artifacts
+                .iter()
+                .all(|a| a.path != "Cargo.extra.toml"),
+            "the extra file is not emitted"
+        );
+        assert!(rendered.warnings.is_empty(), "{:?}", rendered.warnings);
+    }
+
+    #[test]
+    fn a_managed_key_written_in_the_extra_is_restored_with_a_warning() {
+        let (board, opts) = board_case();
+        let overlay = overlay_files(&[(
+            "Cargo.extra.toml",
+            b"[dependencies.esp-hal]\nversion = \"0.1.0\"\n",
+        )]);
+        let rendered = generated(&board, &opts, &overlay);
+        let cargo = &file(&rendered, "Cargo.toml").content;
+        assert!(cargo.contains("~1.2.2"), "{cargo}");
+        assert_eq!(rendered.warnings.len(), 1, "{:?}", rendered.warnings);
+        assert!(
+            rendered.warnings[0].contains("dependencies.esp-hal"),
+            "{:?}",
+            rendered.warnings
+        );
+    }
+
+    #[test]
+    fn a_malformed_cargo_extra_is_a_typed_error() {
+        let (board, opts) = board_case();
+        let overlay = overlay_files(&[("Cargo.extra.toml", b"[dependencies")]);
+        let err = layer_error(&board, &opts, &overlay);
+        let extra = err.downcast_ref::<OverlayFileError>().expect("typed error");
+        assert_eq!(extra.file, "Cargo.extra.toml");
+    }
+
+    #[test]
+    fn readme_names_the_overlay_files_and_says_the_output_is_disposable() {
+        let readme = readme("hello_world");
+        assert!(readme.content.contains("hello_world"));
+        assert!(readme.content.contains("disposable"));
+        assert!(readme.content.contains("Cargo.extra.toml"));
+        assert!(readme.content.contains("espforge build"));
     }
 }

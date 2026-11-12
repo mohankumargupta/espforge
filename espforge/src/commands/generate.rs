@@ -100,7 +100,6 @@ mod tests {
             "src/bin/main.rs",
             "src/app.rs",
             "README.txt",
-            ".espforge/manifest.json",
             ".espforge/source.espf.txt",
         ] {
             assert!(out.join(f).is_file(), "missing {f}");
@@ -121,15 +120,21 @@ mod tests {
         assert!(out.join("Cargo.toml").is_file());
     }
 
+    /// `build/` is disposable: an edited generated file is overwritten.
     #[test]
-    fn rebuilding_is_fine_but_edited_owned_files_are_refused() {
+    fn rebuilding_overwrites_edited_generated_files() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("out");
         let args = example_args("01.Basics/helloworld", &out);
         execute(&args).unwrap();
         execute(&args).unwrap();
         std::fs::write(out.join("src/lib.rs"), "// mine").unwrap();
-        assert!(is_user(execute(&args)));
+        execute(&args).unwrap();
+        assert!(
+            !std::fs::read_to_string(out.join("src/lib.rs"))
+                .unwrap()
+                .contains("// mine")
+        );
     }
 
     #[test]

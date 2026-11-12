@@ -1,17 +1,17 @@
 //! `.cargo/config.toml`, `.cargo/esp-config.toml` and `rust-toolchain.toml`.
 //!
-//! These replace the three template files of the same names. The two shipped
-//! as `.cargo/**` plus the toolchain file are seed-once, so a user who edited
-//! them keeps their version.
+//! These replace the three template files of the same names. All three are
+//! rewritten every build; a project that wants different values puts its own
+//! copy next to the `.espf` and the overlay layer replaces this output.
 //!
 //! `esp-config.toml` is static text; it is here so one module owns the whole
 //! `.cargo` directory. The comments in `config.toml` explain a real choice
 //! (frame pointers cost performance but give backtraces), so they are kept as
 //! decor above the key they belong to rather than dropped with the template.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use espforge_elements::ResolvedOptions;
-use toml_edit::{Array, DocumentMut, Item, Table, value};
+use toml_edit::{Array, DocumentMut, Item, Table, Value, value};
 
 use super::chip::Chip;
 
@@ -81,6 +81,36 @@ fn flags(opts: &ResolvedOptions, chip: &Chip) -> Array {
     flags
 }
 
+/// Append `--partition-table partitions.csv` to the espflash runner.
+///
+/// A project that supplies its own `partitions.csv` is flashed with that
+/// table, so a custom layout (data partitions, asymmetric OTA slots) is not
+/// silently ignored. Called by the overlay layer, which is what knows whether
+/// the project has one.
+pub fn with_partition_table(config: &str) -> Result<String> {
+    let mut doc = config
+        .parse::<DocumentMut>()
+        .context("generated `.cargo/config.toml` is not valid TOML")?;
+    let Some(targets) = doc["target"].as_table_mut() else {
+        return Ok(doc.to_string());
+    };
+    for (_, entry) in targets.iter_mut() {
+        let Some(runner) = entry.as_table_mut().and_then(|t| t.get_mut("runner")) else {
+            continue;
+        };
+        let Some(value) = runner.as_value_mut() else {
+            continue;
+        };
+        let patched = value
+            .as_str()
+            .map(|runner| format!("{runner} --partition-table partitions.csv"));
+        if let Some(patched) = patched {
+            *value = Value::from(patched);
+        }
+    }
+    Ok(doc.to_string())
+}
+
 /// The emitted `rust-toolchain.toml`.
 pub fn toolchain(chip: &Chip) -> Result<String> {
     let mut toolchain = Table::new();
@@ -97,7 +127,8 @@ pub fn toolchain(chip: &Chip) -> Result<String> {
     Ok(doc.to_string())
 }
 
-/// The emitted `.cargo/esp-config.toml`: static, seed-once.
+/// The emitted `.cargo/esp-config.toml`: static text, replaced by a project's
+/// own `esp-config.toml` when it has one.
 pub fn esp_config() -> &'static str {
     "# Keep user/runtime configuration values in this file.\n[env]\nESP_LOG=\"info\"\n"
 }

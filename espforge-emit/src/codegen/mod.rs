@@ -25,7 +25,7 @@ pub mod rust;
 pub mod test_support;
 pub mod wokwi;
 
-/// Every file of the project, in [`FilePlan`] order, with the plan's ownership.
+/// Every file of the project, in [`FilePlan`] order.
 ///
 /// The Rust backend resolves its own chip for `build.rs`; the data backends
 /// share one [`chip::Chip`], so `esp-metadata-generated` is consulted twice per
@@ -57,11 +57,7 @@ pub fn generate(
             Source::Wokwi => wokwi::build(meta, &chip)?,
             Source::Diagram => diagram::build(&chip)?,
         };
-        artifacts.push(Artifact {
-            path: file.out_path.to_string(),
-            content,
-            ownership: file.ownership,
-        });
+        artifacts.push(Artifact::new(file.out_path, content));
     }
     Ok(artifacts)
 }
@@ -69,7 +65,6 @@ pub fn generate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifact::Ownership;
     use espforge_elements::{Answers, Console, DerivedInputs, Runtime, resolve};
 
     /// A project with no hardware: enough for the dispatcher and the data
@@ -94,23 +89,13 @@ mod tests {
     }
 
     #[test]
-    fn every_planned_file_is_produced_with_the_planned_owner() {
+    fn every_planned_file_is_produced() {
         let (board, meta, opts) = hello();
         let generated = generate(&board, &meta, &opts, &RuntimeSource::Published).unwrap();
         let paths: Vec<&str> = generated.iter().map(|a| a.path.as_str()).collect();
         let plan = FilePlan::for_project(&opts);
         let planned: Vec<&str> = plan.paths().collect();
         assert_eq!(paths, planned, "the plan and the output agree");
-
-        for artifact in &generated {
-            let file = plan.get(&artifact.path).unwrap();
-            assert_eq!(artifact.ownership, file.ownership, "{}", artifact.path);
-        }
-        assert_eq!(plan.get("Cargo.toml").unwrap().ownership, Ownership::Merged);
-        assert_eq!(
-            plan.get(".cargo/config.toml").unwrap().ownership,
-            Ownership::SeedOnce
-        );
     }
 
     #[test]
