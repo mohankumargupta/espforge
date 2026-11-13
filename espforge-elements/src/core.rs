@@ -14,7 +14,7 @@
 //! Console-vs-chip rules live in `resolve`, not here.
 
 use crate::chips;
-use crate::model::{Console, Meta, Runtime};
+use crate::model::{Console, FlashSize, Meta, OtaMeta, Runtime};
 use espf::context::ParsedNode;
 use espf::diag::{attr_span, node_span};
 use espforge_diagnostics::{Diagnostic, codes};
@@ -29,6 +29,7 @@ pub fn core_from_section<'n, 'a>(
     let mut chip_node: Option<&ParsedNode> = None;
     let mut runtime: Option<&ParsedNode> = None;
     let mut console: Option<&ParsedNode> = None;
+    let mut ota: Option<&ParsedNode> = None;
     let mut options: Option<&'n ParsedNode<'a>> = None;
 
     for n in nodes {
@@ -37,8 +38,9 @@ pub fn core_from_section<'n, 'a>(
             "chip" if chip_node.is_none() => chip_node = Some(n),
             "runtime" if runtime.is_none() => runtime = Some(n),
             "console" if console.is_none() => console = Some(n),
+            "ota" if ota.is_none() => ota = Some(n),
             "options" if options.is_none() => options = Some(n),
-            "project" | "chip" | "runtime" | "console" | "options" => {
+            "project" | "chip" | "runtime" | "console" | "ota" | "options" => {
                 errors.push(Diagnostic::error(
                     codes::CORE_DUPLICATE_ELEMENT,
                     node_span(n),
@@ -50,7 +52,7 @@ pub fn core_from_section<'n, 'a>(
                 codes::CORE_UNKNOWN_ELEMENT,
                 node_span(n),
                 format!("unknown element <{other}> in # espforge"),
-                "expected one of <project>, <chip>, <runtime>, <console>, <options>",
+                "expected one of <project>, <chip>, <runtime>, <console>, <ota>, <options>",
             )),
         }
     }
@@ -158,6 +160,57 @@ pub fn core_from_section<'n, 'a>(
         }
     };
 
+    // Optional; `<ota />` alone means 4MB with rollback.
+    let ota = match ota {
+        None => None,
+        Some(node) => {
+            let mut config = OtaMeta {
+                flash_size: FlashSize::Mb4,
+                rollback: true,
+            };
+            if let Some(value) = node.get_attr("flash_size") {
+                match FlashSize::parse(value) {
+                    Some(size) => config.flash_size = size,
+                    None => {
+                        let span = node
+                            .get_attr_spanned("flash_size")
+                            .map(attr_span)
+                            .unwrap_or_else(|| node_span(node));
+                        errors.push(Diagnostic::error(
+                            codes::CORE_UNKNOWN_FLASH_SIZE,
+                            span,
+                            "unknown flash size",
+                            format!(
+                                "\"{value}\" is not a flash size (expected one of: 2MB, 4MB, 8MB, 16MB)"
+                            ),
+                        ));
+                    }
+                }
+            }
+            if let Some(value) = node.get_attr("rollback") {
+                match value {
+                    "true" => config.rollback = true,
+                    "false" => config.rollback = false,
+                    other => {
+                        let span = node
+                            .get_attr_spanned("rollback")
+                            .map(attr_span)
+                            .unwrap_or_else(|| node_span(node));
+                        errors.push(Diagnostic::error(
+                            codes::CORE_INVALID_ROLLBACK,
+                            span,
+                            "invalid rollback value",
+                            format!(
+                                "\"{other}\" is not a boolean (expected \"true\" or \"false\")"
+                            ),
+                        ));
+                    }
+                }
+            }
+            Some(config)
+        }
+    };
+
     match (name, chip, runtime) {
         (Some(name), Some(chip), Some(runtime)) if errors.is_empty() => Ok((
             Meta {
@@ -168,6 +221,7 @@ pub fn core_from_section<'n, 'a>(
                 chip: chip.to_string(),
                 runtime,
                 console,
+                ota,
             },
             options,
         )),
@@ -251,6 +305,64 @@ mod tests {
         assert!(errs.iter().any(|e| e.labels[0].text.contains("<chip")));
         assert!(errs.iter().all(|e| e.code == codes::CORE_INCOMPLETE));
         assert!(errs.iter().all(|e| src[e.primary.start..].starts_with('#')));
+    }
+
+    /// `<ota />` alone is 4 MB with rollback; both attributes are optional.
+    #[test]
+    fn ota_defaults_to_4mb_with_rollback() {
+        let m = core("  <chip type=\"esp32c3\" />\n  <ota />\n").unwrap();
+        let ota = m.ota.expect("<ota /> is recorded");
+        assert_eq!(ota.flash_size, FlashSize::Mb4);
+        assert!(ota.rollback);
+    }
+
+    #[test]
+    fn ota_reads_its_two_attributes() {
+        let m = core(
+            "  <chip type=\"esp32c3\" />\n  <ota flash_size=\"8MB\" rollback=\"false\" />\n",
+        )
+        .unwrap();
+        let ota = m.ota.expect("<ota /> is recorded");
+        assert_eq!(ota.flash_size, FlashSize::Mb8);
+        assert!(!ota.rollback);
+    }
+
+    /// A flash size the schema does not offer is reported at the value, and a
+    /// duplicate `<ota>` is the same duplicate-element error as `<chip>`.
+    #[test]
+    fn an_unknown_flash_size_is_located_at_the_value() {
+        let src = format!(
+            "{HEAD}  <chip type=\"esp32c3\" />\n  <ota flash_size=\"32MB\" />\n"
+        );
+        let (sections, _, offsets) = parse_espf_runtime_with_diagnostics(&src);
+        let errs = core_from_section(offsets["espforge"], &sections["espforge"]).unwrap_err();
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].code, codes::CORE_UNKNOWN_FLASH_SIZE);
+        assert_eq!(&src[errs[0].primary.clone()], "32MB");
+    }
+
+    #[test]
+    fn a_duplicate_ota_is_refused() {
+        let src = format!(
+            "{HEAD}  <chip type=\"esp32c3\" />\n  <ota />\n  <ota flash_size=\"2MB\" />\n"
+        );
+        let (sections, _, offsets) = parse_espf_runtime_with_diagnostics(&src);
+        let errs = core_from_section(offsets["espforge"], &sections["espforge"]).unwrap_err();
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].code, codes::CORE_DUPLICATE_ELEMENT);
+        assert!(errs[0].message.contains("duplicate <ota>"));
+    }
+
+    #[test]
+    fn an_invalid_rollback_value_is_named() {
+        let src = format!(
+            "{HEAD}  <chip type=\"esp32c3\" />\n  <ota rollback=\"yes\" />\n"
+        );
+        let (sections, _, offsets) = parse_espf_runtime_with_diagnostics(&src);
+        let errs = core_from_section(offsets["espforge"], &sections["espforge"]).unwrap_err();
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].code, codes::CORE_INVALID_ROLLBACK);
+        assert_eq!(&src[errs[0].primary.clone()], "yes");
     }
 
     #[test]

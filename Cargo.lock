@@ -1151,6 +1151,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp-hal-ota"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6978d1aeb37e6bf33dda15d98744b769ad140364f4fba02f6789ccf067c9666c"
+dependencies = [
+ "embedded-storage",
+ "log",
+]
+
+[[package]]
 name = "esp-hal-procmacros"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1241,6 +1251,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e933ff78374b763b65998b64ad671b4890ed4ba13a80deff9f53afe95ede289d"
 dependencies = [
  "document-features",
+ "esp-metadata-generated",
+]
+
+[[package]]
+name = "esp-storage"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ef0e785f54e316f64a1e14a7a2f061a2ea0b038b284902ca71e1e1f5574cf47"
+dependencies = [
+ "document-features",
+ "embedded-storage",
+ "esp-hal-procmacros",
  "esp-metadata-generated",
 ]
 
@@ -1477,7 +1499,9 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "embedded-tls",
  "esp-hal",
+ "esp-hal-ota",
  "esp-radio",
+ "esp-storage",
  "log",
  "rand_core 0.6.4",
  "sntpc",

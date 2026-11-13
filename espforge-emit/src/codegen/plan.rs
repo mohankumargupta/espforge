@@ -30,6 +30,8 @@ pub enum Source {
     Wokwi,
     /// [`super::diagram`] (`diagram.json`).
     Diagram,
+    /// [`super::partitions`] (`partitions.csv`).
+    Partitions,
 }
 
 /// One file the project emits, before it has any content.
@@ -93,6 +95,14 @@ impl FilePlan {
                 source: Source::Wokwi,
             });
         }
+        // `<ota />` owns the layout the updater writes into. A project with
+        // its own `partitions.csv` replaces this file in the overlay layer.
+        if opts.is_on("ota") {
+            files.push(PlannedFile {
+                out_path: "partitions.csv",
+                source: Source::Partitions,
+            });
+        }
         files.sort_by_key(|file| file.out_path);
         Self { files }
     }
@@ -141,6 +151,30 @@ mod tests {
             plan.get("Cargo.toml").unwrap().source,
             Source::Cargo,
             "Cargo.toml comes from the typed backend"
+        );
+    }
+
+    /// `<ota />` adds the partition table, and only then.
+    #[test]
+    fn ota_adds_the_partition_table() {
+        let off = FilePlan::for_project(&options(true, &[]));
+        assert!(off.get("partitions.csv").is_none(), "no <ota />, no table");
+
+        let mut meta = crate::codegen::test_support::meta("esp32c3");
+        meta.ota = Some(espforge_elements::OtaMeta {
+            flash_size: espforge_elements::FlashSize::Mb4,
+            rollback: true,
+        });
+        let opts = espforge_elements::resolve(
+            &meta,
+            &espforge_elements::Answers::empty(0..0),
+            &espforge_elements::DerivedInputs::default(),
+        )
+        .unwrap();
+        let on = FilePlan::for_project(&opts);
+        assert_eq!(
+            on.get("partitions.csv").map(|file| file.source),
+            Some(Source::Partitions)
         );
     }
 

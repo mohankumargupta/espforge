@@ -19,6 +19,7 @@ pub mod config;
 pub mod diagram;
 pub mod equiv;
 pub mod overlay;
+pub mod partitions;
 pub mod plan;
 pub mod rust;
 #[cfg(test)]
@@ -56,6 +57,7 @@ pub fn generate(
             Source::Toolchain => config::toolchain(&chip)?,
             Source::Wokwi => wokwi::build(meta, &chip)?,
             Source::Diagram => diagram::build(&chip)?,
+            Source::Partitions => partitions::build(meta),
         };
         artifacts.push(Artifact::new(file.out_path, content));
     }
@@ -76,6 +78,7 @@ mod tests {
             chip: "esp32c3".into(),
             runtime: Runtime::Blocking,
             console: Console::Uart,
+            ota: None,
         };
         let opts = resolve(&meta, &Answers::empty(0..0), &DerivedInputs::default()).unwrap();
         let board = Board {

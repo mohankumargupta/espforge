@@ -63,6 +63,13 @@ fn runner(opts: &ResolvedOptions, chip: &Chip) -> String {
             "probe-rs run --chip={} --preverify --always-print-stacktrace --no-location",
             chip.name
         )
+    } else if opts.is_on("ota") {
+        // A fresh USB flash must use the two-slot table and clear `otadata`:
+        // otherwise the bootloader may still point at the other slot.
+        format!(
+            "espflash flash --monitor --chip {} --partition-table ./partitions.csv --erase-parts otadata",
+            chip.name
+        )
     } else {
         format!("espflash flash --monitor --chip {}", chip.name)
     }
@@ -260,6 +267,37 @@ mod tests {
             doc["target"]["riscv32imc-unknown-none-elf"]["runner"].as_str(),
             Some("espflash flash --monitor --chip esp32c3 --partition-table partitions.csv")
         );
+    }
+
+    /// `<ota />` makes the USB runner use the generated table and erase the
+    /// bootloader's slot state.
+    #[test]
+    fn ota_flashes_the_generated_table_and_erases_otadata() {
+        let mut meta = crate::codegen::test_support::meta("esp32c3");
+        meta.ota = Some(espforge_elements::OtaMeta {
+            flash_size: espforge_elements::FlashSize::Mb4,
+            rollback: true,
+        });
+        let opts = espforge_elements::resolve(
+            &meta,
+            &espforge_elements::Answers::empty(0..0),
+            &espforge_elements::DerivedInputs::default(),
+        )
+        .unwrap();
+        let doc = parse(&cargo_config(&opts, &chip("esp32c3")).unwrap());
+        assert_eq!(
+            doc["target"]["riscv32imc-unknown-none-elf"]["runner"].as_str(),
+            Some(
+                "espflash flash --monitor --chip esp32c3 --partition-table ./partitions.csv \
+                 --erase-parts otadata"
+            )
+        );
+        // The overlay layer must not append a second table flag.
+        let patched = with_partition_table(
+            &cargo_config(&opts, &chip("esp32c3")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(patched.matches("--partition-table").count(), 1, "{patched}");
     }
 
     #[test]

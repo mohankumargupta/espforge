@@ -3442,13 +3442,14 @@ options {
         }
         // The `# devices` elements live beside the drivers that implement
         // them (`espforge-drivers/drivers.schema.kdl`), so this file is the
-        // core vocabulary only: 18 elements.
-        assert_eq!(schema.elements.len(), 18);
+        // core vocabulary only: 19 elements.
+        assert_eq!(schema.elements.len(), 19);
         for tag in [
             "project",
             "chip",
             "runtime",
             "console",
+            "ota",
             "options",
             "gpio",
             "i2c",
@@ -3539,6 +3540,7 @@ options {
                 "alloc",
                 "embassy",
                 "wifi",
+                "ota",
                 "probe-rs",
                 "stack-smashing-protection",
                 "wokwi",

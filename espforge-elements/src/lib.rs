@@ -38,8 +38,8 @@ pub use espforge_schema::{Compat, Kind, OptValue, OptionDef, Requires, Schema};
 pub use lower::lower;
 pub use model::{
     Board, BusDevice, BusId, BusMode, BusTransport, Claim, ClaimedPin, Conflict, ConflictKind,
-    Console, Device, Direction, Driver, GpioDecl, HeldClash, HeldResource, I2cTransport, Ident,
-    Meta, Owner, OwnerKind, PeripheralRefusal, Pin, PinDevice, PinDeviceKind, PinUse,
+    Console, Device, Direction, Driver, FlashSize, GpioDecl, HeldClash, HeldResource, I2cTransport,
+    Ident, Meta, OtaMeta, Owner, OwnerKind, PeripheralRefusal, Pin, PinDevice, PinDeviceKind, PinUse,
     ProtocolService, ResourceGraph, Runtime, RuntimeSet, Service, SpiTransport,
 };
 pub use options::{

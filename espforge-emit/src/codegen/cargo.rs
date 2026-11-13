@@ -217,10 +217,13 @@ fn dependencies(
     // stack is what that option means. BLE arrives with its own element.
     let wifi = opts.is_on("wifi");
     let radio = wifi;
+    // `<ota />` in `# espforge` turns the derived `ota` option on: flash
+    // ownership, the partition table and the updater all come from it.
+    let ota = opts.is_on("ota");
     let chip_name = chip.name.as_str();
 
     let mut deps = Table::new();
-    deps["espforge-runtime"] = Item::Value(runtime_dependency(runtime, embassy, wifi, board));
+    deps["espforge-runtime"] = Item::Value(runtime_dependency(runtime, embassy, wifi, ota, board));
     if let Some(drivers) = drivers_dependency(runtime, board) {
         deps["espforge-drivers"] = Item::Value(drivers);
     }
@@ -250,6 +253,13 @@ fn dependencies(
     }
     hal.push("log-04");
     deps["esp-hal"] = Item::Value(dep("~1.2.2", &hal));
+
+    if ota {
+        // The runtime owns the `ota` feature; the project supplies the chip
+        // the flash-controller crates compile for, as it does for `esp-hal`.
+        deps["esp-storage"] = Item::Value(dep("0.10.0", &[chip_name, "embedded-storage"]));
+        deps["esp-hal-ota"] = Item::Value(dep("0.7.2", &[chip_name, "log"]));
+    }
 
     if embassy || radio {
         let mut features = Vec::new();
@@ -422,7 +432,13 @@ fn profiles() -> Item {
 /// `wifi` implies `embassy` (the schema's `requires`), so the Wi-Fi feature
 /// list carries both, in that order. Each service names its own feature, in
 /// declaration order: adding a service never edits this function.
-fn runtime_dependency(source: &RuntimeSource, embassy: bool, wifi: bool, board: &Board) -> Value {
+fn runtime_dependency(
+    source: &RuntimeSource,
+    embassy: bool,
+    wifi: bool,
+    ota: bool,
+    board: &Board,
+) -> Value {
     let mut table = InlineTable::new();
     if let RuntimeSource::Path(path) = source {
         table.insert("path", Value::from(path.replace('\\', "/")));
@@ -431,11 +447,14 @@ fn runtime_dependency(source: &RuntimeSource, embassy: bool, wifi: bool, board: 
 
     let service_features = board.service_features();
     let mut features: Vec<&str> = Vec::new();
-    if embassy || wifi || !service_features.is_empty() {
+    if embassy || wifi || ota || !service_features.is_empty() {
         features.push("embassy");
     }
     if wifi {
         features.push("wifi");
+    }
+    if ota {
+        features.push("ota");
     }
     for feature in service_features {
         if !features.contains(&feature) {
@@ -783,6 +802,48 @@ mod tests {
         for name in ["sntpc", "edge-http", "edge-ws", "embedded-tls"] {
             assert!(doc["dependencies"].get(name).is_none(), "{name}");
         }
+    }
+
+    /// `<ota />` asks the runtime for its `ota` feature and names the two
+    /// crates the updater compiles against, with the chip the project targets.
+    #[test]
+    fn ota_asks_the_runtime_for_the_feature_and_names_the_flash_crates() {
+        let mut meta = crate::codegen::test_support::meta("esp32c3");
+        meta.ota = Some(espforge_elements::OtaMeta {
+            flash_size: espforge_elements::FlashSize::Mb4,
+            rollback: true,
+        });
+        let opts = espforge_elements::resolve(
+            &meta,
+            &espforge_elements::Answers::empty(0..0),
+            &espforge_elements::DerivedInputs::default(),
+        )
+        .unwrap();
+        let doc = parse(
+            &manifest(
+                &meta,
+                &opts,
+                &RuntimeSource::Published,
+                &chip("esp32c3"),
+                &board(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            dependency(&doc, "espforge-runtime"),
+            format!(
+                "{{ version = \"{}\", features = [\"embassy\", \"ota\"] }}",
+                version()
+            )
+        );
+        assert_eq!(
+            dependency(&doc, "esp-storage"),
+            "{ version = \"0.10.0\", features = [\"esp32c3\", \"embedded-storage\"] }"
+        );
+        assert_eq!(
+            dependency(&doc, "esp-hal-ota"),
+            "{ version = \"0.7.2\", features = [\"esp32c3\", \"log\"] }"
+        );
     }
 
     /// A device pulls `espforge-drivers` with just its feature. The runtime no

@@ -49,6 +49,10 @@ codes! {
     CORE_CONSOLE_WITHOUT_TYPE = "E0208";
     /// A console name the catalog does not know.
     CORE_UNKNOWN_CONSOLE = "E0209";
+    /// `<ota flash_size>` names a size the catalog does not know.
+    CORE_UNKNOWN_FLASH_SIZE = "E0210";
+    /// `<ota rollback>` is not `true` or `false`.
+    CORE_INVALID_ROLLBACK = "E0211";
 
     /// An option name that is not in the schema.
     OPTION_UNKNOWN = "E0301";
@@ -247,7 +251,7 @@ mod tests {
                 matches!(
                     n,
                     101..=105
-                        | 201..=209
+                        | 201..=211
                         | 301
                         | 302
                         | 306..=315

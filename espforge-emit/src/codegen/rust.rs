@@ -40,7 +40,7 @@ fn print(tokens: TokenStream) -> Result<String> {
     Ok(prettyplease::unparse(&file))
 }
 
-fn generated(parts: &EmitParts, _meta: &Meta) -> Result<String> {
+fn generated(parts: &EmitParts, meta: &Meta) -> Result<String> {
     // The elements choose the container at their own emission site: a blocking
     // board keeps the bare device field, an embassy board wraps every device
     // in `AsyncMutex`. There is no second wrapping pass here.
@@ -111,12 +111,27 @@ fn generated(parts: &EmitParts, _meta: &Meta) -> Result<String> {
         }
     };
 
+    // The OTA updater's storage: one cell per project, declared here rather
+    // than inside `espforge-runtime` (which never hides a `static`), and
+    // filled by `main()` from the `FLASH` peripheral.
+    let ota_storage = if meta.ota.is_some() {
+        quote::quote! {
+            #[doc = " The OTA updater's storage, filled once by `main()`."]
+            pub static __OTA_STORAGE: espforge_runtime::OtaStorage =
+                espforge_runtime::OtaStorage::new();
+        }
+    } else {
+        quote::quote! {}
+    };
+
     let tokens = quote::quote! {
         #![allow(dead_code, unused_variables)]
 
         // Generated storage: one `static` per bus/station/client, declared by
         // the element that owns it.
         #(#module_items)*
+
+        #ota_storage
 
         #[doc = " Raw ESP32 peripherals, moved out of `esp_hal::peripherals::Peripherals` once at init."]
         pub struct PeripheralRegistry {
@@ -216,6 +231,15 @@ fn lib(meta: &Meta, has_devices: bool) -> Result<String> {
             }
         },
     };
+    // `<ota />` puts the updater handle on the context: `ctx.ota`.
+    let ota_field = if meta.ota.is_some() {
+        quote::quote! {
+            #[doc = " Dual-slot A/B firmware updates (`<ota />`)."]
+            pub ota: espforge_runtime::Ota,
+        }
+    } else {
+        quote::quote! {}
+    };
     let signal = if meta.runtime == Runtime::Embassy {
         quote::quote! {
             #[doc = " Define a cross-task signal. Usage: `crate::signal!(BUTTON_PRESSED)`"]
@@ -271,6 +295,7 @@ fn lib(meta: &Meta, has_devices: bool) -> Result<String> {
             pub delay: espforge_runtime::Delay,
             pub devices: Devices,
             pub services: Services,
+            #ota_field
         }
 
         #[doc = " Set by the entry point once wiring is complete."]
@@ -309,6 +334,35 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
     let heap = heap_line(board, opts);
     let startup = &parts.startup;
 
+    // Build the updater before the context is packed: it owns the `FLASH`
+    // peripheral, and a table that cannot be read is an error at boot, not a
+    // surprise when the first update arrives.
+    let (ota_import, ota_init, ota_field) = match meta.ota {
+        Some(ota) => {
+            let rollback = ota.rollback;
+            (
+                quote::quote! { use #crate_name::generated::__OTA_STORAGE; },
+                quote::quote! {
+                    let ota = match espforge_runtime::Ota::new_in(
+                        &__OTA_STORAGE,
+                        registry.peripherals.FLASH,
+                        #rollback,
+                    ) {
+                        Ok(ota) => ota,
+                        Err(error) => {
+                            logger.error(format_args!("{}", error));
+                            loop {
+                                esp_hal::delay::Delay::new().delay_millis(1_000);
+                            }
+                        }
+                    };
+                },
+                quote::quote! { ota, },
+            )
+        }
+        None => (quote::quote! {}, quote::quote! {}, quote::quote! {}),
+    };
+
     // The empty `Devices {}` keeps the helloworld golden byte-identical; a
     // declared device gets the constructor, which builds its buses itself.
     let devices = if parts.device_fields.is_empty() {
@@ -344,6 +398,7 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
             use esp_backtrace as _;
             use #crate_name::{app, Context, Devices, PeripheralRegistry, CTX};
             use #crate_name::Services;
+            #ota_import
 
             #[esp_hal::main]
             fn main() -> ! {
@@ -359,8 +414,9 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
 
                 #devices
                 #services
+                #ota_init
 
-                let ctx = Context { logger, delay, devices, services };
+                let ctx = Context { logger, delay, devices, services, #ota_field };
                 let ctx = CTX.init(ctx);
                 app::setup(ctx);
                 loop {
@@ -377,6 +433,7 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
             use esp_hal::timer::timg::TimerGroup;
             use #crate_name::{app, Context, Devices, PeripheralRegistry, CTX};
             use #crate_name::Services;
+            #ota_import
 
             #[esp_rtos::main]
             async fn main(spawner: Spawner) {
@@ -399,8 +456,9 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
                 #services
 
                 #(#startup)*
+                #ota_init
 
-                let ctx = Context { logger, delay, devices, services };
+                let ctx = Context { logger, delay, devices, services, #ota_field };
                 let ctx = CTX.init(ctx);
                 app::setup(ctx, spawner).await;
                 loop {

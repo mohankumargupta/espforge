@@ -71,6 +71,20 @@ element "console" section="espforge" {
     example "usb serial" #"<console type="jtag-serial" />"#
 }
 
+element "ota" section="espforge" {
+    summary "Enable dual-slot A/B Over-The-Air firmware updates"
+    description "Partition table, bootloader state and flash ownership are project-wide, so <ota> lives here and works over any transport."
+    attr "flash_size" kind="choice" default="4MB" {
+        choices "2MB" "4MB" "8MB" "16MB"
+        help "Flash chip size used to generate the default partitions.csv layout."
+    }
+    attr "rollback" kind="bool" default="true" {
+        help "Require ctx.ota.mark_app_valid() after boot, otherwise roll back on reset."
+    }
+    example "default 4MB with rollback" #"<ota />"#
+    example "custom flash size" #"<ota flash_size="8MB" rollback="true" />"#
+}
+
 element "options" section="espforge" {
     summary "Build options from this file's options block"
     attr "defaults" kind="bool" default="true" {
@@ -291,6 +305,11 @@ options {
     option "wifi" display_name="Enable Wi-Fi via the esp-radio crate." derived=#true {
         requires "alloc" "unstable-hal" "embassy"
         help "esp-radio comes with no stability guarantees at this time. Wi-Fi also allocates a heap."
+    }
+
+    // Computed from `<ota />` in `# espforge`; users may not set it.
+    option "ota" display_name="Enable OTA partition layout and updater." derived=#true {
+        help "Derived from <ota /> in # espforge."
     }
 
     option "probe-rs" display_name="Use probe-rs to flash and monitor instead of espflash." {

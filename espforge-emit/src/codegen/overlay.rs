@@ -140,6 +140,7 @@ mod tests {
                 chip: "esp32c3".into(),
                 runtime: Runtime::Blocking,
                 console: Console::Uart,
+                ota: None,
             },
             resources: espforge_elements::ResourceGraph::default(),
             devices: Vec::new(),

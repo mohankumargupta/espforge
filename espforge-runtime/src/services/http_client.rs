@@ -26,6 +26,10 @@ use embedded_io_async::{Read, Write};
 /// `rx_buffer_size` sizes it below this; the cap keeps the static bounded.
 const CONN_BUFFER_CAP: usize = 4096;
 
+/// Bytes read per callback in [`HttpClient::get_stream`]. Small enough that a
+/// whole firmware image never has to fit in RAM.
+const STREAM_CHUNK: usize = 2048;
+
 /// One request in flight: its connection buffer and its own TCP socket-buffer
 /// pool.
 ///
@@ -122,6 +126,34 @@ pub enum HttpError {
     BodyTooLarge,
 }
 
+/// What a streaming GET learned before its body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamInfo {
+    /// The HTTP status code.
+    pub status: u16,
+    /// `Content-Length`, when the server sent one.
+    pub content_length: Option<u32>,
+    /// `X-Firmware-CRC32`, when the server sent one (decimal or `0x` hex).
+    ///
+    /// Optional: a caller may take the checksum from a manifest instead.
+    pub crc32_header: Option<u32>,
+}
+
+/// Why a streaming GET stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpStreamError<E> {
+    /// The request, the response or the socket failed.
+    Http(HttpError),
+    /// The chunk callback refused a chunk.
+    Chunk(E),
+}
+
+impl<E> From<HttpError> for HttpStreamError<E> {
+    fn from(error: HttpError) -> Self {
+        HttpStreamError::Http(error)
+    }
+}
+
 /// A handle to the board's HTTP client. `Copy`, so it can sit on `Services`.
 #[derive(Clone, Copy)]
 pub struct HttpClient<const N: usize = 1> {
@@ -150,6 +182,44 @@ impl<const N: usize> HttpClient<N> {
     /// written.
     pub async fn get<'a>(&self, url: &str, rx_buf: &'a mut [u8]) -> Result<&'a [u8], HttpError> {
         self.exchange(Method::Get, url, None, rx_buf).await
+    }
+
+    /// GET `url`, handing the response body to `on_chunk` as it arrives.
+    ///
+    /// This is the streaming half of [`HttpClient::get`]: a firmware image of
+    /// any size fits in RAM because the body is never buffered whole. `on_chunk`
+    /// may fail and stop the download; the chunk error is returned as
+    /// [`HttpStreamError::Chunk`].
+    ///
+    /// Returns the response's status and any length/CRC headers it carried.
+    pub async fn get_stream<F, E>(
+        &self,
+        url: &str,
+        mut on_chunk: F,
+    ) -> Result<StreamInfo, HttpStreamError<E>>
+    where
+        F: FnMut(&[u8]) -> Result<(), E>,
+    {
+        let (host, port, path) = parse_url(url, 80).map_err(HttpStreamError::Http)?;
+        let addr = self.resolve(host, port).await.map_err(HttpStreamError::Http)?;
+
+        let conn_len = self.config.rx_buffer_size.clamp(1, CONN_BUFFER_CAP);
+        let mut guard = self.storage.acquire().await;
+        let Slot { connection, pool } = &mut *guard;
+        let buf: &mut [u8] = &mut connection[..conn_len];
+        let tcp = Tcp::new(self.stack, pool);
+        let timeout = self.config.timeout_ms.min(u32::MAX as u64) as u32;
+
+        match with_timeout(
+            timeout,
+            stream_request(&tcp, addr, host, path, buf, &mut on_chunk),
+        )
+        .await
+        {
+            Ok(result) => Ok(result),
+            Err(WithTimeoutError::Timeout) => Err(HttpStreamError::Http(HttpError::Timeout)),
+            Err(WithTimeoutError::Error(error)) => Err(error),
+        }
     }
 
     /// POST `payload` to `url` with `content_type`, writing the response body
@@ -264,6 +334,66 @@ async fn request<'a>(
         }
     }
     Ok(&rx_buf[..read])
+}
+
+/// One streaming GET: the headers first, then one callback per body chunk.
+///
+/// A free function because it borrows the connection buffer, the socket and the
+/// callback for the whole exchange.
+async fn stream_request<F, E>(
+    tcp: &Tcp<'_>,
+    addr: SocketAddr,
+    host: &str,
+    path: &str,
+    buf: &mut [u8],
+    on_chunk: &mut F,
+) -> Result<StreamInfo, HttpStreamError<E>>
+where
+    F: FnMut(&[u8]) -> Result<(), E>,
+{
+    let mut connection: Connection<'_, Tcp<'_>> = Connection::new(buf, tcp, addr);
+    let mut header_buf = [("", ""); 4];
+    let headers = request_headers(host, None, None, &mut header_buf);
+    connection
+        .initiate_request(true, Method::Get, path, headers)
+        .await
+        .map_err(|_| HttpStreamError::Http(HttpError::Request))?;
+    connection
+        .initiate_response()
+        .await
+        .map_err(|_| HttpStreamError::Http(HttpError::Response))?;
+
+    let (response, body) = connection.split();
+    let info = StreamInfo {
+        status: response.code,
+        content_length: response
+            .headers
+            .get("Content-Length")
+            .and_then(|value| value.trim().parse().ok()),
+        crc32_header: response
+            .headers
+            .get("X-Firmware-CRC32")
+            .and_then(parse_u32),
+    };
+
+    let mut chunk = [0u8; STREAM_CHUNK];
+    loop {
+        match body.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => on_chunk(&chunk[..n]).map_err(HttpStreamError::Chunk)?,
+            Err(_) => return Err(HttpStreamError::Http(HttpError::Read)),
+        }
+    }
+    Ok(info)
+}
+
+/// Parse a header value that is decimal or `0x`-prefixed hex.
+pub(crate) fn parse_u32(value: &str) -> Option<u32> {
+    let value = value.trim();
+    match value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")) {
+        Some(hex) => u32::from_str_radix(hex, 16).ok(),
+        None => value.parse().ok(),
+    }
 }
 
 /// The request headers edge-http wants: `Host`, `Connection: close` and, when
@@ -431,5 +561,14 @@ mod tests {
         assert_eq!(decimal(7, &mut buf), "7");
         assert_eq!(decimal(12345, &mut buf), "12345");
         assert_eq!(decimal(u32::MAX, &mut buf), "4294967295");
+    }
+
+    /// The firmware CRC header may be written either way; both name a u32.
+    #[test]
+    fn a_crc_header_is_decimal_or_hex() {
+        assert_eq!(parse_u32("412800"), Some(412_800));
+        assert_eq!(parse_u32("0x1a2b3c4d"), Some(0x1A2B_3C4D));
+        assert_eq!(parse_u32(" 0X1F0000 "), Some(0x1F_0000));
+        assert_eq!(parse_u32("nope"), None);
     }
 }

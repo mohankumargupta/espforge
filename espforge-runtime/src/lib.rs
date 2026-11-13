@@ -113,6 +113,14 @@ mod hw {
     #[cfg(feature = "wifi")]
     pub use wifi::*;
 
+    /// Dual-slot A/B OTA updates ([`Ota`], [`OtaStorage`], [`OtaError`]),
+    /// behind the `ota` feature: a project without `<ota />` never compiles
+    /// `esp-hal-ota` or touches flash.
+    #[cfg(feature = "ota")]
+    mod ota;
+    #[cfg(feature = "ota")]
+    pub use ota::*;
+
     use esp_hal::gpio::Level;
     use esp_hal::gpio::{Flex, Input, InputConfig, InputPin, Pin, Pull};
 

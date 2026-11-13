@@ -142,5 +142,6 @@ pub fn meta(chip: &str) -> Meta {
         chip: chip.into(),
         runtime: Runtime::Blocking,
         console: Console::Uart,
+        ota: None,
     }
 }

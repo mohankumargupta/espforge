@@ -70,6 +70,13 @@ fn hold_runtime_resources(cx: &mut LowerCx<'_>, meta: &Meta) {
             "use another UART, or move the console with `<console type=\"jtag-serial\" />`",
         );
     }
+    if meta.ota.is_some() {
+        cx.hold(
+            "FLASH",
+            "OTA firmware updates (`<ota>`)",
+            "remove `<ota />` from `# espforge` if another element needs raw FLASH access",
+        );
+    }
     if meta.runtime == crate::model::Runtime::Embassy {
         cx.hold(
             "TIMG0.timer0",
@@ -332,6 +339,7 @@ mod tests {
             chip: "esp32c3".into(),
             runtime: Runtime::Blocking,
             console: Console::Uart,
+            ota: None,
         }
     }
 
@@ -866,6 +874,27 @@ mod tests {
                 .map(|(name, _)| name)
                 .collect::<Vec<_>>(),
             ["FROM_CPU_INTR0", "TIMG0.timer0", "UART0"]
+        );
+    }
+
+    /// `<ota />` takes `FLASH` before any element lowers, so the generated
+    /// `main()` can build the updater from the one peripheral it needs.
+    #[test]
+    fn ota_holds_flash() {
+        let mut meta = meta();
+        meta.ota = Some(crate::model::OtaMeta {
+            flash_size: crate::model::FlashSize::Mb4,
+            rollback: true,
+        });
+        let board = lower_src_with(BLINK, meta).expect("an ota blink lowers");
+        let held: Vec<(&str, &str)> = board
+            .resources
+            .held_resources()
+            .map(|(name, held)| (name, held.holder.as_str()))
+            .collect();
+        assert!(
+            held.contains(&("FLASH", "OTA firmware updates (`<ota>`)")),
+            "{held:?}"
         );
     }
 

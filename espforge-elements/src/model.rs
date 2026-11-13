@@ -98,6 +98,52 @@ pub enum Console {
     JtagSerial,
 }
 
+/// The flash chip size a `<ota>` element lays its partition table out for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FlashSize {
+    /// 2 MiB of flash: two 960 KiB app slots.
+    Mb2,
+    /// 4 MiB of flash: two ~1.94 MiB app slots.
+    #[default]
+    Mb4,
+    /// 8 MiB of flash: two ~3.94 MiB app slots.
+    Mb8,
+    /// 16 MiB of flash: two ~7.94 MiB app slots.
+    Mb16,
+}
+
+impl FlashSize {
+    /// The size in bytes.
+    pub const fn bytes(self) -> u32 {
+        match self {
+            FlashSize::Mb2 => 2 * 1024 * 1024,
+            FlashSize::Mb4 => 4 * 1024 * 1024,
+            FlashSize::Mb8 => 8 * 1024 * 1024,
+            FlashSize::Mb16 => 16 * 1024 * 1024,
+        }
+    }
+
+    /// The size an `<ota flash_size>` names (`"2MB"`, `"4MB"`, `"8MB"`, `"16MB"`).
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "2MB" => Some(FlashSize::Mb2),
+            "4MB" => Some(FlashSize::Mb4),
+            "8MB" => Some(FlashSize::Mb8),
+            "16MB" => Some(FlashSize::Mb16),
+            _ => None,
+        }
+    }
+}
+
+/// What `<ota />` asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OtaMeta {
+    /// The physical flash size the default partition table is laid out for.
+    pub flash_size: FlashSize,
+    /// Whether a freshly booted image must call `mark_app_valid()`.
+    pub rollback: bool,
+}
+
 /// Contents of the `# espforge` section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Meta {
@@ -106,6 +152,8 @@ pub struct Meta {
     pub chip: String,
     pub runtime: Runtime,
     pub console: Console,
+    /// `Some` when the project asked for `<ota />`.
+    pub ota: Option<OtaMeta>,
 }
 
 impl Meta {
@@ -1625,6 +1673,7 @@ mod tests {
             chip: "esp32c3".into(),
             runtime: Runtime::Blocking,
             console: Console::default(),
+            ota: None,
         }
     }
 
