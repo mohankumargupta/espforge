@@ -85,6 +85,30 @@ element "ota" section="espforge" {
     example "custom flash size" #"<ota flash_size="8MB" rollback="true" />"#
 }
 
+element "logger" section="espforge" {
+    summary "Fine-grained log filtering, by subsystem"
+    description "Without <logger>, esp-println reads ESP_LOG from .cargo/esp-config.toml. With it, the generated project installs a target-aware logger: level covers the app and anything unnamed, and each category overrides one layer. level=\"none\" also strips the log crate and every dependency's log feature at compile time, so a silent project keeps its flash."
+    attr "level" kind="choice" default="info" {
+        choices "none" "error" "warn" "info" "debug" "trace"
+        help "The default level, for the app and anything no category names. none strips logging at compile time."
+    }
+    attr "drivers" kind="choice" default="inherit" {
+        choices "inherit" "none" "error" "warn" "info" "debug" "trace"
+        help "espforge-drivers and the vendor driver crates (ssd1306, sky-ili9341)."
+    }
+    attr "network" kind="choice" default="inherit" {
+        choices "inherit" "none" "error" "warn" "info" "debug" "trace"
+        help "esp-radio, smoltcp, embassy-net, and the Wi-Fi station."
+    }
+    attr "hal" kind="choice" default="warn" {
+        choices "inherit" "none" "error" "warn" "info" "debug" "trace"
+        help "esp-hal, esp-rtos, the bootloader and esp-println."
+    }
+    example "silent" #"<logger level="none" />"#
+    example "app only" #"<logger level="info" network="none" hal="none" drivers="none" />"#
+    example "debug sensors" #"<logger level="warn" drivers="debug" />"#
+}
+
 element "options" section="espforge" {
     summary "Build options from this file's options block"
     attr "defaults" kind="bool" default="true" {

@@ -340,6 +340,7 @@ mod tests {
             runtime: Runtime::Blocking,
             console: Console::Uart,
             ota: None,
+            logger: None,
         }
     }
 

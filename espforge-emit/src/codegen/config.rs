@@ -10,7 +10,7 @@
 //! decor above the key they belong to rather than dropped with the template.
 
 use anyhow::{Context, Result};
-use espforge_elements::ResolvedOptions;
+use espforge_elements::{Meta, ResolvedOptions};
 use toml_edit::{Array, DocumentMut, Item, Table, Value, value};
 
 use super::chip::Chip;
@@ -136,10 +136,20 @@ pub fn toolchain(chip: &Chip) -> Result<String> {
     Ok(doc.to_string())
 }
 
-/// The emitted `.cargo/esp-config.toml`: static text, replaced by a project's
-/// own `esp-config.toml` when it has one.
-pub fn esp_config() -> &'static str {
-    "# Keep user/runtime configuration values in this file.\n[env]\nESP_LOG=\"info\"\n"
+/// The emitted `.cargo/esp-config.toml`, replaced by a project's own
+/// `esp-config.toml` when it has one.
+///
+/// `ESP_LOG` is esp-println's own filter. It is kept in step with `<logger>` so
+/// a project that goes back to `init_logger_from_env()` — or reads the value
+/// through `esp-config` — filters exactly what the generated logger would.
+/// Without `<logger>` the file is the static `ESP_LOG="info"` it has always
+/// been.
+pub fn esp_config(meta: &Meta) -> String {
+    let level = match meta.logger {
+        Some(logger) => logger.esp_log(),
+        None => "info".to_string(),
+    };
+    format!("# Keep user/runtime configuration values in this file.\n[env]\nESP_LOG=\"{level}\"\n")
 }
 
 fn array(items: &[&str]) -> Array {
@@ -301,7 +311,39 @@ mod tests {
     }
 
     #[test]
-    fn esp_config_is_the_static_file() {
-        assert!(esp_config().contains("ESP_LOG=\"info\""));
+    fn esp_config_is_the_static_file_without_a_logger() {
+        let meta = crate::codegen::test_support::meta("esp32c3");
+        assert_eq!(
+            esp_config(&meta),
+            "# Keep user/runtime configuration values in this file.\n[env]\nESP_LOG=\"info\"\n"
+        );
+    }
+
+    /// `<logger>` writes the same filters into `ESP_LOG` that the generated
+    /// logger installs, in esp-println's spelling (`off`, not `none`).
+    #[test]
+    fn esp_log_follows_the_logger_element() {
+        let mut meta = crate::codegen::test_support::meta("esp32c3");
+        meta.logger = Some(espforge_elements::LoggerConfig {
+            level: espforge_elements::LogLevel::Warn,
+            drivers: Some(espforge_elements::LogLevel::Debug),
+            network: Some(espforge_elements::LogLevel::Off),
+            hal: Some(espforge_elements::LogLevel::Warn),
+        });
+        let text = esp_config(&meta);
+        assert!(
+            text.contains(
+                "ESP_LOG=\"warn,espforge_drivers=debug,ssd1306=debug,sky_ili9341=debug,\
+                 esp_radio=off,smoltcp=off,embassy_net=off,espforge_runtime::hw::wifi=off\""
+            ),
+            "{text}"
+        );
+
+        // Silence is the whole string: no rule can re-enable a level.
+        meta.logger = Some(espforge_elements::LoggerConfig {
+            level: espforge_elements::LogLevel::Off,
+            ..Default::default()
+        });
+        assert!(esp_config(&meta).contains("ESP_LOG=\"off\""));
     }
 }

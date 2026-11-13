@@ -116,6 +116,12 @@ critical-section = { version = "1.2", features = ["std"] }
 # The generated project supplies the chip feature.
 [target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
 esp-hal = { version = "1", features = ["unstable"] }
+# The sink the filtered logger writes through. No `log-04` (and no default
+# features): the logger prints records itself, so a project with
+# `<logger level="none" />` can strip esp-println's `log` integration without
+# this dependency putting it back. The generated project selects the console
+# backend through feature unification.
+esp-println = { version = "0.18.0", default-features = false }
 # `requires-unstable` is how a library says it uses unstable esp-radio APIs;
 # the final binary enables `unstable` itself.
 esp-radio = { version = "1.0.0-beta.1", features = ["wifi", "requires-unstable"], optional = true }

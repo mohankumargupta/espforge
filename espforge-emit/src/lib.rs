@@ -120,6 +120,7 @@ mod tests {
             runtime: Runtime::Blocking,
             console: Console::default(),
             ota: None,
+            logger: None,
         }
     }
 

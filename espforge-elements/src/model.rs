@@ -144,6 +144,169 @@ pub struct OtaMeta {
     pub rollback: bool,
 }
 
+/// A log level, in the `<logger>` element's vocabulary.
+///
+/// The order is verbosity, least first: `Off` disables logging and `Trace` is
+/// the most detailed. The emitter prints a level as
+/// `log::LevelFilter::<Variant>`, and `ESP_LOG` spells `Off` as `off`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LogLevel {
+    Off,
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl LogLevel {
+    /// Every spelling `<logger level>` accepts, in schema order.
+    pub const CHOICES: [&'static str; 6] = ["none", "error", "warn", "info", "debug", "trace"];
+
+    /// The level an attribute value names (`"none"` is [`LogLevel::Off`]).
+    pub fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "none" => LogLevel::Off,
+            "error" => LogLevel::Error,
+            "warn" => LogLevel::Warn,
+            "info" => LogLevel::Info,
+            "debug" => LogLevel::Debug,
+            "trace" => LogLevel::Trace,
+            _ => return None,
+        })
+    }
+
+    /// The spelling `ESP_LOG` uses (`off`, not `none`).
+    pub fn esp_log(self) -> &'static str {
+        match self {
+            LogLevel::Off => "off",
+            LogLevel::Error => "error",
+            LogLevel::Warn => "warn",
+            LogLevel::Info => "info",
+            LogLevel::Debug => "debug",
+            LogLevel::Trace => "trace",
+        }
+    }
+
+    /// The `log::LevelFilter` variant the generated code names.
+    pub fn variant(self) -> &'static str {
+        match self {
+            LogLevel::Off => "Off",
+            LogLevel::Error => "Error",
+            LogLevel::Warn => "Warn",
+            LogLevel::Info => "Info",
+            LogLevel::Debug => "Debug",
+            LogLevel::Trace => "Trace",
+        }
+    }
+}
+
+/// The target prefixes the `drivers` category owns.
+///
+/// A prefix matches a `log` target at a module boundary (`esp_hal` matches
+/// `esp_hal::gpio` but not `esp_halo`), so a rule names a crate once and covers
+/// every module in it.
+const DRIVER_TARGETS: &[&str] = &["espforge_drivers", "ssd1306", "sky_ili9341"];
+
+/// The prefixes `network` owns: esp-radio's baseband, the two protocol stacks
+/// and the runtime's Wi-Fi station.
+const NETWORK_TARGETS: &[&str] = &[
+    "esp_radio",
+    "smoltcp",
+    "embassy_net",
+    "espforge_runtime::hw::wifi",
+];
+
+/// The prefixes `hal` owns: the silicon layer the generated `main()` sits on.
+const HAL_TARGETS: &[&str] = &[
+    "esp_hal",
+    "esp_rtos",
+    "esp_bootloader_esp_idf",
+    "esp_println",
+    "esp_alloc",
+    "esp_backtrace",
+    "esp_hal_ota",
+    "esp_storage",
+];
+
+/// What `<logger>` asked for.
+///
+/// `None` on [`Meta`] means the project did not declare the element: the
+/// generated `main()` keeps esp-println's `ESP_LOG` logger, which is what
+/// every project had before `<logger>` existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoggerConfig {
+    /// The level for the app and anything no category rule overrides.
+    pub level: LogLevel,
+    /// `espforge-drivers` and the vendor crates they wrap; `None` inherits
+    /// [`Self::level`].
+    pub drivers: Option<LogLevel>,
+    /// The network stack (`esp-radio`, `smoltcp`, `embassy-net`, the Wi-Fi
+    /// station); `None` inherits.
+    pub network: Option<LogLevel>,
+    /// The silicon layer (`esp-hal`, `esp-rtos`, the bootloader, esp-println);
+    /// `None` inherits.
+    pub hal: Option<LogLevel>,
+}
+
+impl Default for LoggerConfig {
+    /// The schema's defaults: `level="info"`, `drivers`/`network="inherit"`,
+    /// `hal="warn"`.
+    fn default() -> Self {
+        Self {
+            level: LogLevel::Info,
+            drivers: None,
+            network: None,
+            hal: Some(LogLevel::Warn),
+        }
+    }
+}
+
+impl LoggerConfig {
+    /// Whether `<logger level="none" />` asked for silence: the emitter strips
+    /// `log` at compile time and installs no logger at all.
+    pub fn silenced(self) -> bool {
+        self.level == LogLevel::Off
+    }
+
+    /// `(target prefix, level)` pairs for the runtime filter, most specific
+    /// first.
+    ///
+    /// A category that inherits the default needs no rule: the default already
+    /// covers it, and an inherited level would only repeat it.
+    pub fn filters(self) -> Vec<(&'static str, LogLevel)> {
+        if self.silenced() {
+            return Vec::new();
+        }
+        let mut filters = Vec::new();
+        for (level, targets) in [
+            (self.drivers, DRIVER_TARGETS),
+            (self.network, NETWORK_TARGETS),
+            (self.hal, HAL_TARGETS),
+        ] {
+            let Some(level) = level else { continue };
+            if level == self.level {
+                continue;
+            }
+            filters.extend(targets.iter().map(|target| (*target, level)));
+        }
+        filters
+    }
+
+    /// The `ESP_LOG` string esp-println's parser reads.
+    ///
+    /// Kept in step with the generated logger so a project that goes back to
+    /// `init_logger_from_env()` (or reads the value through `esp-config`)
+    /// filters the same way.
+    pub fn esp_log(self) -> String {
+        let mut text = self.level.esp_log().to_string();
+        for (target, level) in self.filters() {
+            text.push_str(&format!(",{target}={}", level.esp_log()));
+        }
+        text
+    }
+}
+
 /// Contents of the `# espforge` section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Meta {
@@ -154,6 +317,8 @@ pub struct Meta {
     pub console: Console,
     /// `Some` when the project asked for `<ota />`.
     pub ota: Option<OtaMeta>,
+    /// `Some` when the project declared `<logger>`.
+    pub logger: Option<LoggerConfig>,
 }
 
 impl Meta {
@@ -1674,6 +1839,7 @@ mod tests {
             runtime: Runtime::Blocking,
             console: Console::default(),
             ota: None,
+            logger: None,
         }
     }
 

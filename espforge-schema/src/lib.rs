@@ -3442,14 +3442,15 @@ options {
         }
         // The `# devices` elements live beside the drivers that implement
         // them (`espforge-drivers/drivers.schema.kdl`), so this file is the
-        // core vocabulary only: 19 elements.
-        assert_eq!(schema.elements.len(), 19);
+        // core vocabulary only: 20 elements.
+        assert_eq!(schema.elements.len(), 20);
         for tag in [
             "project",
             "chip",
             "runtime",
             "console",
             "ota",
+            "logger",
             "options",
             "gpio",
             "i2c",

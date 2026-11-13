@@ -53,7 +53,7 @@ pub fn generate(
                 .clone(),
             Source::Cargo => cargo::manifest(meta, opts, runtime, &chip, board)?,
             Source::CargoConfig => config::cargo_config(opts, &chip)?,
-            Source::EspConfig => config::esp_config().to_string(),
+            Source::EspConfig => config::esp_config(meta),
             Source::Toolchain => config::toolchain(&chip)?,
             Source::Wokwi => wokwi::build(meta, &chip)?,
             Source::Diagram => diagram::build(&chip)?,
@@ -79,6 +79,7 @@ mod tests {
             runtime: Runtime::Blocking,
             console: Console::Uart,
             ota: None,
+            logger: None,
         };
         let opts = resolve(&meta, &Answers::empty(0..0), &DerivedInputs::default()).unwrap();
         let board = Board {

@@ -53,6 +53,8 @@ codes! {
     CORE_UNKNOWN_FLASH_SIZE = "E0210";
     /// `<ota rollback>` is not `true` or `false`.
     CORE_INVALID_ROLLBACK = "E0211";
+    /// `<logger>` names a level the catalog does not know.
+    CORE_INVALID_LOG_LEVEL = "E0212";
 
     /// An option name that is not in the schema.
     OPTION_UNKNOWN = "E0301";
@@ -251,7 +253,7 @@ mod tests {
                 matches!(
                     n,
                     101..=105
-                        | 201..=211
+                        | 201..=212
                         | 301
                         | 302
                         | 306..=315

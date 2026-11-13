@@ -12,10 +12,9 @@
 use anyhow::{Context, Result};
 use espforge_elements::element::EmitParts;
 use espforge_elements::{
-    Board, Device, EmitCx, Lowered, MainCtx, Meta, ResolvedOptions, Runtime, Service,
+    Board, Device, EmitCx, LogLevel, Lowered, MainCtx, Meta, ResolvedOptions, Runtime, Service,
 };
-use proc_macro2::Literal;
-use proc_macro2::TokenStream;
+use proc_macro2::{Literal, TokenStream};
 use quote::format_ident;
 
 use crate::artifact::Artifact;
@@ -124,6 +123,42 @@ fn generated(parts: &EmitParts, meta: &Meta) -> Result<String> {
         quote::quote! {}
     };
 
+    // `<logger>` installs the runtime's target filter. The rule table and the
+    // logger itself are statics declared here, not in the runtime, which never
+    // hides storage in a `static`. A project without `<logger>` emits neither
+    // and keeps esp-println's `ESP_LOG` logger; a level="none" project strips
+    // logging at compile time and installs nothing.
+    let logger = match meta.logger {
+        Some(config) if !config.silenced() => {
+            let default = level_filter(config.level);
+            let rules: Vec<TokenStream> = config
+                .filters()
+                .into_iter()
+                .map(|(prefix, level)| {
+                    let level = level_filter(level);
+                    quote::quote! {
+                        espforge_runtime::FilterRule {
+                            prefix: #prefix,
+                            level: log::LevelFilter::#level,
+                        }
+                    }
+                })
+                .collect();
+            quote::quote! {
+                #[doc = " The target filters `<logger>` declared: a module prefix and its level."]
+                pub static LOG_FILTERS: &[espforge_runtime::FilterRule] = &[#(#rules),*];
+
+                #[doc = " The logger `main()` installs before any other code runs."]
+                pub static LOGGER: espforge_runtime::FilteredLogger =
+                    espforge_runtime::FilteredLogger::new(
+                        log::LevelFilter::#default,
+                        LOG_FILTERS,
+                    );
+            }
+        }
+        _ => quote::quote! {},
+    };
+
     let tokens = quote::quote! {
         #![allow(dead_code, unused_variables)]
 
@@ -132,6 +167,8 @@ fn generated(parts: &EmitParts, meta: &Meta) -> Result<String> {
         #(#module_items)*
 
         #ota_storage
+
+        #logger
 
         #[doc = " Raw ESP32 peripherals, moved out of `esp_hal::peripherals::Peripherals` once at init."]
         pub struct PeripheralRegistry {
@@ -329,10 +366,31 @@ fn heap_line(board: &Board, opts: &ResolvedOptions) -> TokenStream {
     }
 }
 
+/// The `log::LevelFilter` variant for a `<logger>` level.
+fn level_filter(level: LogLevel) -> proc_macro2::Ident {
+    format_ident!("{}", level.variant())
+}
+
 fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -> Result<String> {
     let crate_name = format_ident!("{}", meta.crate_name());
     let heap = heap_line(board, opts);
     let startup = &parts.startup;
+
+    // How the entry point installs the `log` sink: the generated filtered
+    // logger, nothing at all when `<logger level="none" />` stripped logging,
+    // or esp-println's env logger for a project that did not declare `<logger>`.
+    let logger_init = match meta.logger {
+        Some(config) if config.silenced() => quote::quote! {
+            #[doc = " logger disabled: `<logger level=\"none\" />` strips every log call at compile time."]
+            const _: () = ();
+        },
+        Some(_) => quote::quote! {
+            espforge_runtime::logger::init(&#crate_name::generated::LOGGER);
+        },
+        None => quote::quote! {
+            esp_println::logger::init_logger_from_env();
+        },
+    };
 
     // Build the updater before the context is packed: it owns the `FLASH`
     // peripheral, and a table that cannot be read is an error at boot, not a
@@ -402,7 +460,7 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
 
             #[esp_hal::main]
             fn main() -> ! {
-                esp_println::logger::init_logger_from_env();
+                #logger_init
                 esp_println::print!("\x1b[20h");
                 esp_bootloader_esp_idf::esp_app_desc!();
                 let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -437,7 +495,7 @@ fn main(board: &Board, parts: &EmitParts, meta: &Meta, opts: &ResolvedOptions) -
 
             #[esp_rtos::main]
             async fn main(spawner: Spawner) {
-                esp_println::logger::init_logger_from_env();
+                #logger_init
                 esp_println::print!("\x1b[20h");
                 esp_bootloader_esp_idf::esp_app_desc!();
                 let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -1286,6 +1344,93 @@ mod tests {
             khz: 400,
         });
         board
+    }
+
+    /// `<logger>` emits the rule table and the logger static in `generated.rs`,
+    /// and `main()` installs it before anything else runs.
+    #[test]
+    fn a_logger_project_installs_the_generated_filter() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut meta = case.meta.clone();
+        meta.logger = Some(espforge_elements::LoggerConfig {
+            level: LogLevel::Info,
+            drivers: Some(LogLevel::Debug),
+            network: None,
+            hal: Some(LogLevel::Warn),
+        });
+        let board = empty_board(&case);
+        let parts = collect(&board);
+
+        let text = generated(&parts, &meta).unwrap();
+        assert!(
+            text.contains("pub static LOG_FILTERS: &[espforge_runtime::FilterRule]"),
+            "{text}"
+        );
+        // The printer wraps a long item across lines; compare without
+        // whitespace so the assertions pin the data, not the layout.
+        let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat.contains("prefix: \"espforge_drivers\", level: log::LevelFilter::Debug"),
+            "{text}"
+        );
+        // `hal` is `warn`, the default of the category, not the default level
+        // (`info`), so it has a rule of its own.
+        assert!(
+            flat.contains("prefix: \"esp_hal\", level: log::LevelFilter::Warn"),
+            "{text}"
+        );
+        assert!(
+            flat.contains(
+                "espforge_runtime::FilteredLogger::new( log::LevelFilter::Info, LOG_FILTERS,"
+            ),
+            "{text}"
+        );
+
+        let boot = main(&board, &parts, &meta, &case.opts).unwrap();
+        let boot_flat: String = boot.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            boot_flat.contains("espforge_runtime::logger::init(&hello_world::generated::LOGGER)"),
+            "{boot}"
+        );
+        assert!(!boot.contains("init_logger_from_env"), "{boot}");
+    }
+
+    /// `<logger level="none" />` installs nothing: the emitter also strips the
+    /// `log` features, so there is no logger to point at.
+    #[test]
+    fn a_silent_project_installs_no_logger() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut meta = case.meta.clone();
+        meta.logger = Some(espforge_elements::LoggerConfig {
+            level: LogLevel::Off,
+            ..Default::default()
+        });
+        let board = empty_board(&case);
+        let parts = collect(&board);
+
+        let text = generated(&parts, &meta).unwrap();
+        assert!(!text.contains("LOG_FILTERS"), "{text}");
+        assert!(!text.contains("LOGGER:"), "{text}");
+
+        let boot = main(&board, &parts, &meta, &case.opts).unwrap();
+        assert!(boot.contains("logger disabled"), "{boot}");
+        assert!(!boot.contains("init_logger_from_env"), "{boot}");
+        assert!(!boot.contains("logger::init"), "{boot}");
+    }
+
+    /// A project without `<logger>` keeps the logger it always had.
+    #[test]
+    fn a_project_without_a_logger_keeps_the_env_logger() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let board = empty_board(&case);
+        let parts = collect(&board);
+        let text = generated(&parts, &case.meta).unwrap();
+        assert!(!text.contains("LOG_FILTERS"), "{text}");
+        let boot = main(&board, &parts, &case.meta, &case.opts).unwrap();
+        assert!(
+            boot.contains("esp_println::logger::init_logger_from_env()"),
+            "{boot}"
+        );
     }
 
     /// The heap line, spelled exactly as the legacy `wifi_station` golden has

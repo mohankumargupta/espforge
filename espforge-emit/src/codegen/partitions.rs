@@ -57,6 +57,7 @@ mod tests {
                 flash_size,
                 rollback: true,
             }),
+            logger: None,
         }
     }
 

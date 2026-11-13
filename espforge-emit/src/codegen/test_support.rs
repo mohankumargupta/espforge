@@ -143,5 +143,6 @@ pub fn meta(chip: &str) -> Meta {
         runtime: Runtime::Blocking,
         console: Console::Uart,
         ota: None,
+        logger: None,
     }
 }

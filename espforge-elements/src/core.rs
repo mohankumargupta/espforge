@@ -14,10 +14,14 @@
 //! Console-vs-chip rules live in `resolve`, not here.
 
 use crate::chips;
-use crate::model::{Console, FlashSize, Meta, OtaMeta, Runtime};
+use crate::model::{Console, FlashSize, LogLevel, LoggerConfig, Meta, OtaMeta, Runtime};
 use espf::context::ParsedNode;
 use espf::diag::{attr_span, node_span};
 use espforge_diagnostics::{Diagnostic, codes};
+
+/// Every value a category attribute (`drivers`, `network`, `hal`) accepts: a
+/// level, or `inherit` to follow `<logger level>`.
+const INHERIT_CHOICES: &[&str] = &["inherit", "none", "error", "warn", "info", "debug", "trace"];
 
 /// Read the `# espforge` section into [`Meta`] plus its `<options>` node.
 pub fn core_from_section<'n, 'a>(
@@ -30,6 +34,7 @@ pub fn core_from_section<'n, 'a>(
     let mut runtime: Option<&ParsedNode> = None;
     let mut console: Option<&ParsedNode> = None;
     let mut ota: Option<&ParsedNode> = None;
+    let mut logger: Option<&ParsedNode> = None;
     let mut options: Option<&'n ParsedNode<'a>> = None;
 
     for n in nodes {
@@ -39,8 +44,9 @@ pub fn core_from_section<'n, 'a>(
             "runtime" if runtime.is_none() => runtime = Some(n),
             "console" if console.is_none() => console = Some(n),
             "ota" if ota.is_none() => ota = Some(n),
+            "logger" if logger.is_none() => logger = Some(n),
             "options" if options.is_none() => options = Some(n),
-            "project" | "chip" | "runtime" | "console" | "ota" | "options" => {
+            "project" | "chip" | "runtime" | "console" | "ota" | "logger" | "options" => {
                 errors.push(Diagnostic::error(
                     codes::CORE_DUPLICATE_ELEMENT,
                     node_span(n),
@@ -52,7 +58,7 @@ pub fn core_from_section<'n, 'a>(
                 codes::CORE_UNKNOWN_ELEMENT,
                 node_span(n),
                 format!("unknown element <{other}> in # espforge"),
-                "expected one of <project>, <chip>, <runtime>, <console>, <ota>, <options>",
+                "expected one of <project>, <chip>, <runtime>, <console>, <ota>, <logger>, <options>",
             )),
         }
     }
@@ -211,6 +217,36 @@ pub fn core_from_section<'n, 'a>(
         }
     };
 
+    // Optional; without it the generated main keeps esp-println's `ESP_LOG`
+    // logger, which is what every project had before `<logger>` existed.
+    let logger = logger.map(|node| {
+        let mut config = LoggerConfig::default();
+        if let Some(value) = node.get_attr("level") {
+            match LogLevel::parse(value) {
+                Some(level) => config.level = level,
+                None => errors.push(invalid_level(node, "level", value, &LogLevel::CHOICES)),
+            }
+        }
+        for (attr, slot) in [
+            ("drivers", &mut config.drivers),
+            ("network", &mut config.network),
+            ("hal", &mut config.hal),
+        ] {
+            let Some(value) = node.get_attr(attr) else {
+                continue;
+            };
+            if value == "inherit" {
+                *slot = None;
+                continue;
+            }
+            match LogLevel::parse(value) {
+                Some(level) => *slot = Some(level),
+                None => errors.push(invalid_level(node, attr, value, INHERIT_CHOICES)),
+            }
+        }
+        config
+    });
+
     match (name, chip, runtime) {
         (Some(name), Some(chip), Some(runtime)) if errors.is_empty() => Ok((
             Meta {
@@ -222,11 +258,29 @@ pub fn core_from_section<'n, 'a>(
                 runtime,
                 console,
                 ota,
+                logger,
             },
             options,
         )),
         _ => Err(errors),
     }
+}
+
+/// A `<logger>` value outside its choices, located at the value as written.
+fn invalid_level(node: &ParsedNode<'_>, attr: &str, value: &str, choices: &[&str]) -> Diagnostic {
+    let span = node
+        .get_attr_spanned(attr)
+        .map(attr_span)
+        .unwrap_or_else(|| node_span(node));
+    Diagnostic::error(
+        codes::CORE_INVALID_LOG_LEVEL,
+        span,
+        "invalid log level",
+        format!(
+            "<logger {attr}=\"{value}\">: expected one of {}",
+            choices.join(", ")
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -363,6 +417,76 @@ mod tests {
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert_eq!(errs[0].code, codes::CORE_INVALID_ROLLBACK);
         assert_eq!(&src[errs[0].primary.clone()], "yes");
+    }
+
+    /// `<logger />` alone is the schema's default: app at info, the silicon
+    /// layer at warn, drivers and network inheriting.
+    #[test]
+    fn logger_defaults_to_info_with_a_quiet_hal() {
+        let m = core("  <chip type=\"esp32c3\" />\n  <logger />\n").unwrap();
+        let logger = m.logger.expect("<logger /> is recorded");
+        assert_eq!(logger.level, LogLevel::Info);
+        assert_eq!(logger.drivers, None);
+        assert_eq!(logger.network, None);
+        assert_eq!(logger.hal, Some(LogLevel::Warn));
+        assert!(!logger.silenced());
+    }
+
+    #[test]
+    fn logger_reads_its_four_attributes() {
+        let m = core(
+            "  <chip type=\"esp32c3\" />\n  <logger level=\"warn\" drivers=\"debug\" network=\"none\" hal=\"inherit\" />\n",
+        )
+        .unwrap();
+        let logger = m.logger.expect("<logger> is recorded");
+        assert_eq!(logger.level, LogLevel::Warn);
+        assert_eq!(logger.drivers, Some(LogLevel::Debug));
+        assert_eq!(logger.network, Some(LogLevel::Off));
+        assert_eq!(logger.hal, None, "inherit follows level");
+    }
+
+    #[test]
+    fn a_logger_level_none_is_silence() {
+        let m = core("  <chip type=\"esp32c3\" />\n  <logger level=\"none\" />\n").unwrap();
+        assert!(m.logger.expect("<logger> is recorded").silenced());
+        // A project without the element keeps esp-println's logger.
+        let absent = core("  <chip type=\"esp32c3\" />\n").unwrap();
+        assert!(absent.logger.is_none());
+    }
+
+    #[test]
+    fn an_invalid_log_level_is_located_at_the_value() {
+        for (attr, value, source) in [
+            (
+                "level",
+                "quiet",
+                format!("{HEAD}  <chip type=\"esp32c3\" />\n  <logger level=\"quiet\" />\n"),
+            ),
+            (
+                "drivers",
+                "loud",
+                format!("{HEAD}  <chip type=\"esp32c3\" />\n  <logger drivers=\"loud\" />\n"),
+            ),
+        ] {
+            let (sections, _, offsets) = parse_espf_runtime_with_diagnostics(&source);
+            let errs = core_from_section(offsets["espforge"], &sections["espforge"]).unwrap_err();
+            assert_eq!(errs.len(), 1, "{errs:?}");
+            assert_eq!(errs[0].code, codes::CORE_INVALID_LOG_LEVEL);
+            assert_eq!(errs[0].message, "invalid log level");
+            assert_eq!(&source[errs[0].primary.clone()], value, "{attr}");
+        }
+    }
+
+    #[test]
+    fn a_duplicate_logger_is_refused() {
+        let src = format!(
+            "{HEAD}  <chip type=\"esp32c3\" />\n  <logger />\n  <logger level=\"warn\" />\n"
+        );
+        let (sections, _, offsets) = parse_espf_runtime_with_diagnostics(&src);
+        let errs = core_from_section(offsets["espforge"], &sections["espforge"]).unwrap_err();
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].code, codes::CORE_DUPLICATE_ELEMENT);
+        assert!(errs[0].message.contains("duplicate <logger>"));
     }
 
     #[test]

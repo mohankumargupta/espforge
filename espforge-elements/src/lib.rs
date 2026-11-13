@@ -39,8 +39,9 @@ pub use lower::lower;
 pub use model::{
     Board, BusDevice, BusId, BusMode, BusTransport, Claim, ClaimedPin, Conflict, ConflictKind,
     Console, Device, Direction, Driver, FlashSize, GpioDecl, HeldClash, HeldResource, I2cTransport,
-    Ident, Meta, OtaMeta, Owner, OwnerKind, PeripheralRefusal, Pin, PinDevice, PinDeviceKind, PinUse,
-    ProtocolService, ResourceGraph, Runtime, RuntimeSet, Service, SpiTransport,
+    Ident, LogLevel, LoggerConfig, Meta, OtaMeta, Owner, OwnerKind, PeripheralRefusal, Pin,
+    PinDevice, PinDeviceKind, PinUse, ProtocolService, ResourceGraph, Runtime, RuntimeSet, Service,
+    SpiTransport,
 };
 pub use options::{
     Answer, Answers, DerivedInputs, Origin, Resolved, ResolvedOptions, Why, resolve, resolve_with,

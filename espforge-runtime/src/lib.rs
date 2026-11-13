@@ -32,8 +32,17 @@ pub use clock::*;
 mod deferred;
 pub use deferred::*;
 
+/// The target-aware logger `<logger>` configures.
+///
+/// The generated code owns the one logger `static` (and the rule table), so
+/// this module adds no storage of its own: `espforge_runtime::FilteredLogger`
+/// is a value, and [`init`] installs the reference the project declared.
+pub mod logger;
+pub use logger::{FilterRule, FilteredLogger, init as init_logger};
+
 /// Logging handle stored on the generated `Context`. Forwards to the `log`
-/// facade; the generated project installs the sink (esp-println).
+/// facade; the generated project installs the sink (esp-println, directly or
+/// through [`FilteredLogger`]).
 #[derive(Clone, Copy)]
 pub struct Logger;
 

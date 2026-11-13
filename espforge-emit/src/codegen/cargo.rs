@@ -220,6 +220,10 @@ fn dependencies(
     // `<ota />` in `# espforge` turns the derived `ota` option on: flash
     // ownership, the partition table and the updater all come from it.
     let ota = opts.is_on("ota");
+    // `<logger level="none" />` is a compile-time decision: `log`'s macros
+    // become no-ops and every dependency drops its logging feature, so a
+    // silent project pays neither flash nor cycles for text it never prints.
+    let silent = meta.logger.is_some_and(|logger| logger.silenced());
     let chip_name = chip.name.as_str();
 
     let mut deps = Table::new();
@@ -245,20 +249,33 @@ fn dependencies(
     }
     deps["static_cell"] = value("2.1.1");
     deps["critical-section"] = value("1.2.0");
-    deps["log"] = value("0.4.27");
+    // `max_level_off` compiles every `log` macro out of the binary, in debug
+    // and release alike; the features are what makes silence total rather
+    // than a runtime check that still carries the format strings.
+    deps["log"] = if silent {
+        Item::Value(dep("0.4.27", &["max_level_off", "release_max_level_off"]))
+    } else {
+        value("0.4.27")
+    };
 
     let mut hal = vec![chip_name];
     if opts.is_on("unstable-hal") {
         hal.push("unstable");
     }
-    hal.push("log-04");
+    if !silent {
+        hal.push("log-04");
+    }
     deps["esp-hal"] = Item::Value(dep("~1.2.2", &hal));
 
     if ota {
         // The runtime owns the `ota` feature; the project supplies the chip
         // the flash-controller crates compile for, as it does for `esp-hal`.
         deps["esp-storage"] = Item::Value(dep("0.10.0", &[chip_name, "embedded-storage"]));
-        deps["esp-hal-ota"] = Item::Value(dep("0.7.2", &[chip_name, "log"]));
+        let mut features = vec![chip_name];
+        if !silent {
+            features.push("log");
+        }
+        deps["esp-hal-ota"] = Item::Value(dep("0.7.2", &features));
     }
 
     if embassy || radio {
@@ -273,15 +290,23 @@ fn dependencies(
             features.push("embassy");
         }
         features.push(chip_name);
-        features.push("log-04");
+        if !silent {
+            features.push("log-04");
+        }
         deps["esp-rtos"] = Item::Value(dep("0.4.0", &features));
     }
 
-    deps["esp-bootloader-esp-idf"] = Item::Value(dep("0.6.0", &["log-04", chip_name]));
-    deps["esp-println"] = Item::Value(dep_without_defaults(
-        "0.18.0",
-        &[chip_name, console(meta), "log-04"],
-    ));
+    let mut bootloader = Vec::new();
+    if !silent {
+        bootloader.push("log-04");
+    }
+    bootloader.push(chip_name);
+    deps["esp-bootloader-esp-idf"] = Item::Value(dep("0.6.0", &bootloader));
+    let mut println = vec![chip_name, console(meta)];
+    if !silent {
+        println.push("log-04");
+    }
+    deps["esp-println"] = Item::Value(dep_without_defaults("0.18.0", &println));
     deps["esp-backtrace"] = Item::Value(dep("0.20.0", &[chip_name, "panic-handler", "println"]));
     if alloc {
         deps["esp-alloc"] = Item::Value(dep("0.11.0", &[chip_name]));
@@ -292,10 +317,11 @@ fn dependencies(
         if embassy {
             deps["embedded-io-async"] = value("0.7.0");
             if wifi {
-                deps["embassy-net"] = Item::Value(dep(
-                    "0.9.1",
-                    &["tcp", "udp", "dhcpv4", "medium-ethernet", "log"],
-                ));
+                let mut features = vec!["tcp", "udp", "dhcpv4", "medium-ethernet"];
+                if !silent {
+                    features.push("log");
+                }
+                deps["embassy-net"] = Item::Value(dep("0.9.1", &features));
                 if let Some(mut key) = deps.key_mut("embassy-net") {
                     key.leaf_decor_mut().set_prefix(
                         "# for more networking protocol support see https://crates.io/crates/edge-net\n",
@@ -304,22 +330,22 @@ fn dependencies(
             }
         }
         if wifi {
-            deps["smoltcp"] = Item::Value(dep_without_defaults(
-                "0.14.0",
-                &[
-                    "medium-ethernet",
-                    "multicast",
-                    "proto-dhcpv4",
-                    "proto-dns",
-                    "proto-ipv4",
-                    "socket-dns",
-                    "socket-raw",
-                    "socket-tcp",
-                    "socket-udp",
-                    "socket-icmp",
-                    "log",
-                ],
-            ));
+            let mut features = vec![
+                "medium-ethernet",
+                "multicast",
+                "proto-dhcpv4",
+                "proto-dns",
+                "proto-ipv4",
+                "socket-dns",
+                "socket-raw",
+                "socket-tcp",
+                "socket-udp",
+                "socket-icmp",
+            ];
+            if !silent {
+                features.push("log");
+            }
+            deps["smoltcp"] = Item::Value(dep_without_defaults("0.14.0", &features));
         }
         let mut features = vec![chip_name];
         if wifi {
@@ -329,13 +355,19 @@ fn dependencies(
             features.push("esp-alloc");
         }
         features.push("unstable");
-        features.push("log-04");
+        if !silent {
+            features.push("log-04");
+        }
         deps["esp-radio"] = Item::Value(dep("1.0.0-beta.1", &features));
     }
 
     if embassy {
-        deps["embassy-executor"] = Item::Value(dep("0.10.0", &["log"]));
-        deps["embassy-time"] = Item::Value(dep("0.5.0", &["log"]));
+        let mut features = Vec::new();
+        if !silent {
+            features.push("log");
+        }
+        deps["embassy-executor"] = Item::Value(dep_with_features("0.10.0", &features));
+        deps["embassy-time"] = Item::Value(dep_with_features("0.5.0", &features));
         deps["embassy-sync"] = value("0.8.0");
     }
 
@@ -510,6 +542,16 @@ fn dep_without_defaults(version: &str, features: &[&str]) -> Value {
     table.insert("default-features", Value::from(false));
     table.insert("features", Value::Array(array(features)));
     Value::InlineTable(table)
+}
+
+/// `{ version, features }`, or the plain version string when the project keeps
+/// no feature at all (a silent project's `embassy-executor = "0.10.0"`).
+fn dep_with_features(version: &str, features: &[&str]) -> Value {
+    if features.is_empty() {
+        Value::from(version)
+    } else {
+        dep(version, features)
+    }
 }
 
 fn array(items: &[&str]) -> Array {
@@ -802,6 +844,74 @@ mod tests {
         for name in ["sntpc", "edge-http", "edge-ws", "embedded-tls"] {
             assert!(doc["dependencies"].get(name).is_none(), "{name}");
         }
+    }
+
+    /// `<logger level="none" />` strips every logging feature and turns the
+    /// `log` macros into no-ops at compile time.
+    #[test]
+    fn silence_strips_every_logging_feature() {
+        let mut meta = crate::codegen::test_support::meta("esp32c3");
+        meta.runtime = Runtime::Embassy;
+        meta.logger = Some(espforge_elements::LoggerConfig {
+            level: espforge_elements::LogLevel::Off,
+            ..Default::default()
+        });
+        let derived = espforge_elements::DerivedInputs {
+            peripherals: vec![("wifi".to_string(), 0..1)],
+            console_span: None,
+        };
+        let opts = espforge_elements::resolve(
+            &meta,
+            &espforge_elements::Answers::empty(0..0),
+            &derived,
+        )
+        .unwrap();
+        let doc = parse(
+            &manifest(
+                &meta,
+                &opts,
+                &RuntimeSource::Published,
+                &chip("esp32c3"),
+                &board(),
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(
+            dependency(&doc, "log"),
+            "{ version = \"0.4.27\", features = [\"max_level_off\", \"release_max_level_off\"] }"
+        );
+        for name in ["esp-hal", "esp-rtos", "esp-radio", "esp-println"] {
+            assert!(
+                !features(&doc, name).iter().any(|f| f == "log-04"),
+                "{name} keeps log-04: {}",
+                dependency(&doc, name)
+            );
+        }
+        assert_eq!(
+            features(&doc, "esp-bootloader-esp-idf"),
+            vec!["esp32c3"],
+            "the bootloader's log feature is stripped too"
+        );
+        for name in ["embassy-net", "smoltcp"] {
+            assert!(
+                !features(&doc, name).iter().any(|f| f == "log"),
+                "{name} keeps log: {}",
+                dependency(&doc, name)
+            );
+        }
+        // A dependency with only its `log` feature left becomes a plain line.
+        assert_eq!(dependency(&doc, "embassy-executor"), "\"0.10.0\"");
+        assert_eq!(dependency(&doc, "embassy-time"), "\"0.5.0\"");
+    }
+
+    /// A project without `<logger>` keeps every feature it has always had.
+    #[test]
+    fn a_project_without_a_logger_keeps_its_log_features() {
+        let doc = parse(&cargo(true, &[], Runtime::Embassy));
+        assert_eq!(dependency(&doc, "log"), "\"0.4.27\"");
+        assert!(features(&doc, "esp-rtos").contains(&"log-04".to_string()));
+        assert_eq!(features(&doc, "embassy-executor"), vec!["log"]);
     }
 
     /// `<ota />` asks the runtime for its `ota` feature and names the two
