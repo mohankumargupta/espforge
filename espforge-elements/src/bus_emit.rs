@@ -95,9 +95,10 @@ pub(crate) fn spi_types(mode: BusMode) -> (TokenStream, TokenStream, TokenStream
 /// Build the I2C controller once per bus inside `Devices::new`, and return the
 /// device endpoint that rides it.
 ///
-/// A blocking bus hands out an `embedded-hal-bus` `RefCellDevice`: the adapter
-/// owns the sharing, and the driver receives its address as a constructor
-/// argument, so nothing rewrites the address a driver passes.
+/// A blocking bus hands out an `embedded-hal-bus` `CriticalSectionDevice`: the
+/// adapter owns the sharing, its critical section makes the handle `Send +
+/// Sync`, and the driver receives its address as a constructor argument, so
+/// nothing rewrites the address a driver passes.
 pub(crate) fn i2c_device(cx: &mut EmitCx, board: &Board, bus: BusId) -> TokenStream {
     let Some(Bus::I2c {
         id,
@@ -140,7 +141,7 @@ pub(crate) fn i2c_device(cx: &mut EmitCx, board: &Board, bus: BusId) -> TokenStr
 
     match mode {
         BusMode::Blocking => quote! {
-            espforge_runtime::embedded_hal_bus::i2c::RefCellDevice::new(#handle.cell())
+            espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice::new(#handle.cs_cell())
         },
         // No async driver exists yet (phase 5); a bus only resolves to `Async`
         // when the scheduler is embassy and nothing blocking binds to it.
@@ -303,8 +304,7 @@ pub(crate) fn spi_device(
             )
         },
         // The async endpoint applies the part's own mode and clock before
-        // asserting CS, exactly like the blocking one. `AsyncSpiDevice` is the
-        // raw `<spi cs="...">` handle, which has no per-device config.
+        // asserting CS, exactly like the blocking one.
         BusMode::Async => quote! {
             espforge_runtime::ConfiguredAsyncSpiDevice::new(
                 #handle,

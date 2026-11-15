@@ -2,15 +2,18 @@
 //!
 //! Two flavours, and the scheduler no longer decides which one exists:
 //!
-//! - [`SpiBus`] is the blocking bus, parked in a `RefCell`. It is compiled in
-//!   every build, including an embassy project: a display on an embassy board
-//!   still talks over a blocking bus, before the executor starts.
+//! - [`SpiBus`] is the blocking bus, parked in a `critical_section::Mutex`. It
+//!   is compiled in every build, including an embassy project: a display on an
+//!   embassy board still talks over a blocking bus, before the executor
+//!   starts.
 //! - [`AsyncSpiBus`] is the async bus (feature `embassy`).
 //!
-//! Device endpoints that ride a blocking bus are `embedded-hal-bus`
-//! `RefCellDevice`s: the runtime owns the bus and exposes its cell, the
-//! standard adapter owns chip select. [`SpiDevice`] and [`AsyncSpiDevice`]
-//! are the raw handles for an `<spi cs="...">` bus.
+//! Both bus handles are `Send + Sync`, so a device that owns one can live in
+//! an `AsyncMutex` on an embassy board. A device endpoint is
+//! [`ConfiguredSpiDevice`] (or [`ConfiguredAsyncSpiDevice`]): the shared bus
+//! plus the part's own chip select, configuration and polarity. There is
+//! deliberately one endpoint per mode; a raw `<spi cs="...">` bus exposes the
+//! same type, so no device type has a second, unconfigured sibling.
 //!
 //! `build_in` is generic over the peripheral instance, so the runtime does not
 //! hardcode `SPI2`; the generated tokens still spell `SPI2`. The storage lives
@@ -130,8 +133,15 @@ impl embedded_hal::spi::Error for SpiError {
 // Blocking bus (every build)
 // ---------------------------------------------------------------------------
 
+/// The cell one blocking `<spi>` bus lives in.
+///
+/// The critical section is what makes the bus handle `Send + Sync`: a bare
+/// `RefCell` is neither, and an embassy board stores blocking devices inside
+/// an `AsyncMutex`.
+type BusCell = critical_section::Mutex<RefCell<Spi<'static, Blocking>>>;
+
 pub struct SpiBus {
-    inner: &'static RefCell<Spi<'static, Blocking>>,
+    inner: &'static BusCell,
     /// The last configuration applied to the controller, owned by the bus so
     /// two devices alternating cannot leave a stale "already applied" flag on
     /// an endpoint. An atomic keeps the handle `Copy` and the storage `Sync`.
@@ -151,7 +161,7 @@ impl Copy for SpiBus {}
 /// [`SpiBus::build_in`] and [`SpiBus::build_write_only_in`] can never
 /// initialise the same cell twice.
 pub struct SpiBusStorage {
-    cell: static_cell::StaticCell<RefCell<Spi<'static, Blocking>>>,
+    cell: static_cell::StaticCell<BusCell>,
     applied: AtomicU32,
 }
 
@@ -183,7 +193,9 @@ impl SpiBus {
             .with_sck(sclk)
             .with_mosi(mosi)
             .with_miso(miso);
-        let inner = storage.cell.init(RefCell::new(esp));
+        let inner = storage
+            .cell
+            .init(critical_section::Mutex::new(RefCell::new(esp)));
         storage.applied.store(packed(config), Ordering::Relaxed);
         Ok(SpiBus {
             inner,
@@ -202,7 +214,9 @@ impl SpiBus {
         let esp = Spi::new(spi, EspConfig::from(config))?
             .with_sck(sclk)
             .with_mosi(mosi);
-        let inner = storage.cell.init(RefCell::new(esp));
+        let inner = storage
+            .cell
+            .init(critical_section::Mutex::new(RefCell::new(esp)));
         storage.applied.store(packed(config), Ordering::Relaxed);
         Ok(SpiBus {
             inner,
@@ -220,17 +234,13 @@ impl SpiBus {
         if self.applied.load(Ordering::Relaxed) == key {
             return Ok(());
         }
-        let mut bus = self.inner.borrow_mut();
-        bus.apply_config(&EspConfig::from(config))
-            .map_err(SpiError::Config)?;
+        critical_section::with(|cs| {
+            let mut bus = self.inner.borrow(cs).borrow_mut();
+            bus.apply_config(&EspConfig::from(config))
+        })
+        .map_err(SpiError::Config)?;
         self.applied.store(key, Ordering::Relaxed);
         Ok(())
-    }
-
-    /// The shared cell, for an `embedded-hal-bus` endpoint
-    /// (`RefCellDevice::new(bus.cell(), cs, delay)`).
-    pub fn cell(&self) -> &'static RefCell<Spi<'static, Blocking>> {
-        self.inner
     }
 }
 
@@ -248,6 +258,7 @@ pub struct AsyncSpiBusStorage {
             Spi<'static, esp_hal::Async>,
         >,
     >,
+    applied: AtomicU32,
 }
 
 #[cfg(feature = "embassy")]
@@ -255,6 +266,7 @@ impl AsyncSpiBusStorage {
     pub const fn new() -> Self {
         Self {
             cell: static_cell::StaticCell::new(),
+            applied: AtomicU32::new(NO_CONFIG),
         }
     }
 }
@@ -272,6 +284,10 @@ pub struct AsyncSpiBus {
         embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
         Spi<'static, esp_hal::Async>,
     >,
+    /// The last configuration applied to the controller, shared by every
+    /// endpoint on the bus. Mirrors [`SpiBus::applied`]: without it, an async
+    /// endpoint reapplied its config on every transaction.
+    applied: &'static AtomicU32,
 }
 
 #[cfg(feature = "embassy")]
@@ -299,7 +315,11 @@ impl AsyncSpiBus {
             .with_miso(miso)
             .into_async();
         let inner = storage.cell.init(embassy_sync::mutex::Mutex::new(esp));
-        Ok(AsyncSpiBus { inner })
+        storage.applied.store(packed(config), Ordering::Relaxed);
+        Ok(AsyncSpiBus {
+            inner,
+            applied: &storage.applied,
+        })
     }
 
     pub fn build_write_only_in<I: Instance + 'static>(
@@ -314,63 +334,112 @@ impl AsyncSpiBus {
             .with_mosi(mosi)
             .into_async();
         let inner = storage.cell.init(embassy_sync::mutex::Mutex::new(esp));
-        Ok(AsyncSpiBus { inner })
+        storage.applied.store(packed(config), Ordering::Relaxed);
+        Ok(AsyncSpiBus {
+            inner,
+            applied: &storage.applied,
+        })
+    }
+
+    /// Apply `config` to the controller if it differs from the last one.
+    ///
+    /// The async mirror of [`SpiBus::configure`]: a device alternating between
+    /// two setups pays for the change, and a transaction that needs nothing new
+    /// performs no extra bus traffic.
+    pub async fn configure(&self, config: SpiConfig) -> Result<(), SpiError> {
+        let key = packed(config);
+        if self.applied.load(Ordering::Relaxed) == key {
+            return Ok(());
+        }
+        let mut bus = self.inner.lock().await;
+        bus.apply_config(&EspConfig::from(config))
+            .map_err(SpiError::Config)?;
+        self.applied.store(key, Ordering::Relaxed);
+        Ok(())
     }
 }
 
 // ---------------------------------------------------------------------------
-// Raw endpoints (`<spi cs="...">`)
+// Device tier: per-device config and chip-select polarity
 // ---------------------------------------------------------------------------
 
-type CsCell = RefCell<Output<'static>>;
-type DelayCell = RefCell<Delay>;
-
-pub struct SpiDevice {
+/// A device endpoint on a shared blocking SPI bus, owning its chip select.
+///
+/// This replaces `embedded-hal-bus`'s `RefCellDevice` for the **device** tier
+/// only: that adapter has no per-transaction configuration and no way to say
+/// a part's select line is active-high. Each transaction applies the device's
+/// own [`SpiConfig`] before asserting CS, runs the operations, and releases CS
+/// in the opposite direction. `transaction` takes `&mut self`, so the CS line
+/// is a plain field: two transactions on one endpoint cannot interleave.
+pub struct ConfiguredSpiDevice {
     bus: SpiBus,
-    cs: CsCell,
-    delay: DelayCell,
+    cs: Output<'static>,
+    delay: Delay,
+    config: SpiConfig,
+    polarity: CsPolarity,
 }
 
-impl SpiDevice {
-    /// Attach a device with its own CS pin to an already-built bus.
-    pub fn new(bus: SpiBus, cs: Output<'static>, delay: Delay) -> Self {
-        SpiDevice {
+impl ConfiguredSpiDevice {
+    /// Attach a part with its own chip select, configuration and polarity to
+    /// an already-built bus.
+    pub fn new(
+        bus: SpiBus,
+        cs: Output<'static>,
+        delay: Delay,
+        config: SpiConfig,
+        polarity: CsPolarity,
+    ) -> Self {
+        Self {
             bus,
-            cs: RefCell::new(cs),
-            delay: RefCell::new(delay),
+            cs,
+            delay,
+            config,
+            polarity,
         }
     }
 
-    pub fn delay_clone(&self) -> Delay {
-        self.delay.borrow().clone()
+    /// The configuration this part applies before each transaction.
+    pub fn config(&self) -> SpiConfig {
+        self.config
+    }
+
+    /// The chip-select polarity this part was built with.
+    pub fn polarity(&self) -> CsPolarity {
+        self.polarity
     }
 
     pub fn transaction(
-        &self,
+        &mut self,
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), SpiError> {
-        let mut bus = self.bus.inner.borrow_mut();
-        let mut cs = self.cs.borrow_mut();
-        let delay = self.delay.borrow();
-        cs.set_low();
-        let result = run_ops(&mut *bus, &delay, operations);
-        cs.set_high();
+        self.cs.set_level(self.polarity.asserted());
+        let result = (|| {
+            self.bus.configure(self.config)?;
+            critical_section::with(|cs| {
+                let mut bus = self.bus.inner.borrow(cs).borrow_mut();
+                run_ops(&mut *bus, &self.delay, operations)
+            })
+        })();
+        self.cs.set_level(self.polarity.idle());
         result
     }
 
-    pub fn write(&self, bytes: &[u8]) -> Result<(), SpiError> {
+    pub fn write(&mut self, bytes: &[u8]) -> Result<(), SpiError> {
         self.transaction(&mut [embedded_hal::spi::Operation::Write(bytes)])
     }
-    pub fn read(&self, buf: &mut [u8]) -> Result<(), SpiError> {
+
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<(), SpiError> {
         self.transaction(&mut [embedded_hal::spi::Operation::Read(buf)])
     }
-    pub fn write_read(&self, w: &[u8], r: &mut [u8]) -> Result<(), SpiError> {
+
+    pub fn write_read(&mut self, write: &[u8], read: &mut [u8]) -> Result<(), SpiError> {
         self.transaction(&mut [
-            embedded_hal::spi::Operation::Write(w),
-            embedded_hal::spi::Operation::Read(r),
+            embedded_hal::spi::Operation::Write(write),
+            embedded_hal::spi::Operation::Read(read),
         ])
     }
-    pub fn transfer_in_place(&self, buf: &mut [u8]) -> Result<(), SpiError> {
+
+    pub fn transfer_in_place(&mut self, buf: &mut [u8]) -> Result<(), SpiError> {
         self.transaction(&mut [embedded_hal::spi::Operation::TransferInPlace(buf)])
     }
 }
@@ -400,89 +469,6 @@ fn run_ops(
         }
     }
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Device-tier endpoint: per-device config and chip-select polarity
-// ---------------------------------------------------------------------------
-
-/// A device endpoint on a shared blocking SPI bus, owning its chip select.
-///
-/// This replaces `embedded-hal-bus`'s `RefCellDevice` for the **device** tier
-/// only: that adapter has no per-transaction configuration and no way to say
-/// a part's select line is active-high. Each transaction applies the device's
-/// own [`SpiConfig`] before asserting CS, runs the operations, and releases CS
-/// in the opposite direction.
-pub struct ConfiguredSpiDevice {
-    bus: SpiBus,
-    cs: RefCell<Output<'static>>,
-    delay: Delay,
-    config: SpiConfig,
-    polarity: CsPolarity,
-}
-
-impl ConfiguredSpiDevice {
-    /// Attach a part with its own chip select, configuration and polarity to
-    /// an already-built bus.
-    pub fn new(
-        bus: SpiBus,
-        cs: Output<'static>,
-        delay: Delay,
-        config: SpiConfig,
-        polarity: CsPolarity,
-    ) -> Self {
-        Self {
-            bus,
-            cs: RefCell::new(cs),
-            delay,
-            config,
-            polarity,
-        }
-    }
-
-    /// The configuration this part applies before each transaction.
-    pub fn config(&self) -> SpiConfig {
-        self.config
-    }
-
-    /// The chip-select polarity this part was built with.
-    pub fn polarity(&self) -> CsPolarity {
-        self.polarity
-    }
-
-    pub fn transaction(
-        &mut self,
-        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
-    ) -> Result<(), SpiError> {
-        let mut cs = self.cs.borrow_mut();
-        cs.set_level(self.polarity.asserted());
-        let result = (|| {
-            self.bus.configure(self.config)?;
-            let mut bus = self.bus.inner.borrow_mut();
-            run_ops(&mut *bus, &self.delay, operations)
-        })();
-        cs.set_level(self.polarity.idle());
-        result
-    }
-
-    pub fn write(&mut self, bytes: &[u8]) -> Result<(), SpiError> {
-        self.transaction(&mut [embedded_hal::spi::Operation::Write(bytes)])
-    }
-
-    pub fn read(&mut self, buf: &mut [u8]) -> Result<(), SpiError> {
-        self.transaction(&mut [embedded_hal::spi::Operation::Read(buf)])
-    }
-
-    pub fn write_read(&mut self, write: &[u8], read: &mut [u8]) -> Result<(), SpiError> {
-        self.transaction(&mut [
-            embedded_hal::spi::Operation::Write(write),
-            embedded_hal::spi::Operation::Read(read),
-        ])
-    }
-
-    pub fn transfer_in_place(&mut self, buf: &mut [u8]) -> Result<(), SpiError> {
-        self.transaction(&mut [embedded_hal::spi::Operation::TransferInPlace(buf)])
-    }
 }
 
 /// A device endpoint on a shared async SPI bus, owning its chip select.
@@ -547,9 +533,8 @@ impl ConfiguredAsyncSpiDevice {
         &mut self,
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), SpiError> {
+        self.bus.configure(self.config).await?;
         let mut bus = self.bus.inner.lock().await;
-        bus.apply_config(&EspConfig::from(self.config))
-            .map_err(SpiError::Config)?;
         for op in operations.iter_mut() {
             match op {
                 embedded_hal::spi::Operation::Read(buf) => {
@@ -629,116 +614,5 @@ impl embedded_hal::spi::SpiDevice for ConfiguredSpiDevice {
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), Self::Error> {
         ConfiguredSpiDevice::transaction(self, operations)
-    }
-}
-
-impl embedded_hal::spi::ErrorType for SpiDevice {
-    type Error = SpiError;
-}
-
-impl embedded_hal::spi::SpiDevice for SpiDevice {
-    fn transaction(
-        &mut self,
-        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
-    ) -> Result<(), Self::Error> {
-        SpiDevice::transaction(self, operations)
-    }
-}
-
-/// A chip-select-owning endpoint on a shared async bus (`embassy`).
-#[cfg(feature = "embassy")]
-pub struct AsyncSpiDevice {
-    bus: AsyncSpiBus,
-    cs: CsCell,
-    delay: DelayCell,
-}
-
-#[cfg(feature = "embassy")]
-impl AsyncSpiDevice {
-    pub fn new(bus: AsyncSpiBus, cs: Output<'static>, delay: Delay) -> Self {
-        AsyncSpiDevice {
-            bus,
-            cs: RefCell::new(cs),
-            delay: RefCell::new(delay),
-        }
-    }
-
-    pub async fn transaction(
-        &self,
-        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
-    ) -> Result<(), SpiError> {
-        let mut bus = self.bus.inner.lock().await;
-        let mut cs = self.cs.borrow_mut();
-        let delay = self.delay.borrow();
-
-        cs.set_low();
-        let result = async {
-            for op in operations.iter_mut() {
-                match op {
-                    embedded_hal::spi::Operation::Read(buf) => {
-                        embedded_hal_async::spi::SpiBus::read(&mut *bus, buf)
-                            .await
-                            .map_err(|_| SpiError::Bus)?
-                    }
-                    embedded_hal::spi::Operation::Write(buf) => {
-                        embedded_hal_async::spi::SpiBus::write(&mut *bus, buf)
-                            .await
-                            .map_err(|_| SpiError::Bus)?
-                    }
-                    embedded_hal::spi::Operation::Transfer(read, write) => {
-                        embedded_hal_async::spi::SpiBus::transfer(&mut *bus, read, write)
-                            .await
-                            .map_err(|_| SpiError::Bus)?
-                    }
-                    embedded_hal::spi::Operation::TransferInPlace(buf) => {
-                        embedded_hal_async::spi::SpiBus::transfer_in_place(&mut *bus, buf)
-                            .await
-                            .map_err(|_| SpiError::Bus)?
-                    }
-                    embedded_hal::spi::Operation::DelayNs(ns) => {
-                        delay.delay_ns((*ns).try_into().unwrap_or(u32::MAX));
-                    }
-                }
-            }
-            Ok(())
-        }
-        .await;
-        cs.set_high();
-        result
-    }
-
-    pub async fn write(&self, bytes: &[u8]) -> Result<(), SpiError> {
-        self.transaction(&mut [embedded_hal::spi::Operation::Write(bytes)])
-            .await
-    }
-    pub async fn read(&self, buf: &mut [u8]) -> Result<(), SpiError> {
-        self.transaction(&mut [embedded_hal::spi::Operation::Read(buf)])
-            .await
-    }
-    pub async fn write_read(&self, w: &[u8], r: &mut [u8]) -> Result<(), SpiError> {
-        self.transaction(&mut [
-            embedded_hal::spi::Operation::Write(w),
-            embedded_hal::spi::Operation::Read(r),
-        ])
-        .await
-    }
-    pub async fn transfer_in_place(&self, buf: &mut [u8]) -> Result<(), SpiError> {
-        self.transaction(&mut [embedded_hal::spi::Operation::TransferInPlace(buf)])
-            .await
-    }
-}
-
-#[cfg(feature = "embassy")]
-impl embedded_hal::spi::ErrorType for AsyncSpiDevice {
-    type Error = SpiError;
-}
-
-#[cfg(feature = "embassy")]
-impl embedded_hal_async::spi::SpiDevice for AsyncSpiDevice {
-    async fn transaction(
-        &mut self,
-        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
-    ) -> Result<(), Self::Error> {
-        AsyncSpiDevice::transaction(self, operations).await
     }
 }

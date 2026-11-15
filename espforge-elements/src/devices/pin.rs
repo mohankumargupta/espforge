@@ -300,14 +300,30 @@ fn invalid(
     issue: Issue<'_>,
 ) -> Reported {
     let id = node.id;
-    let label = match issue {
-        Issue::Missing { attr } if attr == pin_attr => {
-            format!("<{tag} id=\"{id}\"> needs pin=\"<number>\" or {pin_attr}=\"$<gpio id>\"")
-        }
-        Issue::Missing { attr } => format!("Missing required attribute '{attr}'"),
-        Issue::Invalid { attr, value } => {
-            format!("<{tag} id=\"{id}\"> {attr}=\"{value}\" must be \"true\" or \"false\"")
-        }
+    let (code, label, span) = match issue {
+        Issue::Unknown { attr, known } => (
+            codes::ATTR_UNKNOWN,
+            format!(
+                "<{tag} id=\"{id}\"> {}",
+                crate::attrs::unknown_attr(attr, known)
+            ),
+            crate::attrs::key_span_of(node, attr),
+        ),
+        Issue::Missing { attr } if attr == pin_attr => (
+            code,
+            format!("<{tag} id=\"{id}\"> needs pin=\"<number>\" or {pin_attr}=\"$<gpio id>\""),
+            node_span(node),
+        ),
+        Issue::Missing { attr } => (
+            code,
+            format!("Missing required attribute '{attr}'"),
+            node_span(node),
+        ),
+        Issue::Invalid { attr, value } => (
+            code,
+            format!("<{tag} id=\"{id}\"> {attr}=\"{value}\" must be \"true\" or \"false\""),
+            node_span(node),
+        ),
     };
-    cx.report(code, node_span(node), format!("invalid {tag}"), label)
+    cx.report(code, span, format!("invalid {tag}"), label)
 }

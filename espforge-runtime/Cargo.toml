@@ -18,6 +18,12 @@ embedded-hal = "1.0"
 # type of our own.
 embedded-hal-bus = "0.3"
 static_cell = "2.1"
+# The blocking buses park their controller in a `critical_section::Mutex`, so
+# the handle is `Send + Sync` and can live inside an `AsyncMutex` on an
+# embassy project. Non-optional: a project with `<wifi />` and a blocking-only
+# driver links it even without the `ota` feature, and esp-hal supplies the
+# implementation.
+critical-section = "1.2"
 embassy-time = { version = "0.5", features = ["generic-queue-64"], optional = true }
 embassy-sync = { version = "0.7", optional = true }
 embedded-hal-async = { version = "1.0", optional = true }
@@ -94,6 +100,11 @@ ws-client = [
 # The TLS 1.3 WebSocket client (`WssClient`), which implies the plain one.
 wss-client = ["ws-client", "dep:embedded-tls"]
 
+# Dual-slot A/B OTA firmware updates (`<ota>` in `# espforge`). Transport-
+# agnostic: the updater is driven from `app.rs` over whatever the project has.
+# The chip feature is supplied by the generated project, as for `esp-hal`.
+ota = ["dep:esp-hal-ota", "dep:esp-storage"]
+
 # The outgoing SNTP client (`NtpClient`). Like the other network services it
 # implies `wifi`: the only network provider today is a station's stack.
 ntp = ["wifi", "dep:sntpc"]
@@ -107,7 +118,16 @@ critical-section = { version = "1.2", features = ["std"] }
 # The generated project supplies the chip feature.
 [target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
 esp-hal = { version = "1", features = ["unstable"] }
+# The sink the filtered logger writes through. No `log-04` (and no default
+# features): the logger prints records itself, so a project with
+# `<logger level="none" />` can strip esp-println's `log` integration without
+# this dependency putting it back. The generated project selects the console
+# backend through feature unification.
+esp-println = { version = "0.18.0", default-features = false }
 # `requires-unstable` is how a library says it uses unstable esp-radio APIs;
 # the final binary enables `unstable` itself.
 esp-radio = { version = "1.0.0-beta.1", features = ["wifi", "requires-unstable"], optional = true }
+# OTA partition discovery, streaming writes and rollback state (`ota`).
+esp-storage = { version = "0.10.0", features = ["embedded-storage"], optional = true }
+esp-hal-ota = { version = "0.7.2", features = ["log"], optional = true }
 

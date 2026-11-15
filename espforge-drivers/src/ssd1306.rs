@@ -7,7 +7,7 @@ use embedded_graphics::{
 use esp_hal::Blocking;
 use esp_hal::i2c::master::I2c;
 use espforge_runtime::DeviceErrorKind;
-use espforge_runtime::embedded_hal_bus::i2c::RefCellDevice;
+use espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice;
 use ssd1306::mode::DisplayConfig;
 
 pub use ssd1306::prelude::{
@@ -25,8 +25,10 @@ use ssd1306::prelude::DisplayConfigAsync;
 pub type AsyncI2cEndpoint = espforge_runtime::AsyncI2cBus;
 
 /// The I2C endpoint the generated wiring builds: the bus cell, shared by
-/// `embedded-hal-bus`, with the panel address passed separately.
-pub type I2cEndpoint = RefCellDevice<'static, I2c<'static, Blocking>>;
+/// `embedded-hal-bus` through a critical section, with the panel address
+/// passed separately. It is `Send + Sync`, so an embassy board can store the
+/// blocking driver inside an `AsyncMutex`.
+pub type I2cEndpoint = CriticalSectionDevice<'static, I2c<'static, Blocking>>;
 
 type Oled<SIZE> = ssd1306::Ssd1306<
     ssd1306::prelude::I2CInterface<I2cEndpoint>,

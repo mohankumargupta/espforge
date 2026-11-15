@@ -515,6 +515,11 @@ pub struct DeviceArg {
     pub pin: Option<String>,
     /// The direction the referenced `<gpio>` must declare (pin slots).
     pub direction: PinDirection,
+    /// The output level a pin slot starts at (`Low`/`High`), for a deferred
+    /// factory that must build the line after boot.
+    pub level: Option<&'static str>,
+    /// The input pull resistor a pin slot uses (`None`/`Up`/`Down`).
+    pub pull: Option<&'static str>,
     /// Span of the `arg` node in the schema text.
     pub span: Range<usize>,
 }
@@ -2317,6 +2322,10 @@ fn parse_device_arg(
         map: (!map.is_empty()).then_some(map),
         pin,
         direction,
+        // The v2 `pin "<name>"` declarations carry these; this older `arg`
+        // form leaves them at the runtime's own defaults.
+        level: None,
+        pull: None,
         span,
     });
 }
@@ -3442,13 +3451,15 @@ options {
         }
         // The `# devices` elements live beside the drivers that implement
         // them (`espforge-drivers/drivers.schema.kdl`), so this file is the
-        // core vocabulary only: 18 elements.
-        assert_eq!(schema.elements.len(), 18);
+        // core vocabulary only: 20 elements.
+        assert_eq!(schema.elements.len(), 20);
         for tag in [
             "project",
             "chip",
             "runtime",
             "console",
+            "ota",
+            "logger",
             "options",
             "gpio",
             "i2c",
@@ -3539,6 +3550,7 @@ options {
                 "alloc",
                 "embassy",
                 "wifi",
+                "ota",
                 "probe-rs",
                 "stack-smashing-protection",
                 "wokwi",

@@ -65,20 +65,30 @@ pub(crate) fn invalid_element(
     issue: Issue<'_>,
 ) -> Reported {
     let id = node.id;
-    let message = match issue {
-        Issue::Missing { attr } => {
-            format!("<{tag} id=\"{id}\"> needs {attr}=\"$<network service id>\"")
-        }
-        Issue::Invalid { attr, value } => {
-            format!("<{tag} id=\"{id}\"> has an invalid {attr}=\"{value}\"")
-        }
+    let (code, title, message, span) = match issue {
+        Issue::Missing { attr } => (
+            codes::SERVICE_INVALID,
+            format!("invalid {tag}"),
+            format!("<{tag} id=\"{id}\"> needs {attr}=\"$<network service id>\""),
+            node_span(node),
+        ),
+        Issue::Invalid { attr, value } => (
+            codes::SERVICE_INVALID,
+            format!("invalid {tag}"),
+            format!("<{tag} id=\"{id}\"> has an invalid {attr}=\"{value}\""),
+            node_span(node),
+        ),
+        Issue::Unknown { attr, known } => (
+            codes::ATTR_UNKNOWN,
+            "unknown attribute".to_string(),
+            format!(
+                "<{tag} id=\"{id}\"> {}",
+                crate::attrs::unknown_attr(attr, known)
+            ),
+            crate::attrs::key_span_of(node, attr),
+        ),
     };
-    cx.report(
-        codes::SERVICE_INVALID,
-        node_span(node),
-        format!("invalid {tag}"),
-        message,
-    )
+    cx.report(code, span, title, message)
 }
 
 /// A `network=` reference that names no provider service.

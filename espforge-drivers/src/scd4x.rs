@@ -14,10 +14,12 @@ use esp_hal::Blocking;
 use esp_hal::i2c::master::I2c;
 use espforge_runtime::DeviceErrorKind;
 use espforge_runtime::embedded_hal::i2c::I2c as _;
-use espforge_runtime::embedded_hal_bus::i2c::RefCellDevice;
+use espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice;
 
-/// The I2C endpoint the generated wiring builds.
-pub type Scd4xI2cEndpoint = RefCellDevice<'static, I2c<'static, Blocking>>;
+/// The I2C endpoint the generated wiring builds. The critical-section adapter
+/// keeps the blocking driver `Send + Sync`, so it works under `AsyncMutex` on
+/// an embassy board.
+pub type Scd4xI2cEndpoint = CriticalSectionDevice<'static, I2c<'static, Blocking>>;
 
 /// `start_periodic_measurement`.
 const START_PERIODIC_MEASUREMENT: u16 = 0x21b1;

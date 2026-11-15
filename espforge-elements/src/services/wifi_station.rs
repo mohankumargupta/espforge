@@ -272,16 +272,28 @@ fn span_of(node: &ParsedNode<'_>, attr: &str) -> std::ops::Range<usize> {
 /// This element's wording for a schema-level problem.
 fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
     let id = node.id;
-    let message = match issue {
-        Issue::Missing { attr } => format!("<wifi_station id=\"{id}\"> is missing `{attr}`"),
-        Issue::Invalid { attr, value } => {
-            format!("<wifi_station id=\"{id}\"> has an invalid {attr}=\"{value}\"")
-        }
+    let (code, title, message, span) = match issue {
+        Issue::Missing { attr } => (
+            codes::COMPONENT_INVALID_WIFI,
+            "invalid wifi_station".to_string(),
+            format!("<wifi_station id=\"{id}\"> is missing `{attr}`"),
+            node_span(node),
+        ),
+        Issue::Invalid { attr, value } => (
+            codes::COMPONENT_INVALID_WIFI,
+            "invalid wifi_station".to_string(),
+            format!("<wifi_station id=\"{id}\"> has an invalid {attr}=\"{value}\""),
+            node_span(node),
+        ),
+        Issue::Unknown { attr, known } => (
+            codes::ATTR_UNKNOWN,
+            "unknown attribute".to_string(),
+            format!(
+                "<wifi_station id=\"{id}\"> {}",
+                crate::attrs::unknown_attr(attr, known)
+            ),
+            crate::attrs::key_span_of(node, attr),
+        ),
     };
-    cx.report(
-        codes::COMPONENT_INVALID_WIFI,
-        node_span(node),
-        "invalid wifi_station",
-        message,
-    )
+    cx.report(code, span, title, message)
 }

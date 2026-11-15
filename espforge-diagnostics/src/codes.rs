@@ -49,6 +49,18 @@ codes! {
     CORE_CONSOLE_WITHOUT_TYPE = "E0208";
     /// A console name the catalog does not know.
     CORE_UNKNOWN_CONSOLE = "E0209";
+    /// `<ota flash_size>` names a size the catalog does not know.
+    CORE_UNKNOWN_FLASH_SIZE = "E0210";
+    /// `<ota rollback>` is not `true` or `false`.
+    CORE_INVALID_ROLLBACK = "E0211";
+    /// `<logger>` names a level the catalog does not know.
+    CORE_INVALID_LOG_LEVEL = "E0212";
+    /// An attribute no element declares.
+    ///
+    /// Shared by every stage: the message names the attribute and the list
+    /// the element does accept, so a typo like `backight=` fails loudly instead
+    /// of silently taking the schema default.
+    ATTR_UNKNOWN = "E0316";
 
     /// An option name that is not in the schema.
     OPTION_UNKNOWN = "E0301";
@@ -247,10 +259,10 @@ mod tests {
                 matches!(
                     n,
                     101..=105
-                        | 201..=209
+                        | 201..=212
                         | 301
                         | 302
-                        | 306..=315
+                        | 306..=316
                         | 501..=521
                         | 601..=623
                         | 701..=709

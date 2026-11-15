@@ -50,6 +50,15 @@ fn describe(
 ) -> Reported {
     let id = node.id;
     match issue {
+        crate::attrs::Issue::Unknown { attr, known } => cx.report(
+            codes::ATTR_UNKNOWN,
+            crate::attrs::key_span_of(node, attr),
+            "unknown attribute",
+            format!(
+                "<gpio id=\"{id}\"> {}",
+                crate::attrs::unknown_attr(attr, known)
+            ),
+        ),
         crate::attrs::Issue::Invalid {
             attr: "direction",
             value,

@@ -4,9 +4,9 @@
 //! element is data in `testing/fixtures/drivers/accel.kdl`, and this crate is
 //! the Rust half the manifest names.
 //!
-//! The endpoint is the same `RefCellDevice` the generated wiring builds for a
-//! blocking I2C device, and the address is a constructor argument exactly as
-//! `needs_address` says.
+//! The endpoint is the same `CriticalSectionDevice` the generated wiring
+//! builds for a blocking I2C device, and the address is a constructor argument
+//! exactly as `needs_address` says.
 
 #![no_std]
 
@@ -14,10 +14,10 @@ use esp_hal::Blocking;
 use esp_hal::i2c::master::I2c;
 use espforge_runtime::DeviceErrorKind;
 use espforge_runtime::embedded_hal::i2c::I2c as _;
-use espforge_runtime::embedded_hal_bus::i2c::RefCellDevice;
+use espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice;
 
 /// The I2C endpoint the generated wiring builds.
-pub type FxAccelEndpoint = RefCellDevice<'static, I2c<'static, Blocking>>;
+pub type FxAccelEndpoint = CriticalSectionDevice<'static, I2c<'static, Blocking>>;
 
 /// The identity register: `0xA5` on the fixture.
 const WHO_AM_I: u8 = 0x01;

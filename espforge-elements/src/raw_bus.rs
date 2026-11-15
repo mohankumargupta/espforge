@@ -194,12 +194,16 @@ fn emit_spi(
         });
     }
 
+    // A raw `<spi cs="...">` handle is the same configured endpoint a device
+    // gets: the bus's own clock and mode, and an active-low select. One SPI
+    // device type per mode means an example and a driver never speak different
+    // shapes.
     let cs = gpio(cs);
     let (device_ty, endpoint) = match bus_mode {
         BusMode::Blocking => (
-            quote! { espforge_runtime::SpiDevice },
+            quote! { espforge_runtime::ConfiguredSpiDevice },
             quote! {
-                espforge_runtime::SpiDevice::new(
+                espforge_runtime::ConfiguredSpiDevice::new(
                     #handle,
                     esp_hal::gpio::Output::new(
                         #cs,
@@ -207,13 +211,15 @@ fn emit_spi(
                         esp_hal::gpio::OutputConfig::default(),
                     ),
                     espforge_runtime::Delay::new(),
+                    espforge_runtime::SpiConfig { frequency: #rate, mode: #mode_tokens },
+                    espforge_runtime::CsPolarity::ActiveLow,
                 )
             },
         ),
         BusMode::Async => (
-            quote! { espforge_runtime::AsyncSpiDevice },
+            quote! { espforge_runtime::ConfiguredAsyncSpiDevice },
             quote! {
-                espforge_runtime::AsyncSpiDevice::new(
+                espforge_runtime::ConfiguredAsyncSpiDevice::new(
                     #handle,
                     esp_hal::gpio::Output::new(
                         #cs,
@@ -221,6 +227,8 @@ fn emit_spi(
                         esp_hal::gpio::OutputConfig::default(),
                     ),
                     espforge_runtime::Delay::new(),
+                    espforge_runtime::SpiConfig { frequency: #rate, mode: #mode_tokens },
+                    espforge_runtime::CsPolarity::ActiveLow,
                 )
             },
         ),

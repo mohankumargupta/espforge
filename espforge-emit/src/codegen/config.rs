@@ -1,17 +1,17 @@
 //! `.cargo/config.toml`, `.cargo/esp-config.toml` and `rust-toolchain.toml`.
 //!
-//! These replace the three template files of the same names. The two shipped
-//! as `.cargo/**` plus the toolchain file are seed-once, so a user who edited
-//! them keeps their version.
+//! These replace the three template files of the same names. All three are
+//! rewritten every build; a project that wants different values puts its own
+//! copy next to the `.espf` and the overlay layer replaces this output.
 //!
 //! `esp-config.toml` is static text; it is here so one module owns the whole
 //! `.cargo` directory. The comments in `config.toml` explain a real choice
 //! (frame pointers cost performance but give backtraces), so they are kept as
 //! decor above the key they belong to rather than dropped with the template.
 
-use anyhow::Result;
-use espforge_elements::ResolvedOptions;
-use toml_edit::{Array, DocumentMut, Item, Table, value};
+use anyhow::{Context, Result};
+use espforge_elements::{Meta, ResolvedOptions};
+use toml_edit::{Array, DocumentMut, Item, Table, Value, value};
 
 use super::chip::Chip;
 
@@ -63,6 +63,13 @@ fn runner(opts: &ResolvedOptions, chip: &Chip) -> String {
             "probe-rs run --chip={} --preverify --always-print-stacktrace --no-location",
             chip.name
         )
+    } else if opts.is_on("ota") {
+        // A fresh USB flash must use the two-slot table and clear `otadata`:
+        // otherwise the bootloader may still point at the other slot.
+        format!(
+            "espflash flash --monitor --chip {} --partition-table ./partitions.csv --erase-parts otadata",
+            chip.name
+        )
     } else {
         format!("espflash flash --monitor --chip {}", chip.name)
     }
@@ -81,6 +88,38 @@ fn flags(opts: &ResolvedOptions, chip: &Chip) -> Array {
     flags
 }
 
+/// Append `--partition-table partitions.csv` to the espflash runner.
+///
+/// A project with a `partitions.csv` is flashed with that table, so a custom
+/// layout (data partitions, asymmetric OTA slots) is not silently ignored.
+/// Called by the overlay layer, which is what knows whether the project has
+/// one; a runner that already names a table is left alone, so the flag is
+/// appended at most once.
+pub fn with_partition_table(config: &str) -> Result<String> {
+    let mut doc = config
+        .parse::<DocumentMut>()
+        .context("generated `.cargo/config.toml` is not valid TOML")?;
+    let Some(targets) = doc["target"].as_table_mut() else {
+        return Ok(doc.to_string());
+    };
+    for (_, entry) in targets.iter_mut() {
+        let Some(runner) = entry.as_table_mut().and_then(|t| t.get_mut("runner")) else {
+            continue;
+        };
+        let Some(value) = runner.as_value_mut() else {
+            continue;
+        };
+        let patched = value
+            .as_str()
+            .filter(|runner| !runner.contains("--partition-table"))
+            .map(|runner| format!("{runner} --partition-table partitions.csv"));
+        if let Some(patched) = patched {
+            *value = Value::from(patched);
+        }
+    }
+    Ok(doc.to_string())
+}
+
 /// The emitted `rust-toolchain.toml`.
 pub fn toolchain(chip: &Chip) -> Result<String> {
     let mut toolchain = Table::new();
@@ -97,9 +136,20 @@ pub fn toolchain(chip: &Chip) -> Result<String> {
     Ok(doc.to_string())
 }
 
-/// The emitted `.cargo/esp-config.toml`: static, seed-once.
-pub fn esp_config() -> &'static str {
-    "# Keep user/runtime configuration values in this file.\n[env]\nESP_LOG=\"info\"\n"
+/// The emitted `.cargo/esp-config.toml`, replaced by a project's own
+/// `esp-config.toml` when it has one.
+///
+/// `ESP_LOG` is esp-println's own filter. It is kept in step with `<logger>` so
+/// a project that goes back to `init_logger_from_env()` — or reads the value
+/// through `esp-config` — filters exactly what the generated logger would.
+/// Without `<logger>` the file is the static `ESP_LOG="info"` it has always
+/// been.
+pub fn esp_config(meta: &Meta) -> String {
+    let level = match meta.logger {
+        Some(logger) => logger.esp_log(),
+        None => "info".to_string(),
+    };
+    format!("# Keep user/runtime configuration values in this file.\n[env]\nESP_LOG=\"{level}\"\n")
 }
 
 fn array(items: &[&str]) -> Array {
@@ -212,8 +262,88 @@ mod tests {
         assert!(xtensa["toolchain"].get("components").is_none());
     }
 
+    /// The overlay layer calls this once; a config that already names a table
+    /// (a future backend that writes the flag itself) must not gain a second.
     #[test]
-    fn esp_config_is_the_static_file() {
-        assert!(esp_config().contains("ESP_LOG=\"info\""));
+    fn the_partition_table_flag_is_appended_at_most_once() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let generated = cargo_config(&case.opts, &chip("esp32c3")).unwrap();
+        let once = with_partition_table(&generated).unwrap();
+        let twice = with_partition_table(&once).unwrap();
+        assert_eq!(once, twice);
+        assert_eq!(once.matches("--partition-table").count(), 1, "{once}");
+        let doc = parse(&once);
+        assert_eq!(
+            doc["target"]["riscv32imc-unknown-none-elf"]["runner"].as_str(),
+            Some("espflash flash --monitor --chip esp32c3 --partition-table partitions.csv")
+        );
+    }
+
+    /// `<ota />` makes the USB runner use the generated table and erase the
+    /// bootloader's slot state.
+    #[test]
+    fn ota_flashes_the_generated_table_and_erases_otadata() {
+        let mut meta = crate::codegen::test_support::meta("esp32c3");
+        meta.ota = Some(espforge_elements::OtaMeta {
+            flash_size: espforge_elements::FlashSize::Mb4,
+            rollback: true,
+        });
+        let opts = espforge_elements::resolve(
+            &meta,
+            &espforge_elements::Answers::empty(0..0),
+            &espforge_elements::DerivedInputs::default(),
+        )
+        .unwrap();
+        let doc = parse(&cargo_config(&opts, &chip("esp32c3")).unwrap());
+        assert_eq!(
+            doc["target"]["riscv32imc-unknown-none-elf"]["runner"].as_str(),
+            Some(
+                "espflash flash --monitor --chip esp32c3 --partition-table ./partitions.csv \
+                 --erase-parts otadata"
+            )
+        );
+        // The overlay layer must not append a second table flag.
+        let patched = with_partition_table(
+            &cargo_config(&opts, &chip("esp32c3")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(patched.matches("--partition-table").count(), 1, "{patched}");
+    }
+
+    #[test]
+    fn esp_config_is_the_static_file_without_a_logger() {
+        let meta = crate::codegen::test_support::meta("esp32c3");
+        assert_eq!(
+            esp_config(&meta),
+            "# Keep user/runtime configuration values in this file.\n[env]\nESP_LOG=\"info\"\n"
+        );
+    }
+
+    /// `<logger>` writes the same filters into `ESP_LOG` that the generated
+    /// logger installs, in esp-println's spelling (`off`, not `none`).
+    #[test]
+    fn esp_log_follows_the_logger_element() {
+        let mut meta = crate::codegen::test_support::meta("esp32c3");
+        meta.logger = Some(espforge_elements::LoggerConfig {
+            level: espforge_elements::LogLevel::Warn,
+            drivers: Some(espforge_elements::LogLevel::Debug),
+            network: Some(espforge_elements::LogLevel::Off),
+            hal: Some(espforge_elements::LogLevel::Warn),
+        });
+        let text = esp_config(&meta);
+        assert!(
+            text.contains(
+                "ESP_LOG=\"warn,espforge_drivers=debug,ssd1306=debug,sky_ili9341=debug,\
+                 esp_radio=off,smoltcp=off,embassy_net=off,espforge_runtime::hw::wifi=off\""
+            ),
+            "{text}"
+        );
+
+        // Silence is the whole string: no rule can re-enable a level.
+        meta.logger = Some(espforge_elements::LoggerConfig {
+            level: espforge_elements::LogLevel::Off,
+            ..Default::default()
+        });
+        assert!(esp_config(&meta).contains("ESP_LOG=\"off\""));
     }
 }

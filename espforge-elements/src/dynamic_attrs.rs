@@ -22,6 +22,20 @@ use crate::attrs::Issue;
 /// empty); `Invalid` is a value that is not of the declared kind, outside the
 /// declared `range`, or not one of the declared `choices`.
 pub fn validate<'a>(element: &'a Element, node: &'a ParsedNode<'a>) -> Result<(), Issue<'a>> {
+    // A key the manifest does not declare is a typo, not a default. The known
+    // list is empty because it borrows from the element the caller already has
+    // and can name; the issue only has to point at the offending key.
+    if let Some(unknown) = node.attributes.iter().find(|attr| {
+        !element
+            .attrs
+            .iter()
+            .any(|declared| declared.name == attr.key)
+    }) {
+        return Err(Issue::Unknown {
+            attr: unknown.key,
+            known: &[],
+        });
+    }
     for attr in &element.attrs {
         // The name borrows from the schema this run lowers against, which is
         // why `Issue` carries a lifetime rather than a `&'static str`.
@@ -133,6 +147,18 @@ mod tests {
             Err(Issue::Invalid {
                 attr: "direction",
                 value: "sideways"
+            })
+        );
+    }
+
+    #[test]
+    fn an_unknown_attribute_is_refused() {
+        let n = node("# peripherals\n  <gpio id=\"g\" pin=\"18\" directon=\"output\" />\n");
+        assert_eq!(
+            validate(element(), &n),
+            Err(Issue::Unknown {
+                attr: "directon",
+                known: &[]
             })
         );
     }

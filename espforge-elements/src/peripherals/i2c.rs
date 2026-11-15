@@ -42,6 +42,30 @@ impl Element for I2c {
             }
         };
 
+        // An instance the chip does not have cannot be built: `I2C1` does not
+        // exist on a single-controller part, so refuse it here instead of
+        // letting it reach `rustc`.
+        let instance: usize = peripheral
+            .trim_start_matches("I2C")
+            .parse()
+            .expect("the id rule above produced an I2C name");
+        let available = crate::chips::i2c_instances(cx.chip());
+        if instance >= available {
+            return Err(cx.report(
+                codes::I2C_INVALID_ID,
+                node_span(node),
+                "invalid i2c id",
+                format!(
+                    "<i2c id=\"{}\">: {} has {} I2C controller{}, so use i2c0{}",
+                    id.raw,
+                    cx.chip(),
+                    available,
+                    if available == 1 { "" } else { "s" },
+                    if available == 1 { "" } else { " or i2c1" }
+                ),
+            ));
+        }
+
         let khz = parse_khz(attrs.frequency.value, "i2c", &id.raw).map_err(|label| {
             cx.report(
                 codes::I2C_INVALID_FREQUENCY,
@@ -81,6 +105,15 @@ fn claim_bus_pin(
 fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
     let id = node.id;
     match issue {
+        Issue::Unknown { attr, known } => cx.report(
+            codes::ATTR_UNKNOWN,
+            crate::attrs::key_span_of(node, attr),
+            "unknown attribute",
+            format!(
+                "<i2c id=\"{id}\"> {}",
+                crate::attrs::unknown_attr(attr, known)
+            ),
+        ),
         Issue::Missing { attr } | Issue::Invalid { attr, .. } => cx.report(
             codes::I2C_INVALID_PIN,
             node_span(node),

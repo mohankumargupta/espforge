@@ -7,9 +7,11 @@
 //! [`AsyncDeferred`]), never an `Option`: the slot's state is private, and a
 //! caller either gets the device or a typed reason.
 //!
-//! A factory that fails is consumed; a second `init()` reports the failure
-//! instead of retrying. Retrying would need a construction the driver cannot
-//! repeat (the endpoint's pins were moved into the first attempt).
+//! A factory that fails is consumed; a second `init()` reports the same
+//! failure instead of retrying. Retrying would need a construction the driver
+//! cannot repeat (the endpoint's pins were moved into the first attempt), and
+//! the failure is kept whole so the second report still names the part
+//! (`"air"`, `"oled"`) rather than the slot.
 
 /// The device is not initialised yet. [`Deferred::get_mut`] answers this
 /// instead of panicking, so an app can check without an `Option` field.
@@ -31,45 +33,74 @@ pub trait DeferredInit {
     fn init(self) -> Result<Self::Device, crate::DeviceError>;
 }
 
+/// The three states of a deferred slot.
+///
+/// `Failed` is a state, not a missing factory: once the constructor has run
+/// and refused, every later `init()` returns that exact [`DeviceError`], so
+/// the device id the factory named is never replaced by a generic one.
+enum SlotState<F, D> {
+    /// Waiting for the app to call `init()`.
+    Pending(F),
+    /// Built and ready.
+    Ready(D),
+    /// The factory ran and failed.
+    Failed(crate::DeviceError),
+}
+
 /// A device built at boot but initialised on demand.
 pub struct Deferred<F: DeferredInit> {
-    ready: Option<F::Device>,
-    factory: Option<F>,
+    state: SlotState<F, F::Device>,
 }
 
 impl<F: DeferredInit> Deferred<F> {
     /// Store the factory. No bus traffic and no device init happens here.
     pub fn new(factory: F) -> Self {
         Self {
-            ready: None,
-            factory: Some(factory),
+            state: SlotState::Pending(factory),
         }
     }
 
     /// Whether [`init`](Self::init) has succeeded.
     pub fn is_ready(&self) -> bool {
-        self.ready.is_some()
+        matches!(self.state, SlotState::Ready(_))
     }
 
-    /// Run the factory once; later calls return the same device.
+    /// Run the factory once; later calls return the same device or the same
+    /// failure.
     ///
     /// The error carries the element id the factory named, so the app's log
-    /// says which part did not answer.
+    /// says which part did not answer — on the first call and on every retry.
     pub fn init(&mut self) -> Result<&mut F::Device, crate::DeviceError> {
-        if self.ready.is_none()
-            && let Some(factory) = self.factory.take()
-        {
-            self.ready = Some(factory.init()?);
+        if matches!(self.state, SlotState::Pending(_)) {
+            // Swap in a legal placeholder so the factory can be moved out; a
+            // `Pending` has no factory to put back if the constructor fails.
+            let taken = core::mem::replace(
+                &mut self.state,
+                SlotState::Failed(crate::DeviceError {
+                    device: "deferred",
+                    kind: crate::DeviceErrorKind::Init,
+                }),
+            );
+            if let SlotState::Pending(factory) = taken {
+                self.state = match factory.init() {
+                    Ok(device) => SlotState::Ready(device),
+                    Err(error) => SlotState::Failed(error),
+                };
+            }
         }
-        self.ready.as_mut().ok_or(crate::DeviceError {
-            device: "deferred",
-            kind: crate::DeviceErrorKind::Init,
-        })
+        match &mut self.state {
+            SlotState::Ready(device) => Ok(device),
+            SlotState::Failed(error) => Err(*error),
+            SlotState::Pending(_) => unreachable!("a pending slot is initialised above"),
+        }
     }
 
     /// The device, or [`NotReady`] before a successful [`init`](Self::init).
     pub fn get_mut(&mut self) -> Result<&mut F::Device, NotReady> {
-        self.ready.as_mut().ok_or(NotReady)
+        match &mut self.state {
+            SlotState::Ready(device) => Ok(device),
+            SlotState::Pending(_) | SlotState::Failed(_) => Err(NotReady),
+        }
     }
 }
 
@@ -93,8 +124,7 @@ pub trait AsyncDeferredInit {
 /// before the executor, so there is no place to await a constructor at boot.
 #[cfg(feature = "embassy")]
 pub struct AsyncDeferred<F: AsyncDeferredInit> {
-    ready: Option<F::Device>,
-    factory: Option<F>,
+    state: SlotState<F, F::Device>,
 }
 
 #[cfg(feature = "embassy")]
@@ -102,32 +132,46 @@ impl<F: AsyncDeferredInit> AsyncDeferred<F> {
     /// Store the factory. No bus traffic and no device init happens here.
     pub fn new(factory: F) -> Self {
         Self {
-            ready: None,
-            factory: Some(factory),
+            state: SlotState::Pending(factory),
         }
     }
 
     /// Whether [`init`](Self::init) has succeeded.
     pub fn is_ready(&self) -> bool {
-        self.ready.is_some()
+        matches!(self.state, SlotState::Ready(_))
     }
 
-    /// Run the factory once; later calls return the same device.
+    /// Run the factory once; later calls return the same device or the same
+    /// failure.
     pub async fn init(&mut self) -> Result<&mut F::Device, crate::DeviceError> {
-        if self.ready.is_none()
-            && let Some(factory) = self.factory.take()
-        {
-            self.ready = Some(factory.init().await?);
+        if matches!(self.state, SlotState::Pending(_)) {
+            let taken = core::mem::replace(
+                &mut self.state,
+                SlotState::Failed(crate::DeviceError {
+                    device: "deferred",
+                    kind: crate::DeviceErrorKind::Init,
+                }),
+            );
+            if let SlotState::Pending(factory) = taken {
+                self.state = match factory.init().await {
+                    Ok(device) => SlotState::Ready(device),
+                    Err(error) => SlotState::Failed(error),
+                };
+            }
         }
-        self.ready.as_mut().ok_or(crate::DeviceError {
-            device: "deferred",
-            kind: crate::DeviceErrorKind::Init,
-        })
+        match &mut self.state {
+            SlotState::Ready(device) => Ok(device),
+            SlotState::Failed(error) => Err(*error),
+            SlotState::Pending(_) => unreachable!("a pending slot is initialised above"),
+        }
     }
 
     /// The device, or [`NotReady`] before a successful [`init`](Self::init).
     pub fn get_mut(&mut self) -> Result<&mut F::Device, NotReady> {
-        self.ready.as_mut().ok_or(NotReady)
+        match &mut self.state {
+            SlotState::Ready(device) => Ok(device),
+            SlotState::Pending(_) | SlotState::Failed(_) => Err(NotReady),
+        }
     }
 }
 
@@ -204,8 +248,12 @@ mod tests {
         assert_eq!(error.kind, DeviceErrorKind::Init);
         assert_eq!(slot.get_mut(), Err(NotReady));
         assert!(!slot.is_ready());
-        // The factory was consumed: a retry reports instead of panicking.
-        assert!(slot.init().is_err());
+        // The factory was consumed: a retry reports the same failure, still
+        // naming the device that did not answer.
+        let again = slot.init().unwrap_err();
+        assert_eq!(again.device, "counter");
+        assert_eq!(again.kind, DeviceErrorKind::Init);
+        assert_eq!(slot.get_mut(), Err(NotReady));
         assert_eq!(calls.get(), 1);
     }
 

@@ -49,8 +49,8 @@ impl Devices {
             .expect("I2C bus configuration failed");
         Ok(Self {
             oled: espforge_drivers::Ssd1306Display::new(
-                    espforge_runtime::embedded_hal_bus::i2c::RefCellDevice::new(
-                        i2c0_bus.cell(),
+                    espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice::new(
+                        i2c0_bus.cs_cell(),
                     ),
                     60,
                     espforge_drivers::Oled128x64,
@@ -61,8 +61,8 @@ impl Devices {
                     kind,
                 })?,
             air: espforge_runtime::Deferred::new(AirFactory {
-                endpoint: espforge_runtime::embedded_hal_bus::i2c::RefCellDevice::new(
-                    i2c0_bus.cell(),
+                endpoint: espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice::new(
+                    i2c0_bus.cs_cell(),
                 ),
             }),
         })

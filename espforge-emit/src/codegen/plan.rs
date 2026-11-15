@@ -1,17 +1,16 @@
 //! The emitted-file plan, in Rust.
 //!
-//! One list of output paths, the backend that produces each, and the
-//! ownership rule, with conditions as Rust predicates over
-//! [`ResolvedOptions`]. This replaced `metadata.toml` + the template planner,
-//! and is the only place the emitted file list exists ([`super::generate`]
-//! walks it; a unit test pins that the output matches).
+//! One list of output paths and the backend that produces each, with
+//! conditions as Rust predicates over [`ResolvedOptions`]. This replaced
+//! `metadata.toml` + the template planner, and is the only place the emitted
+//! file list exists ([`super::generate`] walks it; a unit test pins that the
+//! output matches).
 //!
 //! The optional files the old `metadata.toml` listed (`ci`, editor configs,
 //! `Embed.toml`, `hello_test.rs`) never existed in the template tree, so they
 //! were never emitted. They are not here either; inventing them would change
 //! the output.
 
-use crate::artifact::Ownership;
 use espforge_elements::ResolvedOptions;
 
 /// The backend that produces a planned file's content.
@@ -31,6 +30,8 @@ pub enum Source {
     Wokwi,
     /// [`super::diagram`] (`diagram.json`).
     Diagram,
+    /// [`super::partitions`] (`partitions.csv`).
+    Partitions,
 }
 
 /// One file the project emits, before it has any content.
@@ -39,7 +40,6 @@ pub struct PlannedFile {
     /// Path relative to the generated project root.
     pub out_path: &'static str,
     pub source: Source,
-    pub ownership: Ownership,
 }
 
 /// Every file this project emits, sorted by output path.
@@ -55,54 +55,52 @@ impl FilePlan {
             PlannedFile {
                 out_path: ".cargo/config.toml",
                 source: Source::CargoConfig,
-                ownership: Ownership::SeedOnce,
             },
             PlannedFile {
                 out_path: ".cargo/esp-config.toml",
                 source: Source::EspConfig,
-                ownership: Ownership::SeedOnce,
             },
             PlannedFile {
                 out_path: "Cargo.toml",
                 source: Source::Cargo,
-                ownership: Ownership::Merged,
             },
             PlannedFile {
                 out_path: "build.rs",
                 source: Source::Rust,
-                ownership: Ownership::Owned,
             },
             PlannedFile {
                 out_path: "rust-toolchain.toml",
                 source: Source::Toolchain,
-                ownership: Ownership::SeedOnce,
             },
             PlannedFile {
                 out_path: "src/bin/main.rs",
                 source: Source::Rust,
-                ownership: Ownership::Owned,
             },
             PlannedFile {
                 out_path: "src/generated.rs",
                 source: Source::Rust,
-                ownership: Ownership::Owned,
             },
             PlannedFile {
                 out_path: "src/lib.rs",
                 source: Source::Rust,
-                ownership: Ownership::Owned,
             },
         ];
         if opts.is_on("wokwi") {
             files.push(PlannedFile {
                 out_path: "diagram.json",
                 source: Source::Diagram,
-                ownership: Ownership::Owned,
             });
             files.push(PlannedFile {
                 out_path: "wokwi.toml",
                 source: Source::Wokwi,
-                ownership: Ownership::Owned,
+            });
+        }
+        // `<ota />` owns the layout the updater writes into. A project with
+        // its own `partitions.csv` replaces this file in the overlay layer.
+        if opts.is_on("ota") {
+            files.push(PlannedFile {
+                out_path: "partitions.csv",
+                source: Source::Partitions,
             });
         }
         files.sort_by_key(|file| file.out_path);
@@ -153,6 +151,30 @@ mod tests {
             plan.get("Cargo.toml").unwrap().source,
             Source::Cargo,
             "Cargo.toml comes from the typed backend"
+        );
+    }
+
+    /// `<ota />` adds the partition table, and only then.
+    #[test]
+    fn ota_adds_the_partition_table() {
+        let off = FilePlan::for_project(&options(true, &[]));
+        assert!(off.get("partitions.csv").is_none(), "no <ota />, no table");
+
+        let mut meta = crate::codegen::test_support::meta("esp32c3");
+        meta.ota = Some(espforge_elements::OtaMeta {
+            flash_size: espforge_elements::FlashSize::Mb4,
+            rollback: true,
+        });
+        let opts = espforge_elements::resolve(
+            &meta,
+            &espforge_elements::Answers::empty(0..0),
+            &espforge_elements::DerivedInputs::default(),
+        )
+        .unwrap();
+        let on = FilePlan::for_project(&opts);
+        assert_eq!(
+            on.get("partitions.csv").map(|file| file.source),
+            Some(Source::Partitions)
         );
     }
 

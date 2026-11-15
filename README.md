@@ -58,6 +58,12 @@ espforge build blink.espf
 then you should have an esp32 no_std rust project ready to upload. `espforge build` writes the
 project to `build/` (change it with `--out`) and compiles it.
 
+`build/` is disposable output: everything in it is rewritten on every build, so you can
+delete it (or `.gitignore` it) at any time. Everything you control lives next to the
+`.espf` instead: `src/app.rs`, `diagram.json` / `wokwi.toml`, `partitions.csv`,
+`rust-toolchain.toml`, `.cargo/*.toml`, and `Cargo.extra.toml` (extra `[dependencies]`,
+`[patch]`, `[profile]` and `[lints]` merged into the generated manifest).
+
 If you want to see the examples in this repo in action, click [here](https://github.com/mohankumargupta/espforge_wokwi)
 
 If you want to see what is the generated rust no_std examples look like,

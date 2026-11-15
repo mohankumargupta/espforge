@@ -40,6 +40,8 @@ pub const RESERVED_IDENTS: &[&str] = &[
     "devices",
     "services",
     "spawner",
+    // The `Context` field of a project with `<ota />`.
+    "ota",
     // Crate items and the `app.rs` contract.
     "app",
     "main",

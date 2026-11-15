@@ -27,6 +27,7 @@ use crate::model::{Direction, Ident};
 
 /// The value span of one attribute on `node`, or the node itself.
 pub(crate) fn span_of(node: &ParsedNode<'_>, attr: &str) -> Range<usize> {
+    // (the value span: an auxiliary pin reference is wrong at its value)
     node.get_attr_spanned(attr)
         .map(|a| a.val_offset..a.val_offset + a.val.len())
         .unwrap_or_else(|| node_span(node))
@@ -63,23 +64,39 @@ pub(crate) fn invalid_element(
     issue: Issue<'_>,
 ) -> Reported {
     let id = node.id;
-    let message = match issue {
-        Issue::Missing { attr } => {
-            format!("<{tag} id=\"{id}\"> is missing `{attr}`")
-        }
-        Issue::Invalid { attr, value } => {
+    let (code, title, message, span) = match issue {
+        Issue::Missing { attr } => (
+            codes::DEVICE_INVALID,
+            format!("invalid {tag}"),
+            format!("<{tag} id=\"{id}\"> is missing `{attr}`"),
+            node_span(node),
+        ),
+        Issue::Invalid { attr, value } => (
+            codes::DEVICE_INVALID,
+            format!("invalid {tag}"),
             format!(
                 "<{tag} id=\"{id}\"> {attr}=\"{value}\" must be {}",
                 expected(element, attr)
+            ),
+            node_span(node),
+        ),
+        // The schema definition names the accepted keys when the issue came
+        // from a run-time element; the generated reader carries them itself.
+        Issue::Unknown { attr, known } => {
+            let declared: Vec<&str> = element.attrs.iter().map(|a| a.name.as_str()).collect();
+            let known = if known.is_empty() { &declared } else { known };
+            (
+                codes::ATTR_UNKNOWN,
+                "unknown attribute".to_string(),
+                format!(
+                    "<{tag} id=\"{id}\"> {}",
+                    crate::attrs::unknown_attr(attr, known)
+                ),
+                crate::attrs::key_span_of(node, attr),
             )
         }
     };
-    cx.report(
-        codes::DEVICE_INVALID,
-        node_span(node),
-        format!("invalid {tag}"),
-        message,
-    )
+    cx.report(code, span, title, message)
 }
 
 /// The values an attribute accepts, in the wording the schema's own listing

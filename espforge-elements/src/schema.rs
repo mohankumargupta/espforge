@@ -221,7 +221,7 @@ mod tests {
         let composed = schema();
         // The devices arrive from `espforge-drivers`, the section from the
         // core schema.
-        for tag in ["ssd1306", "ili9341", "scd4x", "adxl345"] {
+        for tag in ["ssd1306", "ili9341", "scd4x", "adxl345", "sht31"] {
             let element = composed
                 .element(tag)
                 .unwrap_or_else(|| panic!("`<{tag}>` is in the composed schema"));
@@ -246,8 +246,8 @@ mod tests {
         }
         assert_eq!(
             composed.elements.len(),
-            core_schema().elements.len() + 4,
-            "the four driver elements are the only addition"
+            core_schema().elements.len() + 5,
+            "the five driver elements are the only addition"
         );
     }
 
@@ -303,6 +303,43 @@ mod tests {
         assert_eq!(
             scd4x.device_recipe.as_ref().unwrap().address,
             espforge_schema::AddressNeed::Fixed(0x62)
+        );
+    }
+
+    /// `sht31` is manifest only: one KDL file naming the crate that implements
+    /// it, so `espforge-drivers` gains no module and no feature for it.
+    #[test]
+    fn a_manifest_only_driver_names_an_external_crate() {
+        let sht31 = schema().element("sht31").unwrap();
+        let recipe = sht31.device_recipe.as_ref().unwrap();
+        assert_eq!(recipe.feature, "", "no `espforge-drivers` feature");
+        assert_eq!(recipe.address, espforge_schema::AddressNeed::Any);
+        assert_eq!(recipe.address_allowed, Some((0x44, 0x45)));
+        assert_eq!(
+            sht31
+                .package
+                .as_ref()
+                .map(|package| package.package.as_str()),
+            Some("embedded-sht3x"),
+            "the implementation crate is the external one"
+        );
+        assert_eq!(
+            sht31
+                .dependencies
+                .iter()
+                .map(|dependency| dependency.package.as_str())
+                .collect::<Vec<_>>(),
+            ["embedded-sht3x"]
+        );
+        assert!(
+            recipe.ty.starts_with("embedded_sht3x::Sht3x<"),
+            "the type comes from the crate: {}",
+            recipe.ty
+        );
+        assert_eq!(recipe.new, "embedded_sht3x::Sht3x::new");
+        assert!(
+            recipe.args.iter().any(|arg| arg.name == "delay"),
+            "the crate's third argument is the runtime delay"
         );
     }
 

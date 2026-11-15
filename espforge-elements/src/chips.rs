@@ -83,6 +83,26 @@ pub fn has_wifi(name: &str) -> bool {
     chip_config(name).is_some_and(|chip| chip.contains("soc_has_wifi"))
 }
 
+/// How many I2C controllers the chip has.
+///
+/// Hand-kept, like [`has_usb_serial_jtag`]: esp-metadata's generated data does
+/// not name a controller count. The RISC-V entry-level parts expose one; every
+/// other supported chip exposes two.
+pub fn i2c_instances(chip: &str) -> usize {
+    match chip {
+        "esp32c2" | "esp32c3" | "esp32c6" | "esp32h2" => 1,
+        _ => 2,
+    }
+}
+
+/// How many UART ports the chip has.
+pub fn uart_instances(chip: &str) -> usize {
+    match chip {
+        "esp32c2" | "esp32c3" | "esp32c6" | "esp32h2" => 2,
+        _ => 3,
+    }
+}
+
 /// Whether the chip has the built-in USB-Serial-JTAG peripheral.
 ///
 /// NOTE: this is a hand-kept list (it replaces the old `chip == "esp32"`
@@ -109,6 +129,17 @@ mod tests {
         assert!(has_wifi("esp32"));
         assert!(!has_wifi("esp32h2"));
         assert!(!has_wifi("esp32p4"));
+    }
+
+    /// The controller counts the peripheral rules read: a single-I2C chip
+    /// cannot be asked for `i2c1`, and a two-UART chip has no `UART2`.
+    #[test]
+    fn the_controller_counts_follow_the_chip() {
+        assert_eq!(i2c_instances("esp32c3"), 1);
+        assert_eq!(i2c_instances("esp32c6"), 1);
+        assert_eq!(i2c_instances("esp32s3"), 2);
+        assert_eq!(uart_instances("esp32c3"), 2);
+        assert_eq!(uart_instances("esp32s3"), 3);
     }
 
     #[test]

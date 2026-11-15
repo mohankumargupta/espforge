@@ -99,6 +99,15 @@ fn claim_bus_pin(
 fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
     let id = node.id;
     match issue {
+        Issue::Unknown { attr, known } => cx.report(
+            codes::ATTR_UNKNOWN,
+            crate::attrs::key_span_of(node, attr),
+            "unknown attribute",
+            format!(
+                "<spi id=\"{id}\"> {}",
+                crate::attrs::unknown_attr(attr, known)
+            ),
+        ),
         Issue::Invalid {
             attr: "mode",
             value,

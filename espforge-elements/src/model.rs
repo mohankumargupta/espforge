@@ -98,6 +98,215 @@ pub enum Console {
     JtagSerial,
 }
 
+/// The flash chip size a `<ota>` element lays its partition table out for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FlashSize {
+    /// 2 MiB of flash: two 960 KiB app slots.
+    Mb2,
+    /// 4 MiB of flash: two ~1.94 MiB app slots.
+    #[default]
+    Mb4,
+    /// 8 MiB of flash: two ~3.94 MiB app slots.
+    Mb8,
+    /// 16 MiB of flash: two ~7.94 MiB app slots.
+    Mb16,
+}
+
+impl FlashSize {
+    /// The size in bytes.
+    pub const fn bytes(self) -> u32 {
+        match self {
+            FlashSize::Mb2 => 2 * 1024 * 1024,
+            FlashSize::Mb4 => 4 * 1024 * 1024,
+            FlashSize::Mb8 => 8 * 1024 * 1024,
+            FlashSize::Mb16 => 16 * 1024 * 1024,
+        }
+    }
+
+    /// The size an `<ota flash_size>` names (`"2MB"`, `"4MB"`, `"8MB"`, `"16MB"`).
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "2MB" => Some(FlashSize::Mb2),
+            "4MB" => Some(FlashSize::Mb4),
+            "8MB" => Some(FlashSize::Mb8),
+            "16MB" => Some(FlashSize::Mb16),
+            _ => None,
+        }
+    }
+}
+
+/// What `<ota />` asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OtaMeta {
+    /// The physical flash size the default partition table is laid out for.
+    pub flash_size: FlashSize,
+    /// Whether a freshly booted image must call `mark_app_valid()`.
+    pub rollback: bool,
+}
+
+/// A log level, in the `<logger>` element's vocabulary.
+///
+/// The order is verbosity, least first: `Off` disables logging and `Trace` is
+/// the most detailed. The emitter prints a level as
+/// `log::LevelFilter::<Variant>`, and `ESP_LOG` spells `Off` as `off`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LogLevel {
+    Off,
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl LogLevel {
+    /// Every spelling `<logger level>` accepts, in schema order.
+    pub const CHOICES: [&'static str; 6] = ["none", "error", "warn", "info", "debug", "trace"];
+
+    /// The level an attribute value names (`"none"` is [`LogLevel::Off`]).
+    pub fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "none" => LogLevel::Off,
+            "error" => LogLevel::Error,
+            "warn" => LogLevel::Warn,
+            "info" => LogLevel::Info,
+            "debug" => LogLevel::Debug,
+            "trace" => LogLevel::Trace,
+            _ => return None,
+        })
+    }
+
+    /// The spelling `ESP_LOG` uses (`off`, not `none`).
+    pub fn esp_log(self) -> &'static str {
+        match self {
+            LogLevel::Off => "off",
+            LogLevel::Error => "error",
+            LogLevel::Warn => "warn",
+            LogLevel::Info => "info",
+            LogLevel::Debug => "debug",
+            LogLevel::Trace => "trace",
+        }
+    }
+
+    /// The `log::LevelFilter` variant the generated code names.
+    pub fn variant(self) -> &'static str {
+        match self {
+            LogLevel::Off => "Off",
+            LogLevel::Error => "Error",
+            LogLevel::Warn => "Warn",
+            LogLevel::Info => "Info",
+            LogLevel::Debug => "Debug",
+            LogLevel::Trace => "Trace",
+        }
+    }
+}
+
+/// The target prefixes the `drivers` category owns.
+///
+/// A prefix matches a `log` target at a module boundary (`esp_hal` matches
+/// `esp_hal::gpio` but not `esp_halo`), so a rule names a crate once and covers
+/// every module in it.
+const DRIVER_TARGETS: &[&str] = &["espforge_drivers", "ssd1306", "sky_ili9341"];
+
+/// The prefixes `network` owns: esp-radio's baseband, the two protocol stacks
+/// and the runtime's Wi-Fi station.
+const NETWORK_TARGETS: &[&str] = &[
+    "esp_radio",
+    "smoltcp",
+    "embassy_net",
+    "espforge_runtime::hw::wifi",
+];
+
+/// The prefixes `hal` owns: the silicon layer the generated `main()` sits on.
+const HAL_TARGETS: &[&str] = &[
+    "esp_hal",
+    "esp_rtos",
+    "esp_bootloader_esp_idf",
+    "esp_println",
+    "esp_alloc",
+    "esp_backtrace",
+    "esp_hal_ota",
+    "esp_storage",
+];
+
+/// What `<logger>` asked for.
+///
+/// `None` on [`Meta`] means the project did not declare the element: the
+/// generated `main()` keeps esp-println's `ESP_LOG` logger, which is what
+/// every project had before `<logger>` existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoggerConfig {
+    /// The level for the app and anything no category rule overrides.
+    pub level: LogLevel,
+    /// `espforge-drivers` and the vendor crates they wrap; `None` inherits
+    /// [`Self::level`].
+    pub drivers: Option<LogLevel>,
+    /// The network stack (`esp-radio`, `smoltcp`, `embassy-net`, the Wi-Fi
+    /// station); `None` inherits.
+    pub network: Option<LogLevel>,
+    /// The silicon layer (`esp-hal`, `esp-rtos`, the bootloader, esp-println);
+    /// `None` inherits.
+    pub hal: Option<LogLevel>,
+}
+
+impl Default for LoggerConfig {
+    /// The schema's defaults: `level="info"`, `drivers`/`network="inherit"`,
+    /// `hal="warn"`.
+    fn default() -> Self {
+        Self {
+            level: LogLevel::Info,
+            drivers: None,
+            network: None,
+            hal: Some(LogLevel::Warn),
+        }
+    }
+}
+
+impl LoggerConfig {
+    /// Whether `<logger level="none" />` asked for silence: the emitter strips
+    /// `log` at compile time and installs no logger at all.
+    pub fn silenced(self) -> bool {
+        self.level == LogLevel::Off
+    }
+
+    /// `(target prefix, level)` pairs for the runtime filter, most specific
+    /// first.
+    ///
+    /// A category that inherits the default needs no rule: the default already
+    /// covers it, and an inherited level would only repeat it.
+    pub fn filters(self) -> Vec<(&'static str, LogLevel)> {
+        if self.silenced() {
+            return Vec::new();
+        }
+        let mut filters = Vec::new();
+        for (level, targets) in [
+            (self.drivers, DRIVER_TARGETS),
+            (self.network, NETWORK_TARGETS),
+            (self.hal, HAL_TARGETS),
+        ] {
+            let Some(level) = level else { continue };
+            if level == self.level {
+                continue;
+            }
+            filters.extend(targets.iter().map(|target| (*target, level)));
+        }
+        filters
+    }
+
+    /// The `ESP_LOG` string esp-println's parser reads.
+    ///
+    /// Kept in step with the generated logger so a project that goes back to
+    /// `init_logger_from_env()` (or reads the value through `esp-config`)
+    /// filters the same way.
+    pub fn esp_log(self) -> String {
+        let mut text = self.level.esp_log().to_string();
+        for (target, level) in self.filters() {
+            text.push_str(&format!(",{target}={}", level.esp_log()));
+        }
+        text
+    }
+}
+
 /// Contents of the `# espforge` section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Meta {
@@ -106,6 +315,10 @@ pub struct Meta {
     pub chip: String,
     pub runtime: Runtime,
     pub console: Console,
+    /// `Some` when the project asked for `<ota />`.
+    pub ota: Option<OtaMeta>,
+    /// `Some` when the project declared `<logger>`.
+    pub logger: Option<LoggerConfig>,
 }
 
 impl Meta {
@@ -935,12 +1148,17 @@ pub enum FactoryArg {
     /// A value recomputed after boot: a mapped spelling (`Oled128x64`) or the
     /// address the lowerer consumed.
     Constant(RustExpr),
-    /// A control line built during `Devices::new` and moved into the factory.
+    /// A control line the factory builds after boot, so `Devices::new` moves
+    /// the raw peripheral instead of driving the pin.
     Pin {
         name: String,
         optional: bool,
-        /// The wrapper the factory's field stores.
+        /// The wrapper the factory builds in `init`.
         direction: Direction,
+        /// The output level the line starts at (`Low`/`High`).
+        level: Option<&'static str>,
+        /// The input pull resistor (`None`/`Up`/`Down`).
+        pull: Option<&'static str>,
     },
 }
 
@@ -1184,10 +1402,26 @@ impl crate::element::Lowered for BusDevice {
 
         // A device constructor is fallible, and the error carries the element
         // id so a boot log names the part that did not answer.
+        //
+        // A bundled driver returns `espforge_runtime::DeviceErrorKind` itself,
+        // so the kind survives. A manifest-only driver names a foreign crate
+        // whose error type espforge cannot even spell: the part is still named,
+        // and the failure reports as `Init`, the only kind a constructor can
+        // raise.
         let device = Literal::string(id.raw.as_str());
-        let fallible = quote! {
-            .map_err(|kind| espforge_runtime::DeviceError { device: #device, kind })?
+        let fail = if driver.package.is_some() {
+            quote! {
+                .map_err(|_| espforge_runtime::DeviceError {
+                    device: #device,
+                    kind: espforge_runtime::DeviceErrorKind::Init,
+                })
+            }
+        } else {
+            quote! {
+                .map_err(|kind| espforge_runtime::DeviceError { device: #device, kind })
+            }
         };
+        let fallible = quote! { #fail? };
 
         if deferred {
             // A deferred device stores a factory. The endpoint and its control
@@ -1201,6 +1435,10 @@ impl crate::element::Lowered for BusDevice {
                 )
             });
 
+            // The factory stores the raw peripheral for each control line and
+            // builds its `Output`/`Input`/`Bidirectional` in `init`. Building
+            // the wrapper during `Devices::new` would drive reset, backlight
+            // and CS lines at boot, before `app::setup` can power the part.
             let mut fields = vec![quote! { endpoint: #endpoint_ty }];
             let mut pin_inits = Vec::new();
             let mut call_args = vec![quote! { self.endpoint }];
@@ -1210,23 +1448,47 @@ impl crate::element::Lowered for BusDevice {
                         name,
                         optional,
                         direction,
+                        level,
+                        pull,
                     } => {
                         let field = format_ident!("pin_{}", name);
-                        let field_ty = match direction {
-                            Direction::Output => quote! { esp_hal::gpio::Output<'static> },
-                            Direction::Input => quote! { esp_hal::gpio::Input<'static> },
-                            Direction::Bidirectional => {
-                                quote! { espforge_runtime::Bidirectional }
-                            }
-                        };
+                        let pin = driver
+                            .pins
+                            .iter()
+                            .find(|(pin_name, _)| pin_name == name)
+                            .map(|(_, claim)| claim.pin().0)
+                            .unwrap_or_else(|| {
+                                panic!("deferred device `<{tag}>` has no pin `{name}`")
+                            });
+                        let raw = crate::bus_emit::gpio(pin);
+                        let gpio = format_ident!("GPIO{}", pin);
+                        let peripheral_ty = quote! { esp_hal::peripherals::#gpio<'static> };
                         let field_ty = if *optional {
-                            quote! { Option<#field_ty> }
+                            quote! { Option<#peripheral_ty> }
                         } else {
-                            field_ty
+                            peripheral_ty
                         };
                         fields.push(quote! { #field: #field_ty });
-                        pin_inits.push(quote! { #field: #expression });
-                        call_args.push(quote! { self.#field });
+                        pin_inits.push(if *optional {
+                            quote! { #field: Some(#raw) }
+                        } else {
+                            quote! { #field: #raw }
+                        });
+                        let level = match level {
+                            Some("High") => quote! { esp_hal::gpio::Level::High },
+                            _ => quote! { esp_hal::gpio::Level::Low },
+                        };
+                        let pull = match pull {
+                            Some("Up") => quote! { esp_hal::gpio::Pull::Up },
+                            Some("Down") => quote! { esp_hal::gpio::Pull::Down },
+                            _ => quote! { esp_hal::gpio::Pull::None },
+                        };
+                        call_args.push(if *optional {
+                            let build = line_build(*direction, &level, &pull, quote! { pin });
+                            quote! { self.#field.map(|pin| #build) }
+                        } else {
+                            line_build(*direction, &level, &pull, quote! { self.#field })
+                        });
                     }
                     FactoryArg::Constant(_) => call_args.push(expression.clone()),
                 }
@@ -1243,9 +1505,7 @@ impl crate::element::Lowered for BusDevice {
                             Output = Result<Self::Device, espforge_runtime::DeviceError>,
                         > {
                             async move {
-                                #new(#(#call_args),*)
-                                    .await
-                                    .map_err(|kind| espforge_runtime::DeviceError { device: #device, kind })
+                                #new(#(#call_args),*).await #fail
                             }
                         }
                     }
@@ -1256,8 +1516,7 @@ impl crate::element::Lowered for BusDevice {
                         type Device = #ty;
 
                         fn init(self) -> Result<Self::Device, espforge_runtime::DeviceError> {
-                            #new(#(#call_args),*)
-                                .map_err(|kind| espforge_runtime::DeviceError { device: #device, kind })
+                            #new(#(#call_args),*) #fail
                         }
                     }
                 }
@@ -1586,6 +1845,32 @@ impl Board {
     }
 }
 
+/// Build one deferred control line from the raw peripheral the factory stored.
+///
+/// The line is not driven during `Devices::new`; this expression runs inside
+/// `Factory::init`, after `app::setup` had its chance to power the part.
+fn line_build(
+    direction: Direction,
+    level: &TokenStream,
+    pull: &TokenStream,
+    pin: TokenStream,
+) -> TokenStream {
+    match direction {
+        Direction::Output => quote! {
+            esp_hal::gpio::Output::new(#pin, #level, esp_hal::gpio::OutputConfig::default())
+        },
+        Direction::Input => quote! {
+            esp_hal::gpio::Input::new(
+                #pin,
+                esp_hal::gpio::InputConfig::default().with_pull(#pull),
+            )
+        },
+        Direction::Bidirectional => quote! {
+            espforge_runtime::Bidirectional::new(#pin, #pull)
+        },
+    }
+}
+
 /// The generated factory type for one deferred device: `oled` -> `OledFactory`.
 fn factory_name(id: &str) -> String {
     let mut out = String::new();
@@ -1625,6 +1910,8 @@ mod tests {
             chip: "esp32c3".into(),
             runtime: Runtime::Blocking,
             console: Console::default(),
+            ota: None,
+            logger: None,
         }
     }
 

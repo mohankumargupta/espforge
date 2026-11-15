@@ -53,6 +53,15 @@ impl Element for Wifi {
 fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
     let id = node.id;
     match issue {
+        Issue::Unknown { attr, known } => cx.report(
+            codes::ATTR_UNKNOWN,
+            crate::attrs::key_span_of(node, attr),
+            "unknown attribute",
+            format!(
+                "<wifi id=\"{id}\"> {}",
+                crate::attrs::unknown_attr(attr, known)
+            ),
+        ),
         Issue::Missing { attr } | Issue::Invalid { attr, .. } => cx.report(
             codes::WIFI_INVALID_ID,
             node_span(node),

@@ -89,6 +89,16 @@ pub enum Issue<'a> {
         /// The value as written, so the message can quote it.
         value: &'a str,
     },
+    /// Not an attribute the element declares at all: a typo like
+    /// `backight="$gpio6"` instead of silently taking a schema default.
+    ///
+    /// `known` is the generated element's attribute list. It is empty for an
+    /// element validated from a project manifest at run time, where the caller
+    /// has the schema definition itself to name the accepted keys.
+    Unknown {
+        attr: &'a str,
+        known: &'static [&'static str],
+    },
 }
 
 fn find<'a>(node: &'a ParsedNode<'a>, attr: &str) -> Option<&'a TagAttribute<'a>> {
@@ -108,6 +118,32 @@ fn missing<'a>(attr: &'a str) -> Issue<'a> {
 
 fn invalid<'a>(attr: &'a str, value: &'a str) -> Issue<'a> {
     Issue::Invalid { attr, value }
+}
+
+/// The one wording every element's `Issue::Unknown` arm uses:
+/// ``unknown attribute `backight`; expected one of: id, bus, address``.
+pub fn unknown_attr(attr: &str, known: &[&str]) -> String {
+    if known.is_empty() {
+        format!("unknown attribute `{attr}`")
+    } else {
+        format!(
+            "unknown attribute `{attr}`; expected one of: {}",
+            known.join(", ")
+        )
+    }
+}
+
+/// The key span of the attribute named `attr`, or the node's tag when it is
+/// (impossibly) absent.
+///
+/// An unknown attribute is underlined at its name, not its value: the name is
+/// the typo.
+pub fn key_span_of(node: &ParsedNode<'_>, attr: &str) -> std::ops::Range<usize> {
+    node.attributes
+        .iter()
+        .find(|candidate| candidate.key == attr)
+        .map(|candidate| candidate.key_offset..candidate.key_offset + candidate.key.len())
+        .unwrap_or_else(|| espf::diag::node_span(node))
 }
 
 fn shown<'a>(attr: &'a TagAttribute<'a>) -> Spanned<&'a str> {

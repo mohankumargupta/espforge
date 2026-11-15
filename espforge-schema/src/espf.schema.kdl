@@ -71,6 +71,44 @@ element "console" section="espforge" {
     example "usb serial" #"<console type="jtag-serial" />"#
 }
 
+element "ota" section="espforge" {
+    summary "Enable dual-slot A/B Over-The-Air firmware updates"
+    description "Partition table, bootloader state and flash ownership are project-wide, so <ota> lives here and works over any transport."
+    attr "flash_size" kind="choice" default="4MB" {
+        choices "2MB" "4MB" "8MB" "16MB"
+        help "Flash chip size used to generate the default partitions.csv layout."
+    }
+    attr "rollback" kind="bool" default="true" {
+        help "Require ctx.ota.mark_app_valid() after boot, otherwise roll back on reset."
+    }
+    example "default 4MB with rollback" #"<ota />"#
+    example "custom flash size" #"<ota flash_size="8MB" rollback="true" />"#
+}
+
+element "logger" section="espforge" {
+    summary "Fine-grained log filtering, by subsystem"
+    description "Without <logger>, esp-println reads ESP_LOG from .cargo/esp-config.toml. With it, the generated project installs a target-aware logger: level covers the app and anything unnamed, and each category overrides one layer. level=\"none\" also strips the log crate and every dependency's log feature at compile time, so a silent project keeps its flash."
+    attr "level" kind="choice" default="info" {
+        choices "none" "error" "warn" "info" "debug" "trace"
+        help "The default level, for the app and anything no category names. none strips logging at compile time."
+    }
+    attr "drivers" kind="choice" default="inherit" {
+        choices "inherit" "none" "error" "warn" "info" "debug" "trace"
+        help "espforge-drivers and the vendor driver crates (ssd1306, sky-ili9341)."
+    }
+    attr "network" kind="choice" default="inherit" {
+        choices "inherit" "none" "error" "warn" "info" "debug" "trace"
+        help "esp-radio, smoltcp, embassy-net, and the Wi-Fi station."
+    }
+    attr "hal" kind="choice" default="warn" {
+        choices "inherit" "none" "error" "warn" "info" "debug" "trace"
+        help "esp-hal, esp-rtos, the bootloader and esp-println."
+    }
+    example "silent" #"<logger level="none" />"#
+    example "app only" #"<logger level="info" network="none" hal="none" drivers="none" />"#
+    example "debug sensors" #"<logger level="warn" drivers="debug" />"#
+}
+
 element "options" section="espforge" {
     summary "Build options from this file's options block"
     attr "defaults" kind="bool" default="true" {
@@ -291,6 +329,11 @@ options {
     option "wifi" display_name="Enable Wi-Fi via the esp-radio crate." derived=#true {
         requires "alloc" "unstable-hal" "embassy"
         help "esp-radio comes with no stability guarantees at this time. Wi-Fi also allocates a heap."
+    }
+
+    // Computed from `<ota />` in `# espforge`; users may not set it.
+    option "ota" display_name="Enable OTA partition layout and updater." derived=#true {
+        help "Derived from <ota /> in # espforge."
     }
 
     option "probe-rs" display_name="Use probe-rs to flash and monitor instead of espflash." {

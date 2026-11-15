@@ -66,6 +66,29 @@ impl Element for Uart {
             },
         };
 
+        // A port the chip does not have cannot be built: `UART2` does not
+        // exist on a two-UART part, so refuse it here instead of letting it
+        // reach `rustc`.
+        let instance: usize = peripheral
+            .trim_start_matches("UART")
+            .parse()
+            .expect("the rules above produced a UART name");
+        let available = crate::chips::uart_instances(cx.chip());
+        if instance >= available {
+            return Err(cx.report(
+                codes::UART_INVALID_PERIPHERAL,
+                span,
+                "invalid uart peripheral",
+                format!(
+                    "<uart id=\"{}\"> {} does not exist on {}: it has UART0..UART{}",
+                    id.raw,
+                    peripheral,
+                    cx.chip(),
+                    available - 1
+                ),
+            ));
+        }
+
         if attrs.baud_rate.value == 0 {
             return Err(cx.report(
                 codes::UART_INVALID_BAUD,
@@ -120,6 +143,15 @@ fn claim_bus_pin(
 fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
     let id = node.id;
     match issue {
+        Issue::Unknown { attr, known } => cx.report(
+            codes::ATTR_UNKNOWN,
+            crate::attrs::key_span_of(node, attr),
+            "unknown attribute",
+            format!(
+                "<uart id=\"{id}\"> {}",
+                crate::attrs::unknown_attr(attr, known)
+            ),
+        ),
         Issue::Missing { attr } | Issue::Invalid { attr, .. } => cx.report(
             codes::UART_INVALID_PIN,
             node_span(node),

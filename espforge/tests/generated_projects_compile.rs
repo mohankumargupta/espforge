@@ -236,6 +236,70 @@ const CASES: &[Case] = &[
              # services\n",
         ),
     },
+    // A blocking-only driver on an embassy board. `AsyncMutex<T>` needs `T:
+    // Send`, which is what the critical-section I2C adapter provides; before
+    // it, `RefCellDevice` made this project unbuildable. The app comes from
+    // `blink_async` because a spawned task is what forces the future `Send`;
+    // its LED stays so the app's `device!` call still resolves.
+    Case {
+        example: "01.Basics/blink_async",
+        chip: "esp32c3",
+        runtime: Runtime::Embassy,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"embassy_blocking\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"embassy\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             \x20 <wifi id=\"radio\" />\n\
+             # devices\n\
+             \x20 <led id=\"red_led\" pin=\"18\" />\n\
+             \x20 <scd4x id=\"air\" bus=\"$i2c0\" address=\"0x62\" />\n\
+             # services\n",
+        ),
+    },
+    // A deferred device with control lines: the factory stores the raw
+    // peripherals at boot and builds the outputs in `init()`, so reset and
+    // backlight are not driven before `app::setup`.
+    Case {
+        example: "01.Basics/helloworld",
+        chip: "esp32c3",
+        runtime: Runtime::Blocking,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"deferred_pins\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" />\n\
+             \x20 <gpio id=\"gpio4\" pin=\"4\" direction=\"output\" />\n\
+             \x20 <gpio id=\"gpio5\" pin=\"5\" direction=\"output\" />\n\
+             \x20 <gpio id=\"gpio6\" pin=\"6\" direction=\"output\" />\n\
+             # devices\n\
+             \x20 <ili9341 id=\"tft\" bus=\"$spi2\" cs=\"9\" dc=\"$gpio4\" reset=\"$gpio5\" backlight=\"$gpio6\" init=\"deferred\" />\n\
+             # services\n",
+        ),
+    },
+    // A manifest-only driver: `sht31` is one KDL file naming the
+    // `embedded-sht3x` crate, with no `espforge-drivers` module or feature. The
+    // generated project must compile against that external crate alone.
+    Case {
+        example: "01.Basics/helloworld",
+        chip: "esp32c3",
+        runtime: Runtime::Blocking,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"manifest_driver\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <sht31 id=\"air\" bus=\"$i2c0\" address=\"0x44\" />\n\
+             # services\n",
+        ),
+    },
 ];
 
 #[test]

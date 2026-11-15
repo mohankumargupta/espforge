@@ -272,16 +272,14 @@ fn every_declared_cell_is_byte_identical_to_its_golden() {
         let out = dir.path().join("project");
         generate_cell(cell, &out);
 
-        // The 12 emitted artifacts plus `src/app.rs`, the copy of the ESPF
-        // source, and (for an example with a custom Wokwi chip) the seeded
-        // `chip.json` / `chip.wasm`.
-        const BASE_FILES: [&str; 14] = [
+        // The 11 emitted artifacts plus `src/app.rs`, the copy of the ESPF
+        // source, and an OTA project's generated `partitions.csv`.
+        const BASE_FILES: [&str; 13] = [
             "build.rs",
             "Cargo.toml",
             ".cargo/config.toml",
             ".cargo/esp-config.toml",
             "diagram.json",
-            ".espforge/manifest.json",
             ".espforge/source.espf.txt",
             "README.txt",
             "rust-toolchain.toml",
@@ -303,7 +301,10 @@ fn every_declared_cell_is_byte_identical_to_its_golden() {
             .iter()
             .filter(|path| {
                 !BASE_FILES.contains(&path.as_str())
-                    && !matches!(path.as_str(), "chip.json" | "chip.wasm")
+                    && !matches!(
+                        path.as_str(),
+                        "chip.json" | "chip.wasm" | "partitions.csv"
+                    )
             })
             .collect();
         assert!(

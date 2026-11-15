@@ -11,7 +11,7 @@ impl PeripheralRegistry {
 }
 /// Constructed devices.
 pub struct Devices {
-    pub spi2: espforge_runtime::SpiDevice,
+    pub spi2: espforge_runtime::ConfiguredSpiDevice,
 }
 impl Devices {
     /// Build every declared device.
@@ -35,7 +35,7 @@ impl Devices {
             )
             .expect("SPI bus configuration failed");
         Ok(Self {
-            spi2: espforge_runtime::SpiDevice::new(
+            spi2: espforge_runtime::ConfiguredSpiDevice::new(
                 spi2_bus,
                 esp_hal::gpio::Output::new(
                     unsafe { registry.peripherals.GPIO9.clone_unchecked() },
@@ -43,6 +43,11 @@ impl Devices {
                     esp_hal::gpio::OutputConfig::default(),
                 ),
                 espforge_runtime::Delay::new(),
+                espforge_runtime::SpiConfig {
+                    frequency: esp_hal::time::Rate::from_khz(100),
+                    mode: esp_hal::spi::Mode::_0,
+                },
+                espforge_runtime::CsPolarity::ActiveLow,
             ),
         })
     }

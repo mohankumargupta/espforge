@@ -1,0 +1,23 @@
+====================
+OTA UPDATE EXAMPLE
+
+Dual-slot A/B over-the-air updates on a Wi-Fi station. On boot it confirms the
+running image, asks the update server for a manifest (size + CRC32), then
+streams `firmware.bin` straight into the inactive slot and reboots. The
+generated `partitions.csv` gives it two app slots; `<ota />` owns `FLASH`.
+====================
+
+# espforge
+  <project name="ota_update" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+  <ota flash_size="4MB" rollback="true" />
+
+# peripherals
+  <wifi id="radio" />
+
+# devices
+
+# services
+  <wifi_station id="home" wifi="$radio" ssid="Wokwi-GUEST" auth="open" />
+  <http_client id="http" network="$home" connections="1" />

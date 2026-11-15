@@ -139,6 +139,19 @@ fn element_module(element: &Element) -> String {
     for definition in &enums {
         body.push_str(definition);
     }
+    // The declared keys, in schema order: `from_node` refuses anything else, so
+    // a misspelled attribute fails instead of silently taking a default, and
+    // the element's own wording can list what it does accept.
+    let known: Vec<String> = element
+        .attrs
+        .iter()
+        .map(|attr| format!("{:?}", attr.name))
+        .collect();
+    let _ = write!(
+        body,
+        "pub const KNOWN: &[&str] = &[{}];\n\n",
+        known.join(", ")
+    );
     let _ = write!(
         body,
         "/// `<{tag}>` from `espf.schema.kdl`.\n\
@@ -150,6 +163,9 @@ fn element_module(element: &Element) -> String {
          {impl_head}\n\
          \x20   /// Reads the attributes `espf.schema.kdl` declares for `<{tag}>`.\n\
          \x20   {fn_head}\n\
+         \x20       if let Some(unknown) = node.attributes.iter().find(|attr| !KNOWN.contains(&attr.key)) {{\n\
+         \x20           return Err(Issue::Unknown {{ attr: unknown.key, known: KNOWN }});\n\
+         \x20       }}\n\
          \x20       Ok(Self {{\n\
          {inits}\n\
          \x20       }})\n\

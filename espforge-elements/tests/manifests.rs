@@ -84,10 +84,14 @@ fn assert_recipe_eq(tag: &str, v1: &DeviceRecipe, v2: &DeviceRecipe) {
 fn every_bundled_tag_migrated_to_the_same_recipe() {
     let v1 = load_v1();
     let v2 = load_v2();
-    for tag in espforge_drivers::TAGS {
-        let old = v1
-            .element(tag)
-            .unwrap_or_else(|| panic!("`<{tag}>` is in the v1 fixture"));
+    // The frozen file predates `sht31`, which was written in v2 from the
+    // start; a tag with no v1 twin has nothing to compare against.
+    let migrated = espforge_drivers::TAGS
+        .iter()
+        .copied()
+        .filter(|tag| v1.element(tag).is_some());
+    for tag in migrated {
+        let old = v1.element(tag).expect("filtered to tags the fixture has");
         let new = v2
             .element(tag)
             .unwrap_or_else(|| panic!("`<{tag}>` is in the v2 manifests"));

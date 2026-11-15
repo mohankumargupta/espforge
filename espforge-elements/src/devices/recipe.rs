@@ -288,6 +288,7 @@ fn lower_recipe<'s>(
             let Some(gpio) = cx.gpio(reference.name).cloned() else {
                 return Err(unknown_gpio(cx, node, tag, id, source, reference.name));
             };
+            check_cs_direction(cx, node, tag, id, source, &gpio)?;
             gpio.pin
         } else {
             let value = attrs::pin_or_ref(node, "cs")
@@ -298,6 +299,7 @@ fn lower_recipe<'s>(
                     let Some(gpio) = cx.gpio(reference.name).cloned() else {
                         return Err(unknown_gpio(cx, node, tag, id, "cs", reference.name));
                     };
+                    check_cs_direction(cx, node, tag, id, "cs", &gpio)?;
                     gpio.pin
                 }
             }
@@ -370,7 +372,11 @@ fn lower_recipe<'s>(
         let Some(source) = bindings.source(&arg.name) else {
             continue;
         };
-        let Ok(reference) = attrs::reference(node, source) else {
+        // An absent optional pin is not an error; anything else the reader
+        // refuses (a malformed value) must be reported rather than swallowed.
+        let Some(reference) = attrs::opt_reference(node, source)
+            .map_err(|issue| invalid_element(cx, node, tag, element, issue))?
+        else {
             continue;
         };
         let Some(gpio) = cx.gpio(reference.name).cloned() else {
@@ -741,6 +747,8 @@ fn slots(
                         name: arg.name.clone(),
                         optional,
                         direction: direction(arg.direction),
+                        level: arg.level,
+                        pull: arg.pull,
                     },
                     None => FactoryArg::Constant(RustExpr::none()),
                 });
@@ -891,6 +899,31 @@ fn invalid_recipe(
             id.raw
         ),
     )
+}
+
+/// A chip select is an output line. A `cs="$input_gpio"` would drive a pin
+/// declared as an input, so refuse it before the claim.
+fn check_cs_direction(
+    cx: &mut LowerCx<'_>,
+    node: &ParsedNode<'_>,
+    tag: &str,
+    id: &Ident,
+    attr: &str,
+    gpio: &crate::model::GpioDecl,
+) -> Result<(), Reported> {
+    if let Some(found) = gpio.direction.filter(|found| *found != Direction::Output) {
+        return Err(wrong_direction(
+            cx,
+            node,
+            tag,
+            id,
+            attr,
+            &gpio.id.raw,
+            Direction::Output,
+            found,
+        ));
+    }
+    Ok(())
 }
 
 /// The board model's direction for one the schema declared.

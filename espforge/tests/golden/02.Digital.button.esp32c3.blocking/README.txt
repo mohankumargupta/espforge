@@ -2,25 +2,10 @@ espforge generated project: button
 ==========================================
 
 SOURCE OF TRUTH
-This directory is GENERATED from an .espf file. Edit the .espf (and your
-src/app.rs next to it), then re-run `espforge build`.
-
-MACHINE-OWNED (do not edit; regenerated every build):
-  - README.txt
-  - build.rs
-  - diagram.json
-  - src/bin/main.rs
-  - src/generated.rs
-  - src/lib.rs
-  - wokwi.toml
-
-MERGED (regenerated, but the keys you add are kept; managed keys are restored):
-  - Cargo.toml
-
-SEEDED ONCE (written the first time, then yours; never overwritten):
-  - .cargo/config.toml
-  - .cargo/esp-config.toml
-  - rust-toolchain.toml
+This directory is GENERATED and disposable: delete it, or `rm -rf build`,
+at any time. Edit the .espf, your src/app.rs, and the optional overlay files
+next to it (diagram.json, wokwi.toml, partitions.csv, rust-toolchain.toml,
+.cargo/*.toml, Cargo.extra.toml), then re-run `espforge build`.
 
 REGENERATE:
 espforge build <your.espf> --out <this dir>

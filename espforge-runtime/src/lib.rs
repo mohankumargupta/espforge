@@ -32,8 +32,17 @@ pub use clock::*;
 mod deferred;
 pub use deferred::*;
 
+/// The target-aware logger `<logger>` configures.
+///
+/// The generated code owns the one logger `static` (and the rule table), so
+/// this module adds no storage of its own: `espforge_runtime::FilteredLogger`
+/// is a value, and [`init`] installs the reference the project declared.
+pub mod logger;
+pub use logger::{FilterRule, FilteredLogger, init as init_logger};
+
 /// Logging handle stored on the generated `Context`. Forwards to the `log`
-/// facade; the generated project installs the sink (esp-println).
+/// facade; the generated project installs the sink (esp-println, directly or
+/// through [`FilteredLogger`]).
 #[derive(Clone, Copy)]
 pub struct Logger;
 
@@ -113,6 +122,14 @@ mod hw {
     #[cfg(feature = "wifi")]
     pub use wifi::*;
 
+    /// Dual-slot A/B OTA updates ([`Ota`], [`OtaStorage`], [`OtaError`]),
+    /// behind the `ota` feature: a project without `<ota />` never compiles
+    /// `esp-hal-ota` or touches flash.
+    #[cfg(feature = "ota")]
+    mod ota;
+    #[cfg(feature = "ota")]
+    pub use ota::*;
+
     use esp_hal::gpio::Level;
     use esp_hal::gpio::{Flex, Input, InputConfig, InputPin, Pin, Pull};
 
@@ -157,7 +174,7 @@ mod hw {
     }
 
     /// The blocking wait `embedded-hal-bus`'s SPI adapters take, so a
-    /// `RefCellDevice` can honour a transaction's `DelayNs` operation.
+    /// configured device endpoint can honour a transaction's `DelayNs` operation.
     impl embedded_hal::delay::DelayNs for Delay {
         fn delay_ns(&mut self, ns: u32) {
             self.inner.delay_nanos(ns);

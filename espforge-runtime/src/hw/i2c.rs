@@ -2,16 +2,19 @@
 //!
 //! Two flavours, and the scheduler no longer decides which one exists:
 //!
-//! - [`I2cBus`] is the blocking bus, parked in a `RefCell`. It is compiled in
-//!   every build, including an embassy project: a display on an embassy board
-//!   still talks over a blocking bus, before the executor starts.
+//! - [`I2cBus`] is the blocking bus, parked in a `critical_section::Mutex`.
+//!   It is compiled in every build, including an embassy project: a display
+//!   on an embassy board still talks over a blocking bus, before the executor
+//!   starts.
 //! - [`AsyncI2cBus`] is the async bus (feature `embassy`), parked in an
 //!   `embassy_sync::Mutex`.
 //!
 //! Device endpoints that ride a blocking bus are `embedded-hal-bus`
-//! `RefCellDevice`s, built by the generated wiring: the runtime owns the bus,
-//! the standard adapters own the sharing. A device driver receives its address
-//! as a constructor argument, so this runtime never rewrites it.
+//! `CriticalSectionDevice`s, built by the generated wiring: the runtime owns
+//! the bus, the standard adapters own the sharing. The critical section is
+//! what makes the handle `Send + Sync`, so a blocking-only driver can live in
+//! an `AsyncMutex` on an embassy board. A device driver receives its address as
+//! a constructor argument, so this runtime never rewrites it.
 //!
 //! `build_in` is generic over the peripheral instance, so `<i2c id="i2c1">`
 //! emits `I2C1` and still compiles. The storage lives in an [`I2cBusStorage`]
@@ -64,8 +67,15 @@ impl embedded_hal::i2c::Error for I2cError {
 // Blocking bus (every build)
 // ---------------------------------------------------------------------------
 
+/// The cell one blocking `<i2c>` bus lives in.
+///
+/// A critical section replaces the `RefCell` the first slice used: the handle
+/// must be `Send + Sync` to be stored in an `AsyncMutex` on an embassy board,
+/// and a bare `RefCell` is neither.
+type BusCell = critical_section::Mutex<RefCell<I2c<'static, Blocking>>>;
+
 pub struct I2cBus {
-    inner: &'static RefCell<I2c<'static, Blocking>>,
+    inner: &'static BusCell,
 }
 
 impl Clone for I2cBus {
@@ -80,7 +90,7 @@ impl Copy for I2cBus {}
 /// The generated `generated.rs` declares one per bus (`__I2C0_STORAGE`), so
 /// [`I2cBus::build_in`] can never initialise the same cell twice.
 pub struct I2cBusStorage {
-    cell: static_cell::StaticCell<RefCell<I2c<'static, Blocking>>>,
+    cell: static_cell::StaticCell<BusCell>,
 }
 
 impl I2cBusStorage {
@@ -110,13 +120,15 @@ impl I2cBus {
         let esp = I2c::new(i2c, EspConfig::from(config))?
             .with_sda(sda)
             .with_scl(scl);
-        let inner = storage.cell.init(RefCell::new(esp));
+        let inner = storage
+            .cell
+            .init(critical_section::Mutex::new(RefCell::new(esp)));
         Ok(I2cBus { inner })
     }
 
     /// The shared cell, for an `embedded-hal-bus` endpoint
-    /// (`RefCellDevice::new(bus.cell())`).
-    pub fn cell(&self) -> &'static RefCell<I2c<'static, Blocking>> {
+    /// (`CriticalSectionDevice::new(bus.cs_cell())`).
+    pub fn cs_cell(&self) -> &'static BusCell {
         self.inner
     }
 
@@ -126,23 +138,32 @@ impl I2cBus {
         address: u8,
         operations: &mut [embedded_hal::i2c::Operation<'_>],
     ) -> Result<(), I2cError> {
-        let mut bus = self.inner.borrow_mut();
-        embedded_hal::i2c::I2c::transaction(&mut *bus, address, operations).map_err(I2cError::Bus)
+        critical_section::with(|cs| {
+            let mut bus = self.inner.borrow(cs).borrow_mut();
+            embedded_hal::i2c::I2c::transaction(&mut *bus, address, operations)
+                .map_err(I2cError::Bus)
+        })
     }
 
     pub fn write(&self, addr: u8, bytes: &[u8]) -> Result<(), I2cError> {
-        let mut bus = self.inner.borrow_mut();
-        embedded_hal::i2c::I2c::write(&mut *bus, addr, bytes).map_err(I2cError::Bus)
+        critical_section::with(|cs| {
+            let mut bus = self.inner.borrow(cs).borrow_mut();
+            embedded_hal::i2c::I2c::write(&mut *bus, addr, bytes).map_err(I2cError::Bus)
+        })
     }
 
     pub fn read(&self, addr: u8, buf: &mut [u8]) -> Result<(), I2cError> {
-        let mut bus = self.inner.borrow_mut();
-        embedded_hal::i2c::I2c::read(&mut *bus, addr, buf).map_err(I2cError::Bus)
+        critical_section::with(|cs| {
+            let mut bus = self.inner.borrow(cs).borrow_mut();
+            embedded_hal::i2c::I2c::read(&mut *bus, addr, buf).map_err(I2cError::Bus)
+        })
     }
 
     pub fn write_read(&self, addr: u8, w: &[u8], r: &mut [u8]) -> Result<(), I2cError> {
-        let mut bus = self.inner.borrow_mut();
-        embedded_hal::i2c::I2c::write_read(&mut *bus, addr, w, r).map_err(I2cError::Bus)
+        critical_section::with(|cs| {
+            let mut bus = self.inner.borrow(cs).borrow_mut();
+            embedded_hal::i2c::I2c::write_read(&mut *bus, addr, w, r).map_err(I2cError::Bus)
+        })
     }
 }
 

@@ -43,6 +43,7 @@ pub fn lower(
     let devices: Vec<&ParsedNode<'_>> = devices.iter().collect();
     lower_section("devices", &devices, session, &mut cx);
     check_spi_cs_gpio_declarations(&mut cx);
+    check_i2c_addresses(&mut cx);
     if cx.has_errors() {
         return cx.into_board(meta);
     }
@@ -68,6 +69,13 @@ fn hold_runtime_resources(cx: &mut LowerCx<'_>, meta: &Meta) {
             "UART0",
             "the log console",
             "use another UART, or move the console with `<console type=\"jtag-serial\" />`",
+        );
+    }
+    if meta.ota.is_some() {
+        cx.hold(
+            "FLASH",
+            "OTA firmware updates (`<ota>`)",
+            "remove `<ota />` from `# espforge` if another element needs raw FLASH access",
         );
     }
     if meta.runtime == crate::model::Runtime::Embassy {
@@ -160,6 +168,68 @@ fn check_bus_gpio_declarations(cx: &mut LowerCx<'_>) {
     }
     if let Some((span, label)) = found {
         cx.report(codes::CONFLICT_PIN, span, "pin conflict", label);
+    }
+}
+
+/// Two I2C devices on one controller at the same address answer together, so
+/// neither can be talked to. Report the second device, naming both and the
+/// address: the wiring, not the driver, is what has to change.
+fn check_i2c_addresses(cx: &mut LowerCx<'_>) {
+    let bus_names: Vec<String> = cx.buses().iter().map(|bus| bus.id().raw.clone()).collect();
+    let devices: Vec<(
+        String,
+        String,
+        crate::model::BusId,
+        u8,
+        std::ops::Range<usize>,
+    )> = cx
+        .devices()
+        .iter()
+        .filter_map(crate::model::Device::as_bus)
+        .filter_map(|device| match &device.transport {
+            crate::model::BusTransport::I2c(transport) => Some((
+                device.tag.clone(),
+                device.id.raw.clone(),
+                transport.bus,
+                transport.address,
+                device.id.span.clone(),
+            )),
+            _ => None,
+        })
+        .collect();
+
+    let mut claimed: Vec<(crate::model::BusId, u8)> = Vec::new();
+    let mut conflicts: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    for (index, (tag, id, bus, address, span)) in devices.iter().enumerate() {
+        if claimed.contains(&(*bus, *address)) {
+            continue;
+        }
+        claimed.push((*bus, *address));
+        let Some((other_tag, other_id, ..)) =
+            devices[index + 1..]
+                .iter()
+                .find(|(_, _, other_bus, other_address, _)| {
+                    other_bus == bus && other_address == address
+                })
+        else {
+            continue;
+        };
+        let bus_name = bus_names.get(bus.0).map(String::as_str).unwrap_or_default();
+        conflicts.push((
+            span.clone(),
+            format!(
+                "<{tag} id=\"{id}\"> and <{other_tag} id=\"{other_id}\"> both use address \
+                 0x{address:02X} on <i2c id=\"{bus_name}\">"
+            ),
+        ));
+    }
+    for (span, label) in conflicts {
+        cx.report(
+            codes::CONFLICT_I2C_ADDRESS,
+            span,
+            "i2c address conflict",
+            label,
+        );
     }
 }
 
@@ -332,6 +402,8 @@ mod tests {
             chip: "esp32c3".into(),
             runtime: Runtime::Blocking,
             console: Console::Uart,
+            ota: None,
+            logger: None,
         }
     }
 
@@ -477,7 +549,7 @@ mod tests {
         assert_eq!(errors[0].code, codes::DEVICE_UNSUPPORTED);
         assert_eq!(
             errors[0].message,
-            "`<pwm>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`"
+            "`<pwm>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`"
         );
     }
 
@@ -706,6 +778,46 @@ mod tests {
     }
 
     #[test]
+    fn two_devices_at_one_address_are_e0708() {
+        let src = OLED.replace(
+            "# services",
+            "  <ssd1306 id=\"oled2\" bus=\"$i2c0\" address=\"0x3C\" />\n# services",
+        );
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::CONFLICT_I2C_ADDRESS);
+        assert_eq!(errors[0].message, "i2c address conflict");
+        assert_eq!(
+            errors[0].labels[0].text,
+            "<ssd1306 id=\"oled\"> and <ssd1306 id=\"oled2\"> both use address 0x3C on <i2c id=\"i2c0\">"
+        );
+    }
+
+    /// The chip's own controller count: a single-I2C part cannot be asked for
+    /// `i2c1`, because no such peripheral exists on it.
+    #[test]
+    fn an_i2c_instance_the_chip_lacks_is_refused() {
+        let errors = lower_src(&I2C.replace("id=\"i2c0\"", "id=\"i2c1\"")).unwrap_err();
+        assert_eq!(errors[0].code, codes::I2C_INVALID_ID);
+        assert_eq!(errors[0].message, "invalid i2c id");
+        assert_eq!(
+            errors[0].labels[0].text,
+            "<i2c id=\"i2c1\">: esp32c3 has 1 I2C controller, so use i2c0"
+        );
+    }
+
+    /// A misspelled device attribute is a typo, not a default: `rot=` must not
+    /// silently fall back to `rotation`'s default.
+    #[test]
+    fn a_misspelled_device_attribute_is_refused() {
+        let src = OLED.replace("rotation=\"180\"", "rot=\"90\"");
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::ATTR_UNKNOWN);
+        assert_eq!(errors[0].message, "unknown attribute");
+        assert!(errors[0].labels[0].text.contains("`rot`"));
+        assert_eq!(&src[errors[0].primary.clone()], "rot");
+    }
+
+    #[test]
     fn a_bus_pin_on_a_declared_gpio_points_at_the_gpio() {
         let src = I2C.replace(
             "  <i2c id=\"i2c0\"",
@@ -727,6 +839,18 @@ mod tests {
         \x20 <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"6\" mode=\"0\" frequency=\"100kHz\" cs=\"9\" />\n\
         # devices\n\
         # services\n";
+
+    /// `frequency="40MHz"` is the same clock as `40000kHz`, as `driver.rs`
+    /// documents: the units describe one bus configuration, not three.
+    #[test]
+    fn an_spi_frequency_in_mhz_is_the_same_clock() {
+        let board = lower_src(&SPI.replace("frequency=\"100kHz\"", "frequency=\"40MHz\""))
+            .expect("spi lowers");
+        let Bus::Spi { khz, .. } = &board.resources.buses()[0] else {
+            panic!("the bus is an spi bus");
+        };
+        assert_eq!(*khz, 40_000);
+    }
 
     #[test]
     fn spi_lowers_to_a_full_duplex_bus_and_a_cs() {
@@ -751,6 +875,28 @@ mod tests {
         );
         assert_eq!((*khz, *mode), (100, 0));
         assert_eq!(cs.as_ref().unwrap().pin().0, 9);
+    }
+
+    /// Chip select is an output line: a `<gpio>` declared as an input cannot
+    /// carry it, even through a `$` reference.
+    #[test]
+    fn a_chip_select_on_an_input_gpio_is_refused() {
+        let src = "# espforge\n\
+            \x20 <project name=\"accel\" />\n\
+            \x20 <chip type=\"esp32c3\" />\n\
+            \x20 <runtime type=\"blocking\" />\n\
+            # peripherals\n\
+            \x20 <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" />\n\
+            \x20 <gpio id=\"input_gpio\" pin=\"9\" direction=\"input\" />\n\
+            # devices\n\
+            \x20 <adxl345 id=\"accel\" bus=\"$spi2\" cs=\"$input_gpio\" />\n\
+            # services\n";
+        let errors = lower_src(src).unwrap_err();
+        assert_eq!(errors[0].code, codes::DEVICE_WRONG_DIRECTION);
+        assert_eq!(
+            errors[0].labels[0].text,
+            "<adxl345 id=\"accel\"> needs an output pin, but `input_gpio` has direction=\"input\""
+        );
     }
 
     #[test]
@@ -798,6 +944,21 @@ mod tests {
         assert_eq!(
             board.resources.claim_of(Pin(6)).unwrap().need,
             PinUse::Unspecified
+        );
+    }
+
+    /// A port the chip does not have cannot be built: `esp32c3` exposes
+    /// UART0 and UART1, so `UART2` would only surface as a missing type in
+    /// `rustc` unless lowering refuses it here.
+    #[test]
+    fn a_uart_instance_the_chip_lacks_is_refused() {
+        let src = UART.replace("uart=\"UART1\"", "uart=\"UART2\"");
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::UART_INVALID_PERIPHERAL);
+        assert_eq!(errors[0].message, "invalid uart peripheral");
+        assert_eq!(
+            errors[0].labels[0].text,
+            "<uart id=\"uart1\"> UART2 does not exist on esp32c3: it has UART0..UART1"
         );
     }
 
@@ -866,6 +1027,27 @@ mod tests {
                 .map(|(name, _)| name)
                 .collect::<Vec<_>>(),
             ["FROM_CPU_INTR0", "TIMG0.timer0", "UART0"]
+        );
+    }
+
+    /// `<ota />` takes `FLASH` before any element lowers, so the generated
+    /// `main()` can build the updater from the one peripheral it needs.
+    #[test]
+    fn ota_holds_flash() {
+        let mut meta = meta();
+        meta.ota = Some(crate::model::OtaMeta {
+            flash_size: crate::model::FlashSize::Mb4,
+            rollback: true,
+        });
+        let board = lower_src_with(BLINK, meta).expect("an ota blink lowers");
+        let held: Vec<(&str, &str)> = board
+            .resources
+            .held_resources()
+            .map(|(name, held)| (name, held.holder.as_str()))
+            .collect();
+        assert!(
+            held.contains(&("FLASH", "OTA firmware updates (`<ota>`)")),
+            "{held:?}"
         );
     }
 
@@ -1636,6 +1818,38 @@ driver "touch" {
         assert!(board.driver_deps().is_empty());
     }
 
+    /// A manifest-only driver lowers like any other recipe, but names no
+    /// `espforge-drivers` feature: the generated project depends on the
+    /// external crate the manifest points at instead.
+    #[test]
+    fn a_manifest_only_driver_names_no_espforge_drivers_feature() {
+        let src = OLED.replace(
+            "<ssd1306 id=\"oled\" bus=\"$i2c0\" address=\"0x3C\" size=\"128x32\" rotation=\"180\" />",
+            "<sht31 id=\"air\" bus=\"$i2c0\" address=\"0x44\" />",
+        );
+        let board = lower_src(&src).expect("the sensor lowers");
+        let Device::Bus(air) = &board.devices[0] else {
+            panic!("the sensor is a bus device");
+        };
+        assert_eq!(air.tag, "sht31");
+        assert!(air.driver.feature.is_empty(), "no bundled feature");
+        assert_eq!(
+            air.driver
+                .package
+                .as_ref()
+                .map(|package| package.package.as_str()),
+            Some("embedded-sht3x")
+        );
+        assert!(
+            board.driver_features().is_empty(),
+            "a project using it names no espforge-drivers feature"
+        );
+        let dependencies = board.driver_dependencies().expect("one dependency");
+        assert_eq!(dependencies.len(), 1);
+        assert_eq!(dependencies[0].package, "embedded-sht3x");
+        assert_eq!(dependencies[0].version.as_deref(), Some("0.2.0"));
+    }
+
     /// A display and a sensor on one controller: both bind to the same
     /// peripheral and carry their own address.
     #[test]
@@ -1837,7 +2051,7 @@ driver "touch" {
         assert_eq!(errors[0].code, codes::DEVICE_UNSUPPORTED);
         assert_eq!(
             errors[0].message,
-            "`<st7789>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`"
+            "`<st7789>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`"
         );
     }
 
@@ -1991,7 +2205,9 @@ driver "touch" {
             "  <i2c id=\"i2c0\" sda=\"6\" scl=\"6\" frequency=\"100kHz\" />\n\
              \x20 <i2c id=\"i2c1\" sda=\"6\" scl=\"7\" frequency=\"100kHz\" />\n",
         );
-        let errors = lower_src(&src).unwrap_err();
+        // A second controller needs a chip that has one: esp32c3 has only
+        // `I2C0`, so this rollback case runs on an esp32s3.
+        let errors = lower_on("esp32s3", &src).unwrap_err();
         assert_eq!(
             errors.len(),
             1,
@@ -2037,7 +2253,8 @@ driver "touch" {
             \x20 <uart id=\"third\" uart=\"UART2\" tx=\"7\" rx=\"8\" />\n\
             # devices\n\
             # services\n";
-        let errors = lower_src(src).unwrap_err();
+        // A third port needs a chip that has one: esp32c3 has `UART0..UART1`.
+        let errors = lower_on("esp32s3", src).unwrap_err();
         // `other` claimed UART2 and TX 7 before RX 5 clashed: `third` gets both
         // back, so the only problem left is the RX conflict itself.
         assert_eq!(errors.len(), 1, "{errors:#?}");

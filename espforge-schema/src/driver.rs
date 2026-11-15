@@ -1351,6 +1351,8 @@ fn build_recipe(
                 map: None,
                 pin: Some(pin_template(pin.direction, pin.level, pin.pull)),
                 direction: pin.direction,
+                level: Some(pin.level.word()),
+                pull: Some(pin.pull.word()),
                 span: at,
             });
             continue;
@@ -1384,6 +1386,8 @@ fn build_recipe(
             map: Some(entries),
             pin: None,
             direction: PinDirection::Output,
+            level: None,
+            pull: None,
             span: at,
         });
     }

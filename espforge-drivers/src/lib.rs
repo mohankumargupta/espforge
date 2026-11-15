@@ -34,6 +34,10 @@ pub const MANIFESTS: &[(&str, &str)] = &[
         "espforge-drivers/manifests/adxl345.kdl",
         include_str!("../manifests/adxl345.kdl"),
     ),
+    (
+        "espforge-drivers/manifests/sht31.kdl",
+        include_str!("../manifests/sht31.kdl"),
+    ),
 ];
 
 /// The concatenation of [`MANIFESTS`], for callers that take one schema text.
@@ -49,10 +53,15 @@ pub const DRIVERS_SCHEMA_KDL: &str = concat!(
     "\n",
     include_str!("../manifests/adxl345.kdl"),
     "\n",
+    include_str!("../manifests/sht31.kdl"),
+    "\n",
 );
 
 /// Every bundled tag, in manifest order.
-pub const TAGS: &[&str] = &["ssd1306", "ili9341", "scd4x", "adxl345"];
+///
+/// `sht31` is manifest only: it names `embedded-sht3x` directly, so it has no
+/// feature and no module below.
+pub const TAGS: &[&str] = &["ssd1306", "ili9341", "scd4x", "adxl345", "sht31"];
 
 #[cfg(all(
     any(target_arch = "riscv32", target_arch = "xtensa"),

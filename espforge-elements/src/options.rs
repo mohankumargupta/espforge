@@ -267,6 +267,18 @@ fn derived_flag(
                 },
             ))
         }
+        "ota" => {
+            let on = core.ota.is_some();
+            Some((
+                on,
+                None,
+                if on {
+                    "derived from <ota /> in # espforge".into()
+                } else {
+                    "off because there is no <ota /> in # espforge".into()
+                },
+            ))
+        }
         _ => None,
     }
 }
@@ -605,6 +617,7 @@ options {
     option "wifi" derived=#true {
         requires "alloc" "unstable-hal" "embassy"
     }
+    option "ota" derived=#true {}
     option "log" default=#true {}
     option "only-esp32" { compatible { chip "esp32" } }
     option "dflt-esp32" default=#true { compatible { chip "esp32" } }
@@ -710,6 +723,24 @@ options {
         );
         let r = run(&file("esp32c3", "embassy", "", "")).unwrap();
         assert!(!r.is_on("wifi"));
+    }
+
+    /// `ota` follows `<ota />` in `# espforge`, like `wifi` follows the radio.
+    #[test]
+    fn the_ota_flag_follows_the_ota_element() {
+        let r = run(&file("esp32c3", "blocking", "  <ota />\n", "")).unwrap();
+        assert!(r.is_on("ota"));
+        assert_eq!(
+            r.get("ota").unwrap().why.describe(),
+            "derived from <ota /> in # espforge"
+        );
+
+        let r = run(&file("esp32c3", "blocking", "", "")).unwrap();
+        assert!(!r.is_on("ota"));
+        assert_eq!(
+            r.get("ota").unwrap().why.describe(),
+            "off because there is no <ota /> in # espforge"
+        );
     }
 
     #[test]

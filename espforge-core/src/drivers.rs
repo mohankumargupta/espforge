@@ -97,7 +97,17 @@ pub fn collect(source: &Source, extra_dirs: &[PathBuf]) -> Result<Manifests, Str
         read_dir(dir, Tier::Directory, &mut manifests)?;
     }
     if let Some(cache) = cache_root() {
-        read_cache(&cache, &mut manifests)?;
+        // The cache is keyed by tag *and* version, so another project may have
+        // a second version of the same tag. Loading every directory would ask
+        // the schema composer to accept one tag twice; only the exact paths
+        // this project's lock recorded are read.
+        let lock = match &source.dir {
+            Some(dir) => read_lock(dir)?,
+            None => None,
+        };
+        if let Some(lock) = &lock {
+            read_locked_cache(&cache, lock, &mut manifests)?;
+        }
     }
     Ok(manifests)
 }
@@ -127,39 +137,47 @@ fn read_dir(dir: &Path, tier: Tier, manifests: &mut Manifests) -> Result<(), Str
     Ok(())
 }
 
-/// Read `<tag>/<version>/driver.kdl` from the cache, in name order.
-fn read_cache(cache: &Path, manifests: &mut Manifests) -> Result<(), String> {
-    if !cache.is_dir() {
-        return Ok(());
-    }
-    let mut tags = std::fs::read_dir(cache)
-        .map_err(|e| format!("cannot read '{}': {e}", cache.display()))?
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect::<Vec<_>>();
-    tags.sort();
-    for tag in tags {
-        let mut versions = std::fs::read_dir(&tag)
-            .map_err(|e| format!("cannot read '{}': {e}", tag.display()))?
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
-            .collect::<Vec<_>>();
-        versions.sort();
-        for version in versions {
-            let path = version.join("driver.kdl");
-            if path.is_file() {
-                let text = std::fs::read_to_string(&path)
-                    .map_err(|e| format!("cannot read '{}': {e}", path.display()))?;
-                warn_v1(&path, &text, manifests);
-                manifests.files.push(Manifest {
-                    path,
-                    tier: Tier::Cache,
-                    text,
-                });
-            }
+/// Read exactly the cache manifests `lock` pins, in lock order.
+///
+/// The cache is shared by every project on the machine and holds one directory
+/// per `<tag>/<version>`. Walking it would load a version another project
+/// fetched, and `Session::compose` would refuse the tag as a duplicate. A
+/// recorded `cache_path` must stay inside the cache root: a lock cannot point
+/// the readonly path at an arbitrary file.
+fn read_locked_cache(
+    cache: &Path,
+    lock: &DriversLock,
+    manifests: &mut Manifests,
+) -> Result<(), String> {
+    let root = cache.canonicalize().unwrap_or_else(|_| cache.to_path_buf());
+    for entry in lock.drivers.values() {
+        let Some(recorded) = &entry.cache_path else {
+            continue;
+        };
+        let path = recorded.canonicalize().map_err(|error| {
+            format!(
+                "cannot read the cached driver '{}' recorded by the lock: {error}",
+                recorded.display()
+            )
+        })?;
+        if !path.starts_with(&root) {
+            return Err(format!(
+                "the driver lock records '{}' outside the driver cache '{}'",
+                path.display(),
+                root.display()
+            ));
         }
+        if !path.is_file() {
+            return Err(format!("'{}' is not a driver manifest", path.display()));
+        }
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read '{}': {e}", path.display()))?;
+        warn_v1(&path, &text, manifests);
+        manifests.files.push(Manifest {
+            path,
+            tier: Tier::Cache,
+            text,
+        });
     }
     Ok(())
 }
@@ -1579,6 +1597,51 @@ mod tests {
         assert_eq!(lock.drivers["demo"].kind, "local");
     }
 
+    /// The cache is machine-wide: two versions of one tag may exist because two
+    /// projects pinned different ones. Only the lock's recorded path is read,
+    /// so each project loads exactly the version it recorded.
+    #[test]
+    fn only_the_locked_cache_version_is_loaded() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("cache");
+        for (version, text) in [
+            ("0.1.0", "driver \"demo\" { format_version 2 }\n// one"),
+            ("0.2.0", "driver \"demo\" { format_version 2 }\n// two"),
+        ] {
+            let version_dir = cache.join("demo").join(version);
+            std::fs::create_dir_all(&version_dir).unwrap();
+            std::fs::write(version_dir.join("driver.kdl"), text).unwrap();
+        }
+        let pinned = cache.join("demo/0.2.0/driver.kdl");
+        let mut lock = DriversLock::new();
+        lock.drivers.insert(
+            "demo".into(),
+            LockEntry {
+                cache_path: Some(pinned),
+                ..LockEntry::default()
+            },
+        );
+        let mut manifests = Manifests::default();
+        read_locked_cache(&cache, &lock, &mut manifests).unwrap();
+        assert_eq!(manifests.files.len(), 1);
+        assert!(manifests.files[0].path.ends_with("0.2.0/driver.kdl"));
+        assert!(manifests.files[0].text.contains("// two"));
+
+        // A lock may not point the readonly path outside the cache.
+        let outside = dir.path().join("outside.kdl");
+        std::fs::write(&outside, "driver \"demo\" { format_version 2 }\n").unwrap();
+        let mut lock = DriversLock::new();
+        lock.drivers.insert(
+            "demo".into(),
+            LockEntry {
+                cache_path: Some(outside),
+                ..LockEntry::default()
+            },
+        );
+        let mut manifests = Manifests::default();
+        assert!(read_locked_cache(&cache, &lock, &mut manifests).is_err());
+    }
+
     #[test]
     fn migration_rewrites_the_bundled_v1_fixture() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1596,8 +1659,13 @@ mod tests {
             &text,
         ])
         .expect("the migrated file loads");
+        // The frozen fixture predates `sht31`, which ships only in v2, so the
+        // migrated text has no block for it; every tag it does carry must
+        // still come out as a v2 `driver`.
         for tag in espforge_drivers::TAGS {
-            let element = schema.element(tag).expect(tag);
+            let Some(element) = schema.element(tag) else {
+                continue;
+            };
             assert_eq!(element.format, espforge_schema::Format::V2);
             assert!(element.device_recipe.is_some());
         }
