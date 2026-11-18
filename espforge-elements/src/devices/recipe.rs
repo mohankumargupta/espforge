@@ -16,8 +16,8 @@ use espf::context::ParsedNode;
 use espf::diag::node_span;
 use espforge_diagnostics::codes;
 use espforge_schema::{
-    AddressNeed, DeviceArg, DeviceRecipe, MappedValue, PartSource, RecipePart, RustExpr, RustPath,
-    RustType, TypeTemplate,
+    AddressNeed, CtorArg, DeviceArg, DeviceRecipe, MappedValue, PartSource, RecipePart, RustExpr,
+    RustPath, RustType, TypeTemplate,
 };
 use std::collections::BTreeMap;
 
@@ -362,7 +362,7 @@ fn lower_recipe<'s>(
 
     // 6. the auxiliary control lines, claimed in recipe order.
     let mut pins: Vec<(String, ClaimedPin)> = Vec::new();
-    for arg in &recipe.args {
+    for arg in recipe.args.iter().filter_map(CtorArg::slot) {
         if arg.pin.is_none() {
             continue;
         }
@@ -425,17 +425,13 @@ fn lower_recipe<'s>(
         id,
         element,
         recipe,
+        address,
         &pins,
         &ty_template,
         async_template.as_ref(),
         bindings,
     )?;
-    let mut factory_args = slots.factory_args;
-    // The address is a constructor argument like any other, so a deferred
-    // factory must carry it too (it is a constant, not a pin).
-    if let Some(address) = address {
-        factory_args.insert(0, FactoryArg::Constant(RustExpr::number(address as u64)));
-    }
+    let factory_args = slots.factory_args;
     let args = slots.args;
 
     // 8. the field type, with its command slots filled.
@@ -479,6 +475,7 @@ fn lower_recipe<'s>(
         deps: recipe.deps.clone(),
         ty,
         new,
+        fallible: recipe.fallible,
         pins,
         args,
         factory_args,
@@ -489,6 +486,7 @@ fn lower_recipe<'s>(
         init,
         async_ty,
         async_new,
+        async_awaits: recipe.async_mode.awaits,
         async_feature: recipe.async_mode.feature.clone(),
         package: element.package.clone(),
         expose: element.expose.clone(),
@@ -707,6 +705,7 @@ fn slots(
     id: &Ident,
     element: &espforge_schema::Element,
     recipe: &DeviceRecipe,
+    address: Option<u8>,
     pins: &[(String, ClaimedPin)],
     ty: &TypeTemplate,
     async_ty: Option<&TypeTemplate>,
@@ -716,6 +715,29 @@ fn slots(
     let mut factory_args = Vec::new();
     let mut types = BTreeMap::new();
     for arg in &recipe.args {
+        // `{address}` is filled from the element itself, at the position the
+        // manifest gave it, and travels to a deferred factory as a constant.
+        if matches!(arg, CtorArg::Address) {
+            let Some(address) = address else {
+                // The schema refuses `{address}` on a bus that has none.
+                continue;
+            };
+            let expression = RustExpr::number(address as u64);
+            args.push(expression.clone());
+            factory_args.push(FactoryArg::Constant(expression));
+            continue;
+        }
+        // A fixed argument is the manifest's own expression; it rides the same
+        // path, so boot, deferred and async agree on its position.
+        if let CtorArg::Fixed { text, .. } = arg {
+            let expression = rust_expr(cx, node, tag, id, "a constructor argument", text)?;
+            args.push(expression.clone());
+            factory_args.push(FactoryArg::Constant(expression));
+            continue;
+        }
+        let Some(arg) = arg.slot() else {
+            continue;
+        };
         match &arg.pin {
             // A pin slot is the claimed line, wrapped in `Some(..)` when the
             // attribute is optional: the driver's argument is an `Option`.

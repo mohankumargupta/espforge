@@ -1050,7 +1050,10 @@ mod tests {
             git: None,
             rev: None,
             features: vec!["defmt".into()],
+            async_features: Vec::new(),
+            async_default_features: None,
             default_features: false,
+            modes_are_exclusive: false,
         }];
         board.devices = vec![screen];
         let doc = parse(

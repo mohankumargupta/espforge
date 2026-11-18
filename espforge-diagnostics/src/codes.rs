@@ -214,6 +214,9 @@ codes! {
     DEVICE_RESERVED_ID = "E0908";
     /// A blocking-only and an async-only driver bound to one bus.
     DEVICE_BUS_MODE_CONFLICT = "E0909";
+    /// Two devices of one crate whose blocking and async features are
+    /// mutually exclusive: a project cannot enable both halves.
+    DEVICE_DRIVER_MODE_CONFLICT = "E0911";
 }
 
 #[cfg(test)]
@@ -267,7 +270,7 @@ mod tests {
                         | 601..=623
                         | 701..=709
                         | 801..=807
-                        | 901..=909
+                        | 901..=911
                 ),
                 "{} is outside the codes this slice defines",
                 code.as_str()

@@ -86,6 +86,26 @@ placeholder inside a string literal, a duplicate argument, a pin that is not a
 constructor argument, and blocking/async constructors with different argument
 orders.
 
+A constructor argument may also be an expression the manifest already knows.
+Everything after the bus is parsed positionally: a `{hole}` is a slot the
+element fills, and any other expression is passed through verbatim —
+`ads111x::Ads111xConfig::default()`, `&bme680::Configuration::default()`, `20`.
+A fixed argument keeps the position the manifest gave it, for boot, deferred and
+async emission alike, and may not contain a `{placeholder}`. `{address}` still
+has to sit directly after the bus.
+
+`endpoint` is a Rust *type*, not a path: it names the type the generated bus
+helper returns, so a manifest-only driver can write the real thing
+(`espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static,
+esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>`). It takes no
+placeholder; only `type` and `constructor` are templates.
+
+A crate whose `new()` returns the device rather than a `Result` says so with
+`codegen { fallible #false }`. Emission then assigns the device directly and a
+deferred factory wraps it in `Ok(..)`; `.map_err(..)` is written only for a
+fallible constructor. The flag needs an external crate — a bundled driver
+returns `DeviceErrorKind`, so pairing it with `feature` is refused.
+
 ## 3. Dependencies
 
 ```kdl
@@ -104,6 +124,30 @@ pinned `rev`. Every dependency is emitted to `Cargo.toml`, deduplicated by
 package. Two manifests naming one package with different sources are refused
 with `DRIVER_DEPENDENCY_CONFLICT` and both paths. A bundled driver keeps its
 `codegen.feature`; an external driver names at least one `dependency`.
+
+`default_features #false` is honoured verbatim. A crate whose blocking and async
+APIs are different `Cargo` features — `bmi323-driver` puts async on by default
+and `blocking` behind an opt-in — describes both halves:
+
+```kdl
+dependency "bmi323-driver" {
+    version "0.2.0"
+    features "blocking"            # the blocking half
+    default_features #false        # ...which is the opt-in one here
+    async_features "async"         # the async half
+    async_default_features #true   # async is the crate's default
+    modes_are_exclusive #true      # the two must not both be on
+}
+```
+
+`features`/`default_features` describe the blocking mode and
+`async_features`/`async_default_features` the async one. Which applies is the
+*board's* decision, resolved from the device's bus, not the manifest's. For an
+exclusive crate the async set replaces the blocking one, because `Cargo`
+features are additive; for any other crate the async features are added. Two
+devices of one exclusive crate in different modes are refused at lowering as
+`E0911` ("driver mode conflict"), naming both devices, the crate and both
+modes.
 
 ## 4. Fetching and the cache
 
@@ -168,3 +212,32 @@ Rust) is refused with the driver and pin named.
 The frozen v1 file at `testing/fixtures/schema-v1/drivers.schema.kdl` and the
 equivalence test are deleted one release after v2 ships, together with the v1
 branch in the lowerer.
+
+## 6. What stays out of KDL
+
+Three shapes are deliberately left as Rust glue. Writing them as manifest
+templates would turn `codegen` into a macro language, and each needs code that
+composes two or three upstream objects rather than naming one constructor.
+
+1. **Struct-literal constructors.** `ws2812-rs` builds its driver as
+   `WS2812SPI { led: spi }`. A struct literal has no `new` path, so the
+   constructor rule — a call on a plain path — refuses it. A dedicated driver
+   crate with a one-line constructor is the honest answer, not a template that
+   can spell a literal.
+2. **A device with no chip select on SPI.** `<spi>`'s `cs` is optional for the
+   bus, and `cs_via "pin_or_ref"` covers the parts that use one. A part that
+   drives the bus with no select at all is a bus-level decision — it belongs
+   with `provides` (expanders, muxes, multi-peer buses), not with a driver.
+3. **Builders, typestates and composed panels** (`hd44780-embedded-hal`,
+   `epd-waveshare-async`, `epdsi`, `icm20948-async`, `lora-phy`), and crates
+   whose bus type is not exported: `stts22h-rs` and `bmi323-driver` construct a
+   typestate (`Stts22h<I2cBus<P>, OnState>`) whose bus wrapper and bound are not
+   public, so neither `type` nor `endpoint` can name the field. Each of these
+   needs a small function that builds the device from the bus espforge already
+   hands out — one function per crate, not one wrapper struct per crate, planned
+   in a follow-up `driver-glue.md`.
+
+The manifest's job ends where a value must be *computed*: it names a
+constructor, the constants that constructor takes, and the element attributes
+that fill its slots — it does not build an expression that assembles several
+values into a device.

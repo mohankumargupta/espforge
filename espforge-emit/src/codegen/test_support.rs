@@ -87,13 +87,15 @@ pub fn device(feature: &'static str, deps: &[&str]) -> Device {
                 "espforge_drivers::{feature}::new"
             ))
             .expect("a fixture constructor"),
+            fallible: true,
             pins: Vec::new(),
-            args: Vec::new(),
+            args: vec![espforge_elements::model::RustExpr::number(0x3C)],
             factory_args: Vec::new(),
             runtimes: espforge_elements::RuntimeSet::BLOCKING,
             init: espforge_elements::model::Init::Boot,
             async_ty: None,
             async_new: None,
+            async_awaits: true,
             async_feature: None,
             package: None,
             expose: Vec::new(),

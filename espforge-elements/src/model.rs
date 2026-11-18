@@ -1198,6 +1198,11 @@ pub struct Driver {
     pub ty: RustType,
     /// The Rust path of the constructor.
     pub new: RustPath,
+    /// Whether the constructor returns a `Result`.
+    ///
+    /// `codegen { fallible #false }` names a crate whose `new()` returns the
+    /// device directly, so emission must not map an error that does not exist.
+    pub fallible: bool,
     /// The auxiliary pins it claimed, with the argument each one fills.
     pub pins: Vec<(String, ClaimedPin)>,
     /// The Rust expressions passed to the constructor after the bus.
@@ -1213,6 +1218,11 @@ pub struct Driver {
     pub async_ty: Option<RustType>,
     /// The async constructor.
     pub async_new: Option<RustPath>,
+    /// Whether the async constructor is an `async fn` that must be awaited.
+    ///
+    /// `runtime "async" { awaits #false }` names a crate whose `new()` is a
+    /// plain `fn`, so the deferred factory must not append `.await`.
+    pub async_awaits: bool,
     /// The `espforge-drivers` feature the async type needs.
     pub async_feature: Option<String>,
     /// The external crate implementing this driver, when its manifest declares
@@ -1360,7 +1370,7 @@ impl crate::element::Lowered for BusDevice {
             &driver.new
         };
         let deferred = async_bus || driver.init == Init::Deferred;
-        let mut args: Vec<TokenStream> = driver.args.iter().map(|arg| quote! { #arg }).collect();
+        let args: Vec<TokenStream> = driver.args.iter().map(|arg| quote! { #arg }).collect();
 
         // Build the bus and the device's own handle inside `Devices::new`, so
         // the bus exists exactly once and nothing is exposed through a
@@ -1370,11 +1380,9 @@ impl crate::element::Lowered for BusDevice {
         // endpoint rewrites: the driver's own `I2c` calls reach the address it
         // asks for, so a second part on the same bus is addressable too.
         let handle = match transport {
-            BusTransport::I2c(i2c) => {
-                let address = Literal::u8_unsuffixed(i2c.address);
-                args.insert(0, quote! { #address });
-                crate::bus_emit::i2c_device(cx, board, i2c.bus)
-            }
+            // The address is one of `driver.args`, in the position the manifest
+            // wrote it: the driver's own `I2c` calls reach it.
+            BusTransport::I2c(i2c) => crate::bus_emit::i2c_device(cx, board, i2c.bus),
             BusTransport::Spi(spi) => {
                 // A config-declaring recipe applies its own mode and clock;
                 // every other part inherits the bus boot values.
@@ -1408,8 +1416,12 @@ impl crate::element::Lowered for BusDevice {
         // whose error type espforge cannot even spell: the part is still named,
         // and the failure reports as `Init`, the only kind a constructor can
         // raise.
+        // An infallible constructor returns the device directly: there is no
+        // error to map, and `.map_err` on a plain value would not compile.
         let device = Literal::string(id.raw.as_str());
-        let fail = if driver.package.is_some() {
+        let fail = if !driver.fallible {
+            quote! {}
+        } else if driver.package.is_some() {
             quote! {
                 .map_err(|_| espforge_runtime::DeviceError {
                     device: #device,
@@ -1421,7 +1433,12 @@ impl crate::element::Lowered for BusDevice {
                 .map_err(|kind| espforge_runtime::DeviceError { device: #device, kind })
             }
         };
-        let fallible = quote! { #fail? };
+        // The `?` that turns a constructor error into `Devices::new`'s.
+        let check = if driver.fallible {
+            quote! { #fail? }
+        } else {
+            quote! {}
+        };
 
         if deferred {
             // A deferred device stores a factory. The endpoint and its control
@@ -1442,7 +1459,9 @@ impl crate::element::Lowered for BusDevice {
             let mut fields = vec![quote! { endpoint: #endpoint_ty }];
             let mut pin_inits = Vec::new();
             let mut call_args = vec![quote! { self.endpoint }];
-            for (arg, expression) in driver.factory_args.iter().zip(args.iter()) {
+            // `factory_args` carries both the pins a factory stores and the
+            // constants it passes, in the manifest's order.
+            for arg in driver.factory_args.iter() {
                 match arg {
                     FactoryArg::Pin {
                         name,
@@ -1490,9 +1509,23 @@ impl crate::element::Lowered for BusDevice {
                             line_build(*direction, &level, &pull, quote! { self.#field })
                         });
                     }
-                    FactoryArg::Constant(_) => call_args.push(expression.clone()),
+                    FactoryArg::Constant(expression) => call_args.push(quote! { #expression }),
                 }
             }
+
+            // An async constructor is awaited unless its manifest says it is a
+            // plain `fn` (`awaits #false`); an infallible one is wrapped in
+            // `Ok` so the factory keeps its `Result` shape either way.
+            let construct = if async_bus && driver.async_awaits {
+                quote! { #new(#(#call_args),*).await }
+            } else {
+                quote! { #new(#(#call_args),*) }
+            };
+            let factory_body = if driver.fallible {
+                quote! { #construct #fail }
+            } else {
+                quote! { Ok(#construct) }
+            };
 
             let factory_impl = if async_bus {
                 quote! {
@@ -1505,7 +1538,7 @@ impl crate::element::Lowered for BusDevice {
                             Output = Result<Self::Device, espforge_runtime::DeviceError>,
                         > {
                             async move {
-                                #new(#(#call_args),*).await #fail
+                                #factory_body
                             }
                         }
                     }
@@ -1516,7 +1549,7 @@ impl crate::element::Lowered for BusDevice {
                         type Device = #ty;
 
                         fn init(self) -> Result<Self::Device, espforge_runtime::DeviceError> {
-                            #new(#(#call_args),*) #fail
+                            #factory_body
                         }
                     }
                 }
@@ -1581,7 +1614,7 @@ impl crate::element::Lowered for BusDevice {
             });
             cx.device_init(quote! {
                 #name: espforge_runtime::AsyncMutex::new(
-                    #new(#handle, #(#args),*) #fallible
+                    #new(#handle, #(#args),*) #check
                 ),
             });
         } else {
@@ -1589,7 +1622,7 @@ impl crate::element::Lowered for BusDevice {
                 pub #name: #ty,
             });
             cx.device_init(quote! {
-                #name: #new(#handle, #(#args),*) #fallible,
+                #name: #new(#handle, #(#args),*) #check,
             });
         }
     }
@@ -1775,10 +1808,20 @@ impl Board {
                             git: None,
                             rev: None,
                             features: Vec::new(),
+                            async_features: Vec::new(),
+                            async_default_features: None,
                             default_features: true,
+                            modes_are_exclusive: false,
                         });
                     }
                 }
+            }
+            // Which half of a per-mode crate this project needs is the board's
+            // decision, not the manifest's: the same driver resolves async on
+            // an embassy project.
+            let asynchronous = self.bus_mode(device.bus()) == BusMode::Async;
+            for dependency in &mut dependencies {
+                dependency.use_mode(asynchronous);
             }
             let manifest = device
                 .driver
@@ -1923,7 +1966,10 @@ mod tests {
             git: None,
             rev: None,
             features: Vec::new(),
+            async_features: Vec::new(),
+            async_default_features: None,
             default_features: true,
+            modes_are_exclusive: false,
         }
     }
 

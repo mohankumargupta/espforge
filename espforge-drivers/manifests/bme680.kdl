@@ -1,0 +1,29 @@
+driver "bme680" {
+    format_version 2
+    summary "Bosch BME680 temperature, humidity, pressure and gas sensor"
+    description "Takes environmental readings over an I2C bus. Manifest only: the type, constructor and config come straight from the `bosch-bme680` crate. The sensor address is the part's own enum, the config is the crate's default and the ambient temperature is a fixed value, so the constructor's four trailing arguments are constants the manifest writes."
+    category "sensor"
+
+    dependency "bosch-bme680" { version "1.0.4" }
+
+    bus "i2c" {
+        address fixed="0x76"
+    }
+
+    codegen {
+        map "delay" {
+            "runtime" { expr "espforge_runtime::Delay::new()" }
+        }
+        runtime "blocking" {
+            type "bosch_bme680::Bme680<espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>, espforge_runtime::Delay>"
+            constructor "bosch_bme680::Bme680::new({bus_device}, bosch_bme680::DeviceAddress::Primary, {delay}, &bosch_bme680::Configuration::default(), 20)"
+        }
+    }
+
+    attr "delay" kind="choice" default="runtime" {
+        choices "runtime"
+        help "The delay handle the driver takes; espforge always passes the runtime's own."
+    }
+    example "minimal" #"<bme680 id="air" bus="$i2c0" address="0x76" />"#
+    see_also "peripherals/i2c"
+}

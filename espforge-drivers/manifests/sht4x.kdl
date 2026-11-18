@@ -1,0 +1,23 @@
+driver "sht4x" {
+    format_version 2
+    summary "Sensirion SHT40/SHT41/SHT45 temperature and humidity sensor"
+    description "Reads temperature and relative humidity over an I2C bus. Manifest only: `sht4x::Sht4x::new` returns the driver directly (there is no probe to fail), so the manifest says `fallible #false` and emission maps no error. The crate hard-codes address 0x44, which the manifest declares `fixed` and does not pass to the constructor."
+    category "sensor"
+
+    dependency "sht4x" { version "0.2.0" }
+
+    bus "i2c" {
+        address fixed="0x44"
+    }
+
+    codegen {
+        fallible #false
+        runtime "blocking" {
+            type "sht4x::Sht4x<espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>, espforge_runtime::Delay>"
+            constructor "sht4x::Sht4x::new({bus_device})"
+        }
+    }
+
+    example "minimal" #"<sht4x id="air" bus="$i2c0" address="0x44" />"#
+    see_also "peripherals/i2c"
+}

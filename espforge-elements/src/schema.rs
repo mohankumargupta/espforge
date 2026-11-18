@@ -246,8 +246,8 @@ mod tests {
         }
         assert_eq!(
             composed.elements.len(),
-            core_schema().elements.len() + 5,
-            "the five driver elements are the only addition"
+            core_schema().elements.len() + 9,
+            "the bundled driver elements are the only addition"
         );
     }
 
@@ -264,10 +264,11 @@ mod tests {
         assert_eq!(recipe.deps, ["embedded-graphics"]);
         // A display declares its own address in the `.espf`; any usable one.
         assert_eq!(recipe.address, espforge_schema::AddressNeed::Any);
-        let args: Vec<&str> = recipe.args.iter().map(|arg| arg.name.as_str()).collect();
+        let slots: Vec<_> = recipe.args.iter().filter_map(|arg| arg.slot()).collect();
+        let args: Vec<&str> = slots.iter().map(|arg| arg.name.as_str()).collect();
         assert_eq!(args, ["size", "rotation"]);
-        assert!(recipe.args[0].pin.is_none());
-        assert_eq!(recipe.args[0].map.as_ref().unwrap().len(), 2);
+        assert!(slots[0].pin.is_none());
+        assert_eq!(slots[0].map.as_ref().unwrap().len(), 2);
 
         // The SPI display takes its bus and templates its control lines.
         let ili9341 = schema.element("ili9341").unwrap();
@@ -277,12 +278,19 @@ mod tests {
         let pins: Vec<&str> = recipe
             .args
             .iter()
+            .filter_map(|arg| arg.slot())
             .filter(|arg| arg.pin.is_some())
             .map(|arg| arg.name.as_str())
             .collect();
         assert_eq!(pins, ["dc", "reset", "backlight"]);
         assert!(
-            recipe.args[2].pin.as_deref().unwrap().contains("{n}"),
+            recipe.args[2]
+                .slot()
+                .expect("a pin slot")
+                .pin
+                .as_deref()
+                .unwrap()
+                .contains("{n}"),
             "a pin slot substitutes the claimed pin number"
         );
     }
@@ -338,8 +346,107 @@ mod tests {
         );
         assert_eq!(recipe.new, "embedded_sht3x::Sht3x::new");
         assert!(
-            recipe.args.iter().any(|arg| arg.name == "delay"),
+            recipe
+                .args
+                .iter()
+                .filter_map(|arg| arg.slot())
+                .any(|arg| arg.name == "delay"),
             "the crate's third argument is the runtime delay"
+        );
+        // The deferred mode needs the endpoint, and the only honest spelling of
+        // a real bus endpoint is a generic type.
+        let endpoint = recipe.endpoint.as_deref().expect("an endpoint");
+        assert!(
+            endpoint.contains("CriticalSectionDevice<'static"),
+            "the endpoint names the bus helper's own type: {endpoint}"
+        );
+        assert!(
+            endpoint.contains("esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>"),
+            "the endpoint is generic over the bus: {endpoint}"
+        );
+        let init = sht31
+            .attrs
+            .iter()
+            .find(|attr| attr.name == "init")
+            .expect("`sht31` offers `init`");
+        assert_eq!(
+            init.kind,
+            espforge_schema::AttrKind::Choice(vec!["boot".into(), "deferred".into()]),
+            "both init modes are offered"
+        );
+        assert!(
+            sht31
+                .examples
+                .iter()
+                .any(|example| example.fragment.contains("init=\"deferred\"")),
+            "the deferred example is what the endpoint above is for"
+        );
+    }
+
+    /// `mhz19b` is the first manifest-only driver on a UART bus: the port is a
+    /// `UartDevice`, the constructor comes from the `edrv-mhz19` crate, and
+    /// both runtimes name that crate's type over the same bus handle.
+    #[test]
+    fn a_uart_manifest_only_driver_names_an_external_crate() {
+        let mhz19b = schema().element("mhz19b").unwrap();
+        let recipe = mhz19b.device_recipe.as_ref().unwrap();
+        assert_eq!(recipe.bus, "uart");
+        assert_eq!(recipe.kind, "sensor");
+        assert_eq!(recipe.feature, "", "no `espforge-drivers` feature");
+        assert!(!recipe.fallible, "`MHZ19::new` returns the device");
+        assert_eq!(recipe.address, espforge_schema::AddressNeed::None);
+        assert_eq!(
+            mhz19b
+                .package
+                .as_ref()
+                .map(|package| package.package.as_str()),
+            Some("edrv-mhz19"),
+            "the implementation crate is the external one"
+        );
+        assert_eq!(
+            mhz19b
+                .dependencies
+                .iter()
+                .map(|dependency| dependency.package.as_str())
+                .collect::<Vec<_>>(),
+            ["edrv-mhz19"]
+        );
+        assert!(
+            recipe.ty.starts_with("edrv_mhz19::blocking::MHZ19<"),
+            "the type comes from the crate: {}",
+            recipe.ty
+        );
+        assert_eq!(recipe.new, "edrv_mhz19::blocking::MHZ19::new");
+        assert_eq!(
+            recipe.endpoint.as_deref(),
+            Some("espforge_runtime::UartDevice<esp_hal::Blocking>"),
+            "the deferred factory stores the port the bus helper returns"
+        );
+        assert_eq!(
+            recipe.async_mode.ty.as_deref(),
+            Some("edrv_mhz19::MHZ19<espforge_runtime::UartDevice<esp_hal::Async>>")
+        );
+        assert_eq!(
+            recipe.async_mode.endpoint.as_deref(),
+            Some("espforge_runtime::UartDevice<esp_hal::Async>")
+        );
+        assert!(
+            !recipe.async_mode.awaits,
+            "`MHZ19::new` is a plain `fn`, not an `async fn`"
+        );
+        assert!(
+            recipe.args.is_empty(),
+            "the constructor takes the bus and nothing else"
+        );
+        let init = mhz19b
+            .attrs
+            .iter()
+            .find(|attr| attr.name == "init")
+            .expect("`mhz19b` offers `init`");
+        assert_eq!(
+            init.kind,
+            espforge_schema::AttrKind::Choice(vec!["boot".into(), "deferred".into()]),
+            "both init modes are offered"
         );
     }
 

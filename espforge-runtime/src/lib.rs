@@ -333,6 +333,11 @@ mod hw {
     /// `embedded_hal::...` through their own crate without adding the
     /// dependency themselves.
     pub use embedded_hal;
+
+    /// The standard stream traits `UartDevice` implements, re-exported for the
+    /// same reason: a manifest can spell
+    /// `espforge_runtime::embedded_io::Write` without a dependency of its own.
+    pub use embedded_io;
 }
 
 #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]

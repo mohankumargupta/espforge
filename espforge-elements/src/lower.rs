@@ -48,6 +48,7 @@ pub fn lower(
         return cx.into_board(meta);
     }
     check_bus_modes(&mut cx);
+    check_exclusive_driver_modes(&mut cx);
     if cx.has_errors() {
         return cx.into_board(meta);
     }
@@ -285,6 +286,65 @@ fn check_bus_modes(cx: &mut LowerCx<'_>) {
             codes::DEVICE_BUS_MODE_CONFLICT,
             span,
             "bus mode conflict",
+            label,
+        );
+    }
+}
+
+/// Two devices of one crate whose blocking and async APIs are one `Cargo`
+/// feature each cannot share a project: features are additive, so both halves
+/// would be compiled. Report the second device and name the crate.
+fn check_exclusive_driver_modes(cx: &mut LowerCx<'_>) {
+    // (package, mode, tag, id) of the first device that uses each crate.
+    let mut first: Vec<(String, &'static str, String, String)> = Vec::new();
+    let mut conflicts: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    let mut reported: Vec<String> = Vec::new();
+    for device in cx.devices().iter().filter_map(crate::model::Device::as_bus) {
+        let mode = if device.driver.runtimes.async_only() {
+            "async"
+        } else if device.driver.runtimes.blocking_only() {
+            "blocking"
+        } else if cx.runtime() == crate::model::Runtime::Embassy {
+            "async"
+        } else {
+            "blocking"
+        };
+        for dependency in &device.driver.dependencies {
+            if !dependency.modes_are_exclusive {
+                continue;
+            }
+            let known = first
+                .iter()
+                .position(|(package, ..)| *package == dependency.package);
+            let Some(index) = known else {
+                first.push((
+                    dependency.package.clone(),
+                    mode,
+                    device.tag.clone(),
+                    device.id.raw.clone(),
+                ));
+                continue;
+            };
+            let (_, first_mode, first_tag, first_id) = &first[index];
+            if *first_mode == mode || reported.contains(&dependency.package) {
+                continue;
+            }
+            reported.push(dependency.package.clone());
+            conflicts.push((
+                device.id.span.clone(),
+                format!(
+                    "<{} id=\"{}\"> needs the {mode} API of `{}`, but <{} id=\"{}\"> needs its \
+                     {first_mode} API; the crate enables one or the other",
+                    device.tag, device.id.raw, dependency.package, first_tag, first_id
+                ),
+            ));
+        }
+    }
+    for (span, label) in conflicts {
+        cx.report(
+            codes::DEVICE_DRIVER_MODE_CONFLICT,
+            span,
+            "driver mode conflict",
             label,
         );
     }
@@ -549,7 +609,7 @@ mod tests {
         assert_eq!(errors[0].code, codes::DEVICE_UNSUPPORTED);
         assert_eq!(
             errors[0].message,
-            "`<pwm>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`"
+            "`<pwm>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`, `<sht4x>`, `<ads111x>`, `<bme680>`, `<mhz19b>`"
         );
     }
 
@@ -1629,6 +1689,7 @@ mod tests {
         assert_eq!(
             oled.driver.args,
             [
+                crate::model::RustExpr::number(0x3C),
                 crate::model::RustExpr::parse("espforge_drivers::Oled128x32").unwrap(),
                 crate::model::RustExpr::parse("espforge_drivers::DisplayRotation::Rotate180")
                     .unwrap()
@@ -1812,7 +1873,12 @@ driver "touch" {
             air.driver.new,
             crate::model::RustPath::parse("espforge_drivers::Scd4x::new").unwrap()
         );
-        assert!(air.driver.args.is_empty());
+        // The address is the constructor's first argument after the bus, at
+        // the position the manifest wrote `{address}`.
+        assert_eq!(
+            air.driver.args,
+            [crate::model::RustExpr::number(0x62)]
+        );
         assert!(air.driver.pins.is_empty());
         assert_eq!(board.driver_features(), ["scd4x"]);
         assert!(board.driver_deps().is_empty());
@@ -2010,13 +2076,15 @@ driver "touch" {
                     .unwrap(),
                     new: crate::model::RustPath::parse("espforge_drivers::Ssd1306Display::new")
                         .unwrap(),
+                    fallible: true,
                     pins: Vec::new(),
-                    args: Vec::new(),
+                    args: vec![crate::model::RustExpr::number(0x3C)],
                     factory_args: Vec::new(),
                     runtimes,
                     init: crate::model::Init::Boot,
                     async_ty: None,
                     async_new: None,
+                    async_awaits: true,
                     async_feature: None,
                     package: None,
                     expose: Vec::new(),
@@ -2044,6 +2112,172 @@ driver "touch" {
         );
     }
 
+    const MODE_PROBE: &str = r##"
+driver "mode_probe" {
+    format_version 2
+    summary "test"
+    category "sensor"
+    dependency "mode-crate" {
+        version "1.0.0"
+        features "blocking"
+        async_features "async"
+        default_features #false
+        async_default_features #true
+        modes_are_exclusive #true
+    }
+    bus "i2c" { address default="0x40" allowed="0x08..=0x77" }
+    codegen {
+        map "delay" { "runtime" { expr "espforge_runtime::Delay::new()" } }
+        runtime "blocking" {
+            type "mode_crate::Probe<espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>, espforge_runtime::Delay>"
+            constructor "mode_crate::Probe::new({bus_device}, {address}, {delay})"
+            endpoint "espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>"
+        }
+        runtime "async" {
+            type "mode_crate::AsyncProbe<espforge_runtime::AsyncI2cBus, espforge_runtime::Delay>"
+            constructor "mode_crate::AsyncProbe::new({bus_device}, {address}, {delay})"
+            endpoint "espforge_runtime::AsyncI2cBus"
+        }
+    }
+    attr "delay" kind="choice" default="runtime" { choices "runtime" }
+    example "minimal" #"<mode_probe id="probe" bus="$i2c0" address="0x40" />"#
+}
+"##;
+
+    /// Lower one probe project, on the runtime it names, against the per-mode
+    /// fixture.
+    fn lower_mode_probe(runtime: &str) -> Result<Board, Vec<Diagnostic>> {
+        let session = Session::compose(&[("mode-probe.schema.kdl".to_string(), MODE_PROBE.to_string())])
+            .expect("the probe schema loads");
+        let src = format!(
+            "# espforge\n\
+             \x20 <project name=\"mode\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"{runtime}\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <mode_probe id=\"probe\" bus=\"$i2c0\" address=\"0x40\" />\n\
+             # services\n"
+        );
+        let parsed = parse_espf(&src);
+        let section = |name: &str| parsed.sections.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let mut meta = meta();
+        meta.runtime = if runtime == "embassy" {
+            Runtime::Embassy
+        } else {
+            Runtime::Blocking
+        };
+        lower(
+            meta,
+            section("peripherals"),
+            section("devices"),
+            section("services"),
+            &session,
+        )
+    }
+
+    /// Which half of a per-mode crate a project needs is the board's decision:
+    /// the same manifest selects `blocking` on a blocking board and `async` on
+    /// an embassy one, and an exclusive crate swaps the sets instead of
+    /// unioning them.
+    #[test]
+    fn async_features_reach_the_dependency_only_for_async_buses() {
+        let blocking = lower_mode_probe("blocking").expect("the blocking board lowers");
+        let dependency = &blocking.driver_dependencies().expect("one dependency")[0];
+        assert_eq!(dependency.features, ["blocking"]);
+        assert!(!dependency.default_features);
+
+        let asynchronous = lower_mode_probe("embassy").expect("the embassy board lowers");
+        let dependency = &asynchronous.driver_dependencies().expect("one dependency")[0];
+        assert_eq!(dependency.features, ["async"]);
+        assert!(dependency.default_features, "the crate defaults to async");
+        assert!(dependency.modes_are_exclusive);
+    }
+
+    const SHARED_BLOCKING: &str = r##"
+driver "shared_blocking" {
+    format_version 2
+    summary "test"
+    category "sensor"
+    dependency "shared-crate" {
+        version "1.0.0"
+        modes_are_exclusive #true
+    }
+    bus "i2c" { address default="0x40" allowed="0x08..=0x77" }
+    codegen {
+        runtime "blocking" {
+            type "shared_crate::Blocking"
+            constructor "shared_crate::Blocking::new({bus_device}, {address})"
+        }
+    }
+    example "minimal" #"<shared_blocking id="a" bus="$i2c0" address="0x40" />"#
+}
+"##;
+
+    const SHARED_ASYNC: &str = r##"
+driver "shared_async" {
+    format_version 2
+    summary "test"
+    category "sensor"
+    dependency "shared-crate" {
+        version "1.0.0"
+        modes_are_exclusive #true
+    }
+    bus "i2c" { address default="0x41" allowed="0x08..=0x77" }
+    codegen {
+        runtime "async" {
+            type "shared_crate::Async"
+            constructor "shared_crate::Async::new({bus_device}, {address})"
+            endpoint "espforge_runtime::AsyncI2cBus"
+        }
+    }
+    attr "init" kind="choice" default="boot" { choices "boot" "deferred" }
+    example "minimal" #"<shared_async id="b" bus="$i2c0" address="0x41" init="deferred" />"#
+}
+"##;
+
+    /// Two devices of one exclusive crate in different modes cannot share a
+    /// project: Cargo would compile both halves of the crate.
+    #[test]
+    fn two_modes_of_one_exclusive_crate_are_refused() {
+        let session = Session::compose(&[
+            ("a.schema.kdl".to_string(), SHARED_BLOCKING.to_string()),
+            ("b.schema.kdl".to_string(), SHARED_ASYNC.to_string()),
+        ])
+        .expect("both fixtures load");
+        let src = "# espforge\n\
+             \x20 <project name=\"shared\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <shared_blocking id=\"a\" bus=\"$i2c0\" address=\"0x40\" />\n\
+             \x20 <shared_async id=\"b\" bus=\"$i2c0\" address=\"0x41\" init=\"deferred\" />\n\
+             # services\n";
+        let parsed = parse_espf(src);
+        let section = |name: &str| parsed.sections.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let errors = lower(
+            meta(),
+            section("peripherals"),
+            section("devices"),
+            section("services"),
+            &session,
+        )
+        .unwrap_err();
+        let conflict = errors
+            .iter()
+            .find(|error| error.code == codes::DEVICE_DRIVER_MODE_CONFLICT)
+            .unwrap_or_else(|| panic!("a driver mode conflict: {errors:#?}"));
+        assert_eq!(conflict.message, "driver mode conflict");
+        assert!(
+            conflict.labels[0].text.contains("`shared-crate`"),
+            "{:?}",
+            conflict.labels
+        );
+    }
+
     #[test]
     fn an_unknown_device_tag_names_the_displays() {
         let src = OLED.replace("<ssd1306 id=\"oled\"", "<st7789 id=\"lcd\"");
@@ -2051,7 +2285,7 @@ driver "touch" {
         assert_eq!(errors[0].code, codes::DEVICE_UNSUPPORTED);
         assert_eq!(
             errors[0].message,
-            "`<st7789>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`"
+            "`<st7789>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`, `<sht4x>`, `<ads111x>`, `<bme680>`, `<mhz19b>`"
         );
     }
 

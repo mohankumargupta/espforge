@@ -1343,8 +1343,10 @@ fn migrate_element(element: &Element) -> Result<String, String> {
     }
 
     let mut pin_names = Vec::new();
-    for arg in recipe.args.iter().filter(|arg| arg.pin.is_some()) {
-        let template = arg.pin.as_deref().unwrap();
+    for arg in recipe.args.iter().filter_map(|arg| arg.slot()) {
+        let Some(template) = arg.pin.as_deref() else {
+            continue;
+        };
         if !template.contains("esp_hal::gpio::Output::new") {
             return Err(format!(
                 "`<{}>` pin `{}` is not an output pin v2 can express\n   fix: keep it as a v1 manifest or migrate it by hand",
@@ -1409,7 +1411,10 @@ fn migrate_element(element: &Element) -> Result<String, String> {
         }
         out.push_str("        }\n");
     }
-    for arg in recipe.args.iter().filter(|arg| arg.map.is_some()) {
+    for arg in recipe.args.iter().filter_map(|arg| arg.slot()) {
+        let Some(map) = arg.map.as_ref() else {
+            continue;
+        };
         if pin_names.contains(&arg.name) {
             continue;
         }
@@ -1420,7 +1425,7 @@ fn migrate_element(element: &Element) -> Result<String, String> {
                 .ty
                 .as_deref()
                 .is_some_and(|ty| ty.contains(&format!("{{{}}}", arg.name)));
-        for (spelling, value) in arg.map.as_ref().unwrap() {
+        for (spelling, value) in map {
             out.push_str(&format!(
                 "            \"{}\" {{ {} \"{}\" }}\n",
                 escape(spelling),
@@ -1499,14 +1504,12 @@ fn migrate_element(element: &Element) -> Result<String, String> {
 
 fn constructor(recipe: &espforge_schema::DeviceRecipe, new: &str) -> String {
     let mut args = vec!["{bus_device}".to_string()];
-    if matches!(
-        recipe.address,
-        espforge_schema::AddressNeed::Any | espforge_schema::AddressNeed::Fixed(_)
-    ) {
-        args.push("{address}".into());
-    }
     for arg in &recipe.args {
-        args.push(format!("{{{}}}", arg.name));
+        args.push(match arg {
+            espforge_schema::CtorArg::Address => "{address}".to_string(),
+            espforge_schema::CtorArg::Slot(slot) => format!("{{{}}}", slot.name),
+            espforge_schema::CtorArg::Fixed { text, .. } => text.clone(),
+        });
     }
     format!("{new}({})", args.join(", "))
 }

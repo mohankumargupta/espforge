@@ -1,6 +1,6 @@
 # `driverfixes.md`: Closing the Gaps That Keep Drivers Out of Pure KDL
 
-**Baseline:** `espforge` workspace `0.8.0`, branch `dev`, with `drivers.md`
+**Baseline:** `espforge` workspace `0.9.0`, branch `dev`, with `drivers.md`
 Milestones 1–3 landed and `sht31` shipped as the first manifest-only driver
 (`espforge-drivers/manifests/sht31.kdl`, no module and no Cargo feature in
 `espforge-drivers`).

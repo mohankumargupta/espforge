@@ -7,6 +7,13 @@
 //!
 //! Line buffering uses esp-hal's `read_buffered` plus a `\n` scan; the buffer
 //! is caller-provided.
+//!
+//! The standard stream traits are implemented on the device itself:
+//! `embedded_io::Read + Write` for the blocking port and, under `embassy`,
+//! `embedded_io_async::Read + Write` for the async one. A crates.io driver
+//! generic over those traits therefore accepts the port directly, which is what
+//! lets a UART part be a manifest-only driver. The inherent `read`/`write_all`
+//! stay: same names, and they shadow the trait methods for direct calls.
 
 // Only the blocking port parks its hardware in a `RefCell`; the async one uses
 // an embassy mutex.
@@ -64,6 +71,33 @@ pub enum UartError {
     Config(esp_hal::uart::ConfigError),
     Write(esp_hal::uart::TxError),
     Read(esp_hal::uart::RxError),
+}
+
+// `embedded_io 0.7`'s `Error` is a stronger trait than the 0.6 one: it
+// requires `core::error::Error`, which is `Debug + Display`. The stream traits
+// carry `UartError` because the esp-hal error types are foreign (the orphan
+// rule forbids implementing `embedded_io`'s error traits for them here).
+impl core::fmt::Display for UartError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            UartError::Config(error) => write!(f, "uart configuration failed: {error:?}"),
+            UartError::Write(error) => write!(f, "uart write failed: {error:?}"),
+            UartError::Read(error) => write!(f, "uart read failed: {error:?}"),
+        }
+    }
+}
+
+impl core::error::Error for UartError {}
+
+impl embedded_io::Error for UartError {
+    fn kind(&self) -> embedded_io::ErrorKind {
+        match self {
+            // Construction happened in `build`, so a reader only sees this if
+            // the device was reused across a reconfiguration.
+            UartError::Config(_) => embedded_io::ErrorKind::InvalidInput,
+            UartError::Write(_) | UartError::Read(_) => embedded_io::ErrorKind::Other,
+        }
+    }
 }
 
 #[cfg(not(feature = "embassy"))]
@@ -154,6 +188,46 @@ impl UartDevice<Blocking> {
 }
 
 // ---------------------------------------------------------------------------
+// Blocking standard stream traits
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "embassy"))]
+impl embedded_io::ErrorType for UartDevice<Blocking> {
+    type Error = UartError;
+}
+
+#[cfg(not(feature = "embassy"))]
+impl embedded_io::Read for UartDevice<Blocking> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        // `embedded-io` reserves `Ok(0)` for "no progress"; a UART has no EOF,
+        // so an idle port waits for the first byte instead of reporting one.
+        // The inherent `read` is the one called here: the trait method is the
+        // same name on this type.
+        loop {
+            let n = self.inner.borrow_mut().read(buf).map_err(UartError::Read)?;
+            if n > 0 {
+                return Ok(n);
+            }
+            esp_hal::delay::Delay::new().delay_millis(1);
+        }
+    }
+}
+
+#[cfg(not(feature = "embassy"))]
+impl embedded_io::Write for UartDevice<Blocking> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.inner.borrow_mut().write(buf).map_err(UartError::Write)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.inner.borrow_mut().flush().map_err(UartError::Write)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Async build + API (only under `embassy`)
 // ---------------------------------------------------------------------------
 
@@ -231,5 +305,56 @@ impl UartDevice<Async> {
     ) -> Result<R, UartError> {
         let n = self.read_line(buf).await?;
         Ok(f(&buf[..n]))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Async standard stream traits
+// ---------------------------------------------------------------------------
+
+// These delegate to esp-hal's `*_async` methods rather than to the synchronous
+// ones the inherent API uses: `read_async` waits for data instead of returning
+// `0`, so a reader yields to the executor rather than busy-polling a timer.
+// The guard is held across one await; the port has a single owner, so that is
+// what serialises access to it.
+
+#[cfg(feature = "embassy")]
+impl embedded_io::ErrorType for UartDevice<Async> {
+    type Error = UartError;
+}
+
+#[cfg(feature = "embassy")]
+impl embedded_io_async::Read for UartDevice<Async> {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        self.inner
+            .lock()
+            .await
+            .read_async(buf)
+            .await
+            .map_err(UartError::Read)
+    }
+}
+
+#[cfg(feature = "embassy")]
+impl embedded_io_async::Write for UartDevice<Async> {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.inner
+            .lock()
+            .await
+            .write_async(buf)
+            .await
+            .map_err(UartError::Write)
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.inner
+            .lock()
+            .await
+            .flush_async()
+            .await
+            .map_err(UartError::Write)
     }
 }

@@ -202,8 +202,22 @@ pub struct Dependency {
     pub path: Option<String>,
     pub git: Option<String>,
     pub rev: Option<String>,
+    /// The features the blocking mode asks for.
     pub features: Vec<String>,
+    /// The features the async mode asks for. For a crate whose two APIs are
+    /// one `Cargo` feature each, this is the async half.
+    pub async_features: Vec<String>,
+    /// `default_features` in the async mode, when it differs from the blocking
+    /// one. `stts22h-rs` and `bmi323-driver` default to async, so their
+    /// blocking mode is the one that turns defaults off.
+    pub async_default_features: Option<bool>,
     pub default_features: bool,
+    /// True when the crate's blocking and async features must not both be on.
+    ///
+    /// Cargo features are additive, so one project can only use one mode: two
+    /// devices in different modes are refused as `E0911` instead of compiling
+    /// the crate with both halves enabled.
+    pub modes_are_exclusive: bool,
 }
 
 impl Dependency {
@@ -227,7 +241,10 @@ impl Dependency {
             git: package.git.clone(),
             rev: package.rev.clone(),
             features: package.features.clone(),
+            async_features: Vec::new(),
+            async_default_features: None,
             default_features: true,
+            modes_are_exclusive: false,
         }
     }
 
@@ -240,7 +257,10 @@ impl Dependency {
             git: None,
             rev: None,
             features: Vec::new(),
+            async_features: Vec::new(),
+            async_default_features: None,
             default_features: true,
+            modes_are_exclusive: false,
         }
     }
 
@@ -281,7 +301,42 @@ impl Dependency {
                 self.features.push(feature.clone());
             }
         }
+        for feature in &other.async_features {
+            if !self.async_features.contains(feature) {
+                self.async_features.push(feature.clone());
+            }
+        }
+        self.modes_are_exclusive |= other.modes_are_exclusive;
+        self.async_default_features =
+            match (self.async_default_features, other.async_default_features) {
+                (Some(left), Some(right)) => Some(left && right),
+                (Some(left), None) => Some(left),
+                (None, right) => right,
+            };
         self.default_features &= other.default_features;
+    }
+
+    /// Resolve the features one board's mode asks this crate for.
+    ///
+    /// A blocking board keeps `features`; an async one adds `async_features`,
+    /// or, for an exclusive crate, replaces them: the crate's two APIs are one
+    /// switch each, and Cargo would enable both.
+    pub fn use_mode(&mut self, asynchronous: bool) {
+        if !asynchronous {
+            return;
+        }
+        if self.modes_are_exclusive {
+            self.features = self.async_features.clone();
+        } else {
+            for feature in &self.async_features {
+                if !self.features.contains(feature) {
+                    self.features.push(feature.clone());
+                }
+            }
+        }
+        if let Some(default_features) = self.async_default_features {
+            self.default_features = default_features;
+        }
     }
 }
 
@@ -392,7 +447,7 @@ impl Default for Runtimes {
 ///
 /// The type and constructor are a pair: half a block is a load error, and a
 /// block is only legal beside `runtime "async"`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AsyncMode {
     /// The field's Rust type on an async bus.
     pub ty: Option<String>,
@@ -403,6 +458,26 @@ pub struct AsyncMode {
     pub feature: Option<String>,
     /// The endpoint type the async constructor takes, for a deferred factory.
     pub endpoint: Option<String>,
+    /// Whether the async constructor is an `async fn` that must be awaited.
+    ///
+    /// `runtime "async" { awaits #false }` names a crate whose `new()` is a
+    /// plain `fn` even on the async path (most sensor crates); the deferred
+    /// factory then calls it without `.await`.
+    pub awaits: bool,
+}
+
+impl Default for AsyncMode {
+    fn default() -> Self {
+        Self {
+            ty: None,
+            new: None,
+            feature: None,
+            endpoint: None,
+            // A driver with no async block never calls an async constructor,
+            // so `true` is the value that changes nothing.
+            awaits: true,
+        }
+    }
 }
 
 /// Which level asserts an SPI device's chip select. A recipe fact, like the
@@ -433,11 +508,21 @@ pub struct DeviceRecipe {
     /// The Rust path of the constructor, called with the bus and every `arg`
     /// in declared order.
     pub new: String,
+    /// Whether the constructor returns a `Result`.
+    ///
+    /// `codegen { fallible #false }` names a crate whose `new()` returns the
+    /// device directly, so the generated call maps no error. A v1 recipe is
+    /// always fallible.
+    pub fallible: bool,
     /// Crates the generated project must name because of this driver
     /// (`embedded-graphics`).
     pub deps: Vec<String>,
-    /// The value slots, in constructor argument order.
-    pub args: Vec<DeviceArg>,
+    /// The constructor's arguments after the bus, in the order the manifest
+    /// wrote them.
+    ///
+    /// One list holds the address, the slots and the fixed expressions, so
+    /// nothing downstream has to insert an argument at a remembered index.
+    pub args: Vec<CtorArg>,
     /// The bus modes the driver supports (`runtime "blocking"`).
     pub runtimes: Runtimes,
     /// The async half of the recipe (`runtime "async" { .. }`).
@@ -499,6 +584,47 @@ pub enum PartSource {
     From(String),
     /// `value="0x48"`: a literal the spec does not write.
     Value(String),
+}
+
+/// One positional argument of a driver's constructor, after the bus.
+///
+/// Position is the manifest's: boot, deferred and async emission all read this
+/// list and pass its entries in order, so no feature needs to know where the
+/// address or a fixed value sits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CtorArg {
+    /// `{address}`: the element's I2C address, passed as a number.
+    Address,
+    /// `{name}`: a slot filled by an attribute's spelling or a claimed pin.
+    Slot(DeviceArg),
+    /// A fixed Rust expression the manifest writes verbatim
+    /// (`ads111x::Ads111xConfig::default()`).
+    Fixed {
+        /// The expression, as Rust tokens.
+        text: String,
+        /// Span of the constructor that carries it.
+        span: Range<usize>,
+    },
+}
+
+impl CtorArg {
+    /// The slot this argument fills, for an argument that has one.
+    pub fn slot(&self) -> Option<&DeviceArg> {
+        match self {
+            CtorArg::Slot(arg) => Some(arg),
+            CtorArg::Address | CtorArg::Fixed { .. } => None,
+        }
+    }
+
+    /// What this argument contributes, for comparing two constructors: a slot
+    /// name or a fixed expression. The address is the bus's, not a choice.
+    pub(crate) fn shape(&self) -> Option<(Option<&str>, Option<&str>)> {
+        match self {
+            CtorArg::Address => None,
+            CtorArg::Slot(arg) => Some((Some(arg.name.as_str()), None)),
+            CtorArg::Fixed { text, .. } => Some((None, Some(text.as_str()))),
+        }
+    }
 }
 
 /// One `arg` of a [`DeviceRecipe`]: a slot the constructor takes, either a
@@ -1312,7 +1438,10 @@ fn parse_element(node: &KdlNode, schema: &mut Schema, errors: &mut Vec<SchemaErr
                     git: None,
                     rev: None,
                     features: Vec::new(),
+                    async_features: Vec::new(),
+                    async_default_features: None,
                     default_features: true,
+                    modes_are_exclusive: false,
                 });
             }
         }
@@ -1919,14 +2048,23 @@ fn parse_device_recipe(
         }
     }
 
+    // A v1 recipe wrote `needs_address`, not a `{address}` placeholder: the
+    // argument sat directly after the bus, which is where it goes here.
+    let mut ctor_args: Vec<CtorArg> = Vec::new();
+    if matches!(&address, AddressNeed::Any | AddressNeed::Fixed(_)) {
+        ctor_args.push(CtorArg::Address);
+    }
+    ctor_args.extend(args.into_iter().map(CtorArg::Slot));
+
     Some(DeviceRecipe {
         bus,
         feature,
         kind,
         ty,
         new,
+        fallible: true,
         deps,
-        args,
+        args: ctor_args,
         address,
         address_default: None,
         address_allowed: None,
@@ -2008,13 +2146,28 @@ fn parse_runtimes(node: &KdlNode, errors: &mut Vec<SchemaError>) -> (Runtimes, A
                     let Some((text, span)) = child_string(child, name, errors) else {
                         continue;
                     };
-                    if matches!(name, "new" | "endpoint") && !is_rust_path(&text) {
+                    if name == "new" && !is_rust_path(&text) {
                         errors.push(err(
                             span,
                             format!("`{name}` must be a Rust path"),
                             "segments are identifiers separated by `::`",
                         ));
                         continue;
+                    }
+                    // An `endpoint` is a type, so a generic one is legal; it
+                    // takes no `{placeholder}`.
+                    if name == "endpoint" {
+                        if let Some(placeholder) = driver::first_placeholder(&text) {
+                            errors.push(err(
+                                span,
+                                format!("`{name}` takes no `{{placeholder}}`"),
+                                format!(
+                                    "remove `{{{placeholder}}}`: an endpoint is a type, not a template"
+                                ),
+                            ));
+                            continue;
+                        }
+                        driver::validate_type_in(&text, name, span.clone(), errors);
                     }
                     if name == "feature" && text.is_empty() {
                         errors.push(err(span, "`feature` is empty", "name the async feature"));
@@ -2059,17 +2212,21 @@ fn parse_runtimes(node: &KdlNode, errors: &mut Vec<SchemaError>) -> (Runtimes, A
 }
 
 /// The first positional string of the optional child `name`, validated as a
-/// Rust path when present.
+/// Rust type when present.
+///
+/// Only `endpoint` uses this: it is the type the bus helper already returns, so
+/// a generic type is legal and there is nothing for a `{placeholder}` to fill.
 fn parse_path_child(node: &KdlNode, name: &str, errors: &mut Vec<SchemaError>) -> Option<String> {
     let (text, span) = child_string(node, name, errors)?;
-    if !is_rust_path(&text) {
+    if let Some(placeholder) = driver::first_placeholder(&text) {
         errors.push(err(
             span,
-            format!("`{name}` must be a Rust path"),
-            "segments are identifiers separated by `::`",
+            format!("`{name}` takes no `{{placeholder}}`"),
+            format!("remove `{{{placeholder}}}`: an endpoint is a type, not a template"),
         ));
         return None;
     }
+    driver::validate_type_in(&text, name, span, errors);
     Some(text)
 }
 

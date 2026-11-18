@@ -947,6 +947,7 @@ mod tests {
                 deps: Vec::new(),
                 ty: RustType::parse("test::Gps").expect("a driver type"),
                 new: RustPath::parse("test::Gps::new").expect("a constructor"),
+                fallible: true,
                 pins: Vec::new(),
                 args: Vec::new(),
                 factory_args: Vec::new(),
@@ -954,6 +955,7 @@ mod tests {
                 init: Init::Boot,
                 async_ty: None,
                 async_new: None,
+                async_awaits: true,
                 async_feature: None,
                 package: None,
                 expose: Vec::new(),
@@ -981,6 +983,89 @@ mod tests {
         assert!(
             !text.contains("pub uart1:"),
             "a bound port is not also a raw field: {text}"
+        );
+    }
+
+    /// An infallible constructor returns the device directly: `Devices::new`
+    /// must not map an error that does not exist, and a deferred factory still
+    /// returns a `Result` for the runtime to store.
+    #[test]
+    fn an_infallible_constructor_needs_no_error_mapping() {
+        use espforge_elements::model::{Bus, Init, RustPath, RustType};
+
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = empty_board(&case);
+        let owner = Owner::new(OwnerKind::I2c, Ident::new("i2c0", 0..0));
+        let sda = board
+            .resources
+            .claim(Pin(6), owner.clone(), 0..0, PinUse::Bidirectional)
+            .expect("sda is free");
+        let scl = board
+            .resources
+            .claim(Pin(7), owner, 0..0, PinUse::Bidirectional)
+            .expect("scl is free");
+        let bus = board.resources.add_bus(Bus::I2c {
+            id: Ident::new("i2c0", 0..0),
+            peripheral: "I2C0".into(),
+            sda,
+            scl,
+            khz: 400,
+        });
+        board.devices.push(Device::Bus(BusDevice {
+            id: Ident::new("air", 0..0),
+            tag: "sht4x".into(),
+            driver: Driver {
+                feature: String::new(),
+                deps: Vec::new(),
+                ty: RustType::parse("sht4x::Sht4x").expect("a sensor type"),
+                new: RustPath::parse("sht4x::Sht4x::new").expect("a constructor"),
+                fallible: false,
+                pins: Vec::new(),
+                // `sht4x::Sht4x::new` takes no address: the recipe keeps the
+                // fixed one in the element, so neither list carries it.
+                args: Vec::new(),
+                factory_args: Vec::new(),
+                runtimes: espforge_elements::RuntimeSet::BLOCKING,
+                init: Init::Boot,
+                async_ty: None,
+                async_new: None,
+                async_awaits: true,
+                async_feature: None,
+                package: None,
+                expose: Vec::new(),
+                dependencies: Vec::new(),
+                manifest: None,
+            },
+            transport: BusTransport::I2c(I2cTransport {
+                bus,
+                address: 0x44,
+                endpoint: Some(RustType::parse("test::Endpoint").expect("an endpoint")),
+                async_endpoint: None,
+            }),
+        }));
+
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        assert!(text.contains("sht4x::Sht4x::new("), "{text}");
+        assert!(
+            !text.contains(".map_err"),
+            "an infallible constructor maps no error: {text}"
+        );
+        assert!(
+            text.contains("pub air: sht4x::Sht4x,"),
+            "the device is assigned directly: {text}"
+        );
+
+        if let Device::Bus(device) = &mut board.devices[0] {
+            device.driver.init = Init::Deferred;
+        }
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        assert!(
+            text.contains("Ok(sht4x::Sht4x::new(self.endpoint"),
+            "the deferred factory still returns a Result: {text}"
+        );
+        assert!(
+            !text.contains(".map_err"),
+            "an infallible deferred factory maps no error: {text}"
         );
     }
 
@@ -1077,8 +1162,10 @@ mod tests {
                 .expect("a display type"),
                 new: RustPath::parse("espforge_drivers::Ssd1306Display::new")
                     .expect("a display constructor"),
+                fallible: true,
                 pins: Vec::new(),
                 args: vec![
+                    RustExpr::number(0x3C),
                     RustExpr::parse("espforge_drivers::Oled128x64").expect("a size"),
                     RustExpr::parse("espforge_drivers::DisplayRotation::Rotate0")
                         .expect("a rotation"),
@@ -1088,6 +1175,7 @@ mod tests {
                 init: espforge_elements::model::Init::Boot,
                 async_ty: None,
                 async_new: None,
+                async_awaits: true,
                 async_feature: None,
                 package: None,
                 expose: Vec::new(),
@@ -1179,6 +1267,7 @@ mod tests {
                 ty: RustType::parse("espforge_drivers::Ili9341Display").expect("a display type"),
                 new: RustPath::parse("espforge_drivers::Ili9341Display::new")
                     .expect("a display constructor"),
+                fallible: true,
                 pins: Vec::new(),
                 args: vec![
                     RustExpr::parse("espforge_drivers::Orientation::Landscape")
@@ -1189,6 +1278,7 @@ mod tests {
                 init: espforge_elements::model::Init::Boot,
                 async_ty: None,
                 async_new: None,
+                async_awaits: true,
                 async_feature: None,
                 package: None,
                 expose: Vec::new(),

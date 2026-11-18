@@ -38,6 +38,22 @@ pub const MANIFESTS: &[(&str, &str)] = &[
         "espforge-drivers/manifests/sht31.kdl",
         include_str!("../manifests/sht31.kdl"),
     ),
+    (
+        "espforge-drivers/manifests/sht4x.kdl",
+        include_str!("../manifests/sht4x.kdl"),
+    ),
+    (
+        "espforge-drivers/manifests/ads111x.kdl",
+        include_str!("../manifests/ads111x.kdl"),
+    ),
+    (
+        "espforge-drivers/manifests/bme680.kdl",
+        include_str!("../manifests/bme680.kdl"),
+    ),
+    (
+        "espforge-drivers/manifests/mhz19b.kdl",
+        include_str!("../manifests/mhz19b.kdl"),
+    ),
 ];
 
 /// The concatenation of [`MANIFESTS`], for callers that take one schema text.
@@ -55,13 +71,32 @@ pub const DRIVERS_SCHEMA_KDL: &str = concat!(
     "\n",
     include_str!("../manifests/sht31.kdl"),
     "\n",
+    include_str!("../manifests/sht4x.kdl"),
+    "\n",
+    include_str!("../manifests/ads111x.kdl"),
+    "\n",
+    include_str!("../manifests/bme680.kdl"),
+    "\n",
+    include_str!("../manifests/mhz19b.kdl"),
+    "\n",
 );
 
 /// Every bundled tag, in manifest order.
 ///
-/// `sht31` is manifest only: it names `embedded-sht3x` directly, so it has no
-/// feature and no module below.
-pub const TAGS: &[&str] = &["ssd1306", "ili9341", "scd4x", "adxl345", "sht31"];
+/// `sht31`, `sht4x`, `ads111x`, `bme680` and `mhz19b` are manifest only: they
+/// name `embedded-sht3x`, `sht4x`, `embedded-ads111x`, `bosch-bme680` and
+/// `edrv-mhz19` directly, so they have no feature and no module below.
+pub const TAGS: &[&str] = &[
+    "ssd1306",
+    "ili9341",
+    "scd4x",
+    "adxl345",
+    "sht31",
+    "sht4x",
+    "ads111x",
+    "bme680",
+    "mhz19b",
+];
 
 #[cfg(all(
     any(target_arch = "riscv32", target_arch = "xtensa"),

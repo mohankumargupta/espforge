@@ -300,6 +300,137 @@ const CASES: &[Case] = &[
              # services\n",
         ),
     },
+    // The same manifest-only driver, deferred: the factory struct and its
+    // `DeferredInit` impl are the only place the endpoint is named, so this is
+    // what proves a manifest can spell a real (generic) bus endpoint.
+    Case {
+        example: "01.Basics/helloworld",
+        chip: "esp32c3",
+        runtime: Runtime::Blocking,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"manifest_driver_deferred\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <sht31 id=\"air\" bus=\"$i2c0\" address=\"0x44\" init=\"deferred\" />\n\
+             # services\n",
+        ),
+    },
+    // An infallible constructor: `fallible #false` makes emission skip the
+    // `.map_err(..)?`, and the fixed address is declared but never passed.
+    Case {
+        example: "01.Basics/helloworld",
+        chip: "esp32c3",
+        runtime: Runtime::Blocking,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"manifest_driver_infallible\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <sht4x id=\"air\" bus=\"$i2c0\" address=\"0x44\" />\n\
+             # services\n",
+        ),
+    },
+    // Fixed constructor arguments: the crate's own config rides after the
+    // address, and the deferred factory passes the same constants after the
+    // endpoint.
+    Case {
+        example: "01.Basics/helloworld",
+        chip: "esp32c3",
+        runtime: Runtime::Blocking,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"manifest_driver_fixed_args\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <ads111x id=\"adc\" bus=\"$i2c0\" address=\"0x48\" init=\"deferred\" />\n\
+             # services\n",
+        ),
+    },
+    // A reference to a temporary and a bare integer are fixed arguments too:
+    // `&Configuration::default()` and `20` keep their positions in the call.
+    Case {
+        example: "01.Basics/helloworld",
+        chip: "esp32c3",
+        runtime: Runtime::Blocking,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"manifest_driver_fixed_ref\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <bme680 id=\"air\" bus=\"$i2c0\" address=\"0x76\" />\n\
+             # services\n",
+        ),
+    },
+    // The first manifest-only driver on a UART bus: `UartDevice` implements
+    // `embedded_io::Read + Write`, so the crate's `MHZ19::new` takes the port
+    // directly and its infallible constructor skips the error mapping.
+    Case {
+        example: "01.Basics/helloworld",
+        chip: "esp32c3",
+        runtime: Runtime::Blocking,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"mhz19b_boot\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <uart id=\"uart1\" uart=\"UART1\" tx=\"6\" rx=\"5\" baud_rate=\"9600\" />\n\
+             # devices\n\
+             \x20 <mhz19b id=\"co2\" bus=\"$uart1\" />\n\
+             # services\n",
+        ),
+    },
+    // Deferred: the factory struct's `endpoint` is the generic `UartDevice`
+    // type the bus helper returns, so a manifest can spell a real UART handle.
+    Case {
+        example: "01.Basics/helloworld",
+        chip: "esp32c3",
+        runtime: Runtime::Blocking,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"mhz19b_deferred\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <uart id=\"uart1\" uart=\"UART1\" tx=\"6\" rx=\"5\" baud_rate=\"9600\" />\n\
+             # devices\n\
+             \x20 <mhz19b id=\"co2\" bus=\"$uart1\" init=\"deferred\" />\n\
+             # services\n",
+        ),
+    },
+    // Async: the port satisfies `embedded_io_async::Read + Write`, so the
+    // driver's `read_co2` and the device's `AsyncMutex` compile on a spawned
+    // task. The LED stays because `blink_async`'s app drives it.
+    Case {
+        example: "01.Basics/blink_async",
+        chip: "esp32c3",
+        runtime: Runtime::Embassy,
+        inline: Some(
+            "# espforge\n\
+             \x20 <project name=\"mhz19b_async\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"embassy\" />\n\
+             # peripherals\n\
+             \x20 <uart id=\"uart1\" uart=\"UART1\" tx=\"6\" rx=\"5\" baud_rate=\"9600\" />\n\
+             # devices\n\
+             \x20 <led id=\"red_led\" pin=\"18\" />\n\
+             \x20 <mhz19b id=\"co2\" bus=\"$uart1\" />\n\
+             # services\n",
+        ),
+    },
 ];
 
 #[test]

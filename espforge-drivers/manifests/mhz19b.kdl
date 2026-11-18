@@ -1,0 +1,34 @@
+driver "mhz19b" {
+    format_version 2
+    summary "Winsen MH-Z19 / MH-Z19B NDIR CO2 sensor"
+    description "Reads the CO2 concentration over a 9600 8N1 UART. Manifest only: the type and constructor come from the `edrv-mhz19` crate, so `espforge-drivers` has no module and no feature for it. The driver carries no timeouts and no resynchronisation: a mis-wired sensor blocks its read, and a torn frame needs the port reset before the next attempt."
+    category "sensor"
+
+    dependency "edrv-mhz19" { version "0.1.1" }
+
+    bus "uart"
+
+    codegen {
+        fallible #false
+        runtime "blocking" {
+            type "edrv_mhz19::blocking::MHZ19<espforge_runtime::UartDevice<esp_hal::Blocking>>"
+            constructor "edrv_mhz19::blocking::MHZ19::new({bus_device})"
+            endpoint "espforge_runtime::UartDevice<esp_hal::Blocking>"
+        }
+        runtime "async" {
+            type "edrv_mhz19::MHZ19<espforge_runtime::UartDevice<esp_hal::Async>>"
+            constructor "edrv_mhz19::MHZ19::new({bus_device})"
+            endpoint "espforge_runtime::UartDevice<esp_hal::Async>"
+            awaits #false
+        }
+    }
+
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "`boot` builds the sensor during `Devices::new`; `deferred` stores the port and constructs it in `init()`."
+    }
+
+    example "minimal" #"<mhz19b id="co2" bus="$uart1" />"#
+    example "deferred" #"<mhz19b id="co2" bus="$uart1" init="deferred" />"#
+    see_also "peripherals/uart"
+}

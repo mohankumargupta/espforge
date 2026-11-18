@@ -84,6 +84,8 @@ struct RuntimeDecl {
     constructor: Option<(String, Range<usize>)>,
     endpoint: Option<String>,
     feature: Option<String>,
+    /// `awaits #false`: the constructor is a plain `fn` on the async path.
+    awaits: Option<bool>,
     span: Range<usize>,
 }
 
@@ -94,6 +96,9 @@ struct Codegen {
     blocking: Option<RuntimeDecl>,
     asynchronous: Option<RuntimeDecl>,
     maps: Vec<MapDecl>,
+    /// Whether the constructor returns `Result` (`fallible #false` names a
+    /// crate whose `new()` returns the device directly).
+    fallible: bool,
     span: Range<usize>,
 }
 
@@ -528,13 +533,22 @@ fn parse_dependency(
     let path = child_string(node, "path", errors).map(|(value, _)| value);
     let git = child_string(node, "git", errors).map(|(value, _)| value);
     let rev = child_string(node, "rev", errors).map(|(value, _)| value);
-    let default_features = prop_flag(node, "default_features", true);
+    let default_features = child_flag(node, "default_features", true);
+    let async_default_features = child_flag_option(node, "async_default_features");
+    let modes_are_exclusive = child_flag(node, "modes_are_exclusive", false);
     let mut features = Vec::new();
+    let mut async_features = Vec::new();
 
     for child in children(node) {
         match child.name().value() {
-            "version" | "path" | "git" | "rev" | "default_features" => {}
+            "version" | "path" | "git" | "rev" | "default_features"
+            | "async_default_features" | "modes_are_exclusive" => {}
             "features" => features.extend(
+                positional_strings(child, errors)
+                    .into_iter()
+                    .map(|(feature, _)| feature),
+            ),
+            "async_features" => async_features.extend(
                 positional_strings(child, errors)
                     .into_iter()
                     .map(|(feature, _)| feature),
@@ -542,7 +556,8 @@ fn parse_dependency(
             other => errors.push(err(
                 node_range(child),
                 format!("unknown node `{other}` in `dependency` `{package}`"),
-                "expected version, path, git, rev, features or default_features",
+                "expected version, path, git, rev, features, async_features, default_features, \
+                 async_default_features or modes_are_exclusive",
             )),
         }
     }
@@ -581,17 +596,32 @@ fn parse_dependency(
         git,
         rev,
         features,
+        async_features,
+        async_default_features,
         default_features,
+        modes_are_exclusive,
     })
 }
 
-fn prop_flag(node: &KdlNode, key: &str, default: bool) -> bool {
-    node.entries()
-        .iter()
-        .filter(|entry| entry.name().is_some_and(|name| name.value() == key))
-        .map(|entry| entry.value().as_bool() != Some(false))
-        .next()
-        .unwrap_or(default)
+/// The positional boolean of a child node (`fallible #false`), or `default`
+/// when the node is absent.
+fn child_flag(node: &KdlNode, key: &str, default: bool) -> bool {
+    child_flag_option(node, key).unwrap_or(default)
+}
+
+/// [`child_flag`] for a flag whose absence is meaningful: `None` keeps the
+/// blocking mode's value instead of forcing one.
+fn child_flag_option(node: &KdlNode, key: &str) -> Option<bool> {
+    for child in children(node) {
+        if child.name().value() == key {
+            return child
+                .entries()
+                .iter()
+                .find(|entry| entry.name().is_none())
+                .map(|entry| entry.value().as_bool() != Some(false));
+        }
+    }
+    None
 }
 
 fn parse_bus(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<BusDecl> {
@@ -989,6 +1019,7 @@ fn parse_codegen(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<Codege
     let span = node_range(node);
     let mut codegen = Codegen {
         span: span.clone(),
+        fallible: true,
         ..Codegen::default()
     };
     for child in children(node) {
@@ -1049,6 +1080,16 @@ fn parse_codegen(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<Codege
                     )),
                 }
             }
+            // `fallible #false`: the constructor returns the device, not a
+            // `Result`, so the generated call maps no error.
+            "fallible" => {
+                codegen.fallible = child
+                    .entries()
+                    .iter()
+                    .find(|entry| entry.name().is_none())
+                    .map(|entry| entry.value().as_bool() != Some(false))
+                    .unwrap_or(true);
+            }
             "map" => {
                 if let Some(map) = parse_map(child, errors) {
                     if codegen.maps.iter().any(|known| known.name == map.name) {
@@ -1065,7 +1106,7 @@ fn parse_codegen(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<Codege
             other => errors.push(err(
                 node_range(child),
                 format!("unknown node `{other}` in `codegen`"),
-                "expected feature, runtime or map",
+                "expected feature, fallible, runtime or map",
             )),
         }
     }
@@ -1077,7 +1118,6 @@ fn parse_runtime(
     asynchronous: bool,
     errors: &mut Vec<SchemaError>,
 ) -> Option<RuntimeDecl> {
-    let _ = asynchronous;
     let span = node_range(node);
     let mut runtime = RuntimeDecl {
         span: span.clone(),
@@ -1105,14 +1145,23 @@ fn parse_runtime(
             }
             "endpoint" => {
                 if let Some((value, at)) = positional_strings(child, errors).into_iter().next() {
-                    if !is_rust_path(&value) {
-                        errors.push(err(
+                    // The endpoint is the type the generated bus helper already
+                    // returns, not a template: a generic type is the normal
+                    // shape, and there is nothing for a `{placeholder}` to
+                    // fill.
+                    match first_placeholder(&value) {
+                        Some(placeholder) => errors.push(err(
                             at,
-                            "`endpoint` must be a Rust path",
-                            "segments are identifiers separated by `::`",
-                        ));
-                    } else {
-                        runtime.endpoint = Some(value);
+                            "`endpoint` takes no `{placeholder}`",
+                            format!(
+                                "remove `{{{placeholder}}}`: an endpoint is a type, not a template"
+                            ),
+                        )),
+                        None => {
+                            validate_placeholders(&value, &[], at.clone(), "endpoint", errors);
+                            validate_type_in(&value, "endpoint", at, errors);
+                            runtime.endpoint = Some(value);
+                        }
                     }
                 }
             }
@@ -1125,10 +1174,30 @@ fn parse_runtime(
                     }
                 }
             }
+            // `awaits #false`: the async constructor is a plain `fn`, not an
+            // `async fn`. Absent means awaited, which is every bundled driver.
+            "awaits" => {
+                if !asynchronous {
+                    errors.push(err(
+                        node_range(child),
+                        "`awaits` belongs to the async runtime",
+                        "a blocking constructor is a plain `fn`",
+                    ));
+                } else {
+                    runtime.awaits = Some(
+                        child
+                            .entries()
+                            .iter()
+                            .find(|entry| entry.name().is_none())
+                            .map(|entry| entry.value().as_bool() != Some(false))
+                            .unwrap_or(true),
+                    );
+                }
+            }
             other => errors.push(err(
                 node_range(child),
                 format!("unknown node `{other}` in `runtime`"),
-                "expected type, constructor, endpoint or feature",
+                "expected type, constructor, endpoint, feature or awaits",
             )),
         }
     }
@@ -1245,6 +1314,16 @@ fn build_recipe(
             "write `codegen { feature \"..\" }` or a `dependency` block",
         ));
     }
+    // A bundled driver returns `DeviceErrorKind` and the `espforge-drivers`
+    // API is shaped around that; only a crate the manifest names can return
+    // the device directly.
+    if !codegen.fallible && codegen.feature.is_some() {
+        errors.push(err(
+            codegen.span.clone(),
+            "`fallible #false` needs a crate that returns the device directly",
+            "drop `feature \"..\"` or the flag",
+        ));
+    }
 
     let maps: BTreeMap<&str, &MapDecl> = codegen
         .maps
@@ -1321,32 +1400,61 @@ fn build_recipe(
         },
         errors,
     )?;
-    let mut ctor_args = ctor_args;
-    let address_seen = ctor_args.first().is_some_and(|(name, _)| name == "address");
-    if matches!(bus.address, AddressNeed::Any | AddressNeed::Fixed(_)) {
-        if address_seen {
-            ctor_args.remove(0);
-        } else {
+    // The address keeps the place the manifest gave it: directly after the
+    // bus, which is what both the crate's `new` and a deferred factory expect.
+    let address_at = ctor_args
+        .iter()
+        .position(|spec| spec.name() == Some("address"));
+    if let Some(index) = address_at {
+        if index != 0 {
             errors.push(err(
-                ctor_span.clone(),
-                format!("`{tag}` declares an address but its constructor does not take it"),
-                "put `{address}` directly after the bus argument",
+                ctor_args[index].span().clone(),
+                "`{address}` must come directly after the bus argument",
+                "move it in front of every other argument",
             ));
         }
-    } else if address_seen {
-        errors.push(err(
+    }
+    match (bus.address, address_at.is_some()) {
+        // A part the project addresses must hand that address to its
+        // constructor.
+        (AddressNeed::Any, false) => errors.push(err(
+            ctor_span.clone(),
+            format!("`{tag}` declares an address but its constructor does not take it"),
+            "put `{address}` directly after the bus argument",
+        )),
+        // A part at one `fixed` address may hard-code it in the crate, so the
+        // manifest may leave `{address}` out; the element still declares the
+        // address, so lowering routes and checks it.
+        (AddressNeed::Fixed(_), _) => {}
+        (AddressNeed::None, true) => errors.push(err(
             ctor_span.clone(),
             format!("`{tag}` has no I2C address but its constructor takes `{{address}}`"),
             "add an `address` to `bus \"i2c\"` or drop the argument",
-        ));
+        )),
+        _ => {}
     }
 
-    let mut args: Vec<DeviceArg> = Vec::new();
+    let mut args: Vec<crate::CtorArg> = Vec::new();
     let mut used_pins: Vec<&str> = Vec::new();
-    for (name, at) in ctor_args {
+    for spec in ctor_args {
+        let (name, at) = match spec {
+            // The address is a constructor argument like any other, and level
+            // lowering fills it from the element.
+            CtorSpec::Placeholder { name, .. } if name == "address" => {
+                args.push(crate::CtorArg::Address);
+                continue;
+            }
+            // A fixed expression keeps the text the manifest wrote; no slot
+            // resolves it and no attribute can change it.
+            CtorSpec::Fixed { text, span } => {
+                args.push(crate::CtorArg::Fixed { text, span });
+                continue;
+            }
+            CtorSpec::Placeholder { name, span } => (name, span),
+        };
         if let Some(pin) = pins.iter().find(|pin| pin.name == name) {
             used_pins.push(&pin.name);
-            args.push(DeviceArg {
+            args.push(crate::CtorArg::Slot(DeviceArg {
                 name: pin.name.clone(),
                 map: None,
                 pin: Some(pin_template(pin.direction, pin.level, pin.pull)),
@@ -1354,13 +1462,10 @@ fn build_recipe(
                 level: Some(pin.level.word()),
                 pull: Some(pin.pull.word()),
                 span: at,
-            });
+            }));
             continue;
         }
-        if matches!(
-            name.as_str(),
-            "bus_device" | "spi_device" | "cs_pin" | "address"
-        ) {
+        if matches!(name.as_str(), "bus_device" | "spi_device" | "cs_pin") {
             continue;
         }
         let Some(map) = maps.get(name.as_str()) else {
@@ -1381,7 +1486,7 @@ fn build_recipe(
                 (spelling.clone(), text)
             })
             .collect();
-        args.push(DeviceArg {
+        args.push(crate::CtorArg::Slot(DeviceArg {
             name: map.name.clone(),
             map: Some(entries),
             pin: None,
@@ -1389,7 +1494,7 @@ fn build_recipe(
             level: None,
             pull: None,
             span: at,
-        });
+        }));
     }
     for pin in pins {
         if used_pins.contains(&pin.name.as_str()) || part_uses_pin(parts, &pin.name) {
@@ -1424,18 +1529,22 @@ fn build_recipe(
                         errors,
                     )
                 })?;
-            let async_args: Vec<&str> = async_args
+            // Two constructors of one driver must take the same things in the
+            // same order, constants included: a dual-mode driver whose halves
+            // ask for different values is a manifest bug.
+            let async_args: Vec<ArgShape<'_>> = async_args
                 .iter()
-                .map(|(name, _)| name.as_str())
-                .filter(|name| *name != "address")
+                .filter_map(CtorSpec::shape)
                 .collect();
-            let blocking_names: Vec<&str> = args.iter().map(|arg| arg.name.as_str()).collect();
-            let async_names: Vec<&str> = async_args;
-            if blocking_names != async_names {
+            let blocking_args: Vec<ArgShape<'_>> = args
+                .iter()
+                .filter_map(crate::CtorArg::shape)
+                .collect();
+            if blocking_args != async_args {
                 errors.push(err(
                     runtime.span.clone(),
                     format!("the async constructor of `{tag}` takes different arguments"),
-                    "the blocking and async constructors must take the same bus, pins and slots",
+                    "both constructors must take the same bus, pins, slots and fixed values",
                 ));
             }
             (
@@ -1448,6 +1557,7 @@ fn build_recipe(
                     new: Some(async_new),
                     feature: runtime.feature.clone(),
                     endpoint: runtime.endpoint.clone(),
+                    awaits: runtime.awaits.unwrap_or(true),
                 },
             )
         }
@@ -1467,6 +1577,7 @@ fn build_recipe(
                     new: Some(new.clone()),
                     feature: runtime.feature.clone(),
                     endpoint: endpoint.clone(),
+                    awaits: runtime.awaits.unwrap_or(true),
                 },
             )
         }
@@ -1479,6 +1590,7 @@ fn build_recipe(
         kind: "device".into(),
         ty,
         new,
+        fallible: codegen.fallible,
         deps: dependencies
             .iter()
             .map(|dependency| dependency.package.clone())
@@ -1506,7 +1618,47 @@ fn build_recipe(
     })
 }
 
-type ConstructorArgs = (String, Vec<(String, Range<usize>)>);
+type ConstructorArgs = (String, Vec<CtorSpec>);
+
+/// One constructor argument after the bus, before it becomes a
+/// [`crate::CtorArg`].
+///
+/// The split happens here and not downstream because only the manifest knows
+/// whether an argument is a hole the element fills or a value it fixed.
+enum CtorSpec {
+    /// A `{name}` hole, with the name it resolved to.
+    Placeholder { name: String, span: Range<usize> },
+    /// A fixed Rust expression the manifest wrote.
+    Fixed { text: String, span: Range<usize> },
+}
+
+impl CtorSpec {
+    fn name(&self) -> Option<&str> {
+        match self {
+            CtorSpec::Placeholder { name, .. } => Some(name),
+            CtorSpec::Fixed { .. } => None,
+        }
+    }
+
+    fn span(&self) -> &Range<usize> {
+        match self {
+            CtorSpec::Placeholder { span, .. } | CtorSpec::Fixed { span, .. } => span,
+        }
+    }
+
+    /// What this argument contributes, for comparing the blocking and async
+    /// constructors: a slot name or a fixed expression.
+    fn shape(&self) -> Option<ArgShape<'_>> {
+        match self {
+            CtorSpec::Placeholder { name, .. } if name == "address" => None,
+            CtorSpec::Placeholder { name, .. } => Some((Some(name.as_str()), None)),
+            CtorSpec::Fixed { text, .. } => Some((None, Some(text.as_str()))),
+        }
+    }
+}
+
+/// A constructor argument reduced to what two constructors must agree on.
+type ArgShape<'a> = (Option<&'a str>, Option<&'a str>);
 
 struct ConstructorCtx<'a> {
     tag: &'a str,
@@ -1577,28 +1729,36 @@ fn parse_constructor(
         return None;
     };
 
-    let mut args: Vec<(String, Range<usize>)> = Vec::new();
+    let mut args: Vec<CtorSpec> = Vec::new();
     for argument in &call.args {
-        let Expr::Path(argument) = argument else {
-            errors.push(err(
-                span.clone(),
-                "a constructor argument must be a `{placeholder}`",
-                "write `{bus_device}`, `{address}`, a `pin` name or a mapped `attr` name",
-            ));
-            continue;
+        // A bare sentinel identifier is a hole the element fills; any other
+        // expression is a value the manifest already knows.
+        let placeholder = match argument {
+            Expr::Path(path) => placeholder_of(&path.path),
+            _ => None,
         };
-        let Some(placeholder) = placeholder_of(&argument.path) else {
-            errors.push(err(
-                span.clone(),
-                "a constructor argument is not a placeholder",
-                "write `{bus_device}`, `{address}`, a `pin` name or a mapped `attr` name",
-            ));
+        let Some(placeholder) = placeholder else {
+            // The text is the substituted one, so a leftover sentinel means the
+            // manifest wrote a hole inside a compound expression.
+            let text = quote::quote!(#argument).to_string();
+            if text.contains("__espforge_") {
+                errors.push(err(
+                    span.clone(),
+                    "a fixed constructor argument takes no `{placeholder}`",
+                    "write the value there, or make the whole argument a slot",
+                ));
+                continue;
+            }
+            args.push(CtorSpec::Fixed {
+                text,
+                span: span.clone(),
+            });
             continue;
         };
         let resolved = resolve_pin(ctx.pins, &placeholder)
             .map(str::to_string)
             .unwrap_or_else(|| placeholder.clone());
-        if args.iter().any(|(known, _)| *known == resolved) {
+        if args.iter().any(|known| known.name() == Some(resolved.as_str())) {
             errors.push(err(
                 span.clone(),
                 format!("`{{{placeholder}}}` appears twice in the constructor"),
@@ -1645,9 +1805,12 @@ fn parse_constructor(
                 format!("add `map \"{placeholder}\" {{ .. }}`"),
             ));
         }
-        args.push((resolved, span.clone()));
+        args.push(CtorSpec::Placeholder {
+            name: resolved,
+            span: span.clone(),
+        });
     }
-    let first = args.first().map(|(name, _)| name.as_str());
+    let first = args.first().and_then(CtorSpec::name);
     if !matches!(first, Some("bus_device" | "spi_device")) {
         errors.push(err(
             span,
@@ -1737,12 +1900,52 @@ fn substitute(text: &str) -> Result<String, (String, String)> {
 }
 
 fn validate_type(text: &str, span: Range<usize>, errors: &mut Vec<SchemaError>) {
+    validate_type_in(text, "type", span, errors);
+}
+
+/// [`validate_type`] for a template that is not `type`: a v2 `endpoint` is the
+/// same kind of text, but the diagnostic names the block it came from.
+pub(crate) fn validate_type_in(
+    text: &str,
+    block: &str,
+    span: Range<usize>,
+    errors: &mut Vec<SchemaError>,
+) {
     let Ok(substituted) = substitute(text) else {
         return;
     };
     if let Err(error) = syn::parse_str::<Type>(&substituted) {
-        errors.push(err(span, "`type` is not a Rust type", error.to_string()));
+        errors.push(err(
+            span,
+            format!("`{block}` is not a Rust type"),
+            error.to_string(),
+        ));
     }
+}
+
+/// The first `{name}` a template contains, if any. A `{`–`}` mismatch is left
+/// to [`validate_placeholders`], which reports it.
+pub(crate) fn first_placeholder(text: &str) -> Option<String> {
+    let mut rest = text;
+    let mut in_string = false;
+    while let Some(character) = rest.chars().next() {
+        rest = &rest[character.len_utf8()..];
+        if in_string {
+            if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' => {
+                let (name, _) = rest.split_once('}')?;
+                return Some(name.trim().to_string());
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn validate_expr(text: &str, span: Range<usize>, errors: &mut Vec<SchemaError>) {
@@ -1895,6 +2098,40 @@ driver "demo" {
         assert_eq!(address.default.as_deref(), Some("0x10"));
     }
 
+    /// A crate that puts its blocking and async APIs behind one feature each
+    /// says so in the dependency, not in the manifest's prose.
+    #[test]
+    fn a_dependency_declares_which_half_each_mode_needs() {
+        let text = DRIVER.replace(
+            "dependency \"embedded-graphics\" { version \"0.8.1\" }",
+            "dependency \"mode-crate\" {\n        version \"1.0.0\"\n        features \"blocking\"\n        \
+             async_features \"async\"\n        default_features #false\n        async_default_features \
+             #true\n        modes_are_exclusive #true\n    }",
+        );
+        let schema = load(&text).expect("the dependency loads");
+        let dependency = &schema.element("demo").expect("tag").dependencies[0];
+        assert_eq!(dependency.features, ["blocking"]);
+        assert_eq!(dependency.async_features, ["async"]);
+        assert_eq!(dependency.async_default_features, Some(true));
+        assert!(!dependency.default_features);
+        assert!(dependency.modes_are_exclusive);
+    }
+
+    /// An absent `async_default_features` keeps the blocking value; a crate
+    /// whose default features stay on in both modes says nothing extra.
+    #[test]
+    fn a_dependency_without_per_mode_defaults_inherits_them() {
+        let text = DRIVER.replace(
+            "dependency \"embedded-graphics\" { version \"0.8.1\" }",
+            "dependency \"mode-crate\" { version \"1.0.0\" }",
+        );
+        let schema = load(&text).expect("the dependency loads");
+        let dependency = &schema.element("demo").expect("tag").dependencies[0];
+        assert_eq!(dependency.async_default_features, None);
+        assert!(dependency.default_features);
+        assert!(!dependency.modes_are_exclusive);
+    }
+
     #[test]
     fn a_malformed_type_fails_at_load() {
         let bad = DRIVER.replace("type \"demo::Demo\"", "type \"demo::Demo<\"");
@@ -1905,6 +2142,219 @@ driver "demo" {
                 .any(|error| error.message.contains("not a Rust type")),
             "{errors:?}"
         );
+    }
+
+    /// The endpoint is the type the bus helper already returns, so a generic
+    /// type is the normal shape and must reach the recipe verbatim.
+    #[test]
+    fn an_endpoint_may_be_a_generic_type() {
+        let generic = DRIVER.replace(
+            "endpoint \"demo::Endpoint\"",
+            "endpoint \"CriticalSectionDevice<'static, I2c<'static, Blocking>>\"",
+        );
+        let schema = load(&generic).expect("a generic endpoint loads");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            recipe.endpoint.as_deref(),
+            Some("CriticalSectionDevice<'static, I2c<'static, Blocking>>")
+        );
+    }
+
+    #[test]
+    fn an_endpoint_that_is_not_a_type_is_refused() {
+        let bad = DRIVER.replace("endpoint \"demo::Endpoint\"", "endpoint \"0x44\"");
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "`endpoint` is not a Rust type"),
+            "{errors:?}"
+        );
+    }
+
+    /// An endpoint is a type, not a template: `{bus}` has nothing to fill it.
+    #[test]
+    fn an_endpoint_takes_no_placeholder() {
+        let bad = DRIVER.replace(
+            "endpoint \"demo::Endpoint\"",
+            "endpoint \"Endpoint<{bus}>\"",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "`endpoint` takes no `{placeholder}`"),
+            "{errors:?}"
+        );
+        assert!(
+            !errors
+                .iter()
+                .any(|error| error.message.contains("not a Rust type")),
+            "the placeholder is reported as such, not as a `syn` failure: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn an_infallible_constructor_is_not_mapped() {
+        let infallible = DRIVER.replace("        feature \"demo\"\n", "        fallible #false\n");
+        let schema = load(&infallible).expect("an infallible constructor loads");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert!(!recipe.fallible);
+        assert_eq!(recipe.feature, "");
+    }
+
+    /// Only a crate the manifest names can return the device directly: the
+    /// bundled API returns `DeviceErrorKind`.
+    #[test]
+    fn an_infallible_bundled_driver_is_refused() {
+        let bad = DRIVER.replace(
+            "        feature \"demo\"\n",
+            "        feature \"demo\"\n        fallible #false\n",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error.message
+                == "`fallible #false` needs a crate that returns the device directly"),
+            "{errors:?}"
+        );
+    }
+
+    /// A part at one `fixed` address may hard-code it in the crate: the
+    /// manifest leaves `{address}` out and emission passes none.
+    /// A constructor argument the manifest already knows is a fixed
+    /// expression: it is not a slot, and it keeps the place it was written in.
+    #[test]
+    fn a_fixed_argument_keeps_its_place() {
+        let fixed = DRIVER.replace(
+            "constructor \"demo::Demo::new({bus_device}, {address})\"",
+            "constructor \"demo::Demo::new({bus_device}, {address}, demo::Config::default(), 20)\"",
+        );
+        let schema = load(&fixed).expect("fixed arguments load");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert_eq!(recipe.args[0], crate::CtorArg::Address);
+        assert_eq!(recipe.args.len(), 3);
+        let text = |arg: &crate::CtorArg| match arg {
+            crate::CtorArg::Fixed { text, .. } => text.clone(),
+            other => panic!("a fixed argument, not {other:?}"),
+        };
+        assert!(text(&recipe.args[1]).contains("Config"));
+        assert_eq!(text(&recipe.args[2]), "20");
+    }
+
+    /// A fixed argument is an expression, not a template: a slot inside one
+    /// would reach emission as a sentinel.
+    #[test]
+    fn a_fixed_argument_takes_no_placeholder() {
+        let bad = DRIVER.replace(
+            "constructor \"demo::Demo::new({bus_device}, {address})\"",
+            "constructor \"demo::Demo::new({bus_device}, {address}, demo::wrap({address}))\"",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "a fixed constructor argument takes no `{placeholder}`"),
+            "{errors:?}"
+        );
+    }
+
+    /// Two constructors of one driver take the same things: a dual-mode
+    /// manifest whose halves pass different constants is a bug.
+    #[test]
+    fn dual_mode_constructors_must_take_the_same_constants() {
+        let dual = DRIVER.replace(
+            "        runtime \"blocking\" {\n            type \"demo::Demo\"\n            constructor \"demo::Demo::new({bus_device}, {address})\"\n            endpoint \"demo::Endpoint\"\n        }\n",
+            "        runtime \"blocking\" {\n            type \"demo::Demo\"\n            constructor \"demo::Demo::new({bus_device}, {address}, 20)\"\n            endpoint \"demo::Endpoint\"\n        }\n        runtime \"async\" {\n            type \"demo::Demo\"\n            constructor \"demo::Demo::new({bus_device}, {address}, 40)\"\n            endpoint \"demo::Endpoint\"\n        }\n",
+        );
+        let errors = load(&dual).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error
+                .message
+                == "the async constructor of `demo` takes different arguments"),
+            "{errors:?}"
+        );
+    }
+
+    /// A fixed argument is still Rust: a malformed one is a load error, not a
+    /// `rustc` error in the generated project.
+    #[test]
+    fn a_fixed_argument_must_be_a_rust_expression() {
+        let bad = DRIVER.replace(
+            "constructor \"demo::Demo::new({bus_device}, {address})\"",
+            "constructor \"demo::Demo::new({bus_device}, {address}, 2 +)\"",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "the constructor is not a Rust expression"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_fixed_address_need_not_reach_the_constructor() {
+        let fixed = DRIVER
+            .replace(
+                "bus \"i2c\" { address default=\"0x10\" allowed=\"0x08..=0x77\" }",
+                "bus \"i2c\" { address fixed=\"0x10\" }",
+            )
+            .replace(
+                "constructor \"demo::Demo::new({bus_device}, {address})\"",
+                "constructor \"demo::Demo::new({bus_device})\"",
+            );
+        let schema = load(&fixed).expect("a fixed-address driver loads");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert!(!recipe.args.contains(&crate::CtorArg::Address));
+        assert_eq!(recipe.address, AddressNeed::Fixed(0x10));
+    }
+
+    /// A project-chosen address must still reach the constructor.
+    #[test]
+    fn an_any_address_must_reach_the_constructor() {
+        let bad = DRIVER.replace(
+            "constructor \"demo::Demo::new({bus_device}, {address})\"",
+            "constructor \"demo::Demo::new({bus_device})\"",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error
+                .message
+                == "`demo` declares an address but its constructor does not take it"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn fallible_defaults_to_true() {
+        let schema = load(DRIVER).expect("the driver loads");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert!(recipe.fallible);
     }
 
     #[test]
@@ -1982,6 +2432,7 @@ driver "pinned" {
         recipe
             .args
             .iter()
+            .filter_map(|arg| arg.slot())
             .find(|arg| arg.name == name)
             .unwrap_or_else(|| panic!("`{name}` is an argument"))
     }

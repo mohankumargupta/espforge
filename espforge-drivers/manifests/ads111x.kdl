@@ -1,0 +1,28 @@
+driver "ads111x" {
+    format_version 2
+    summary "Texas Instruments ADS1115 16-bit I2C ADC"
+    description "Reads single-ended or differential voltages over an I2C bus. Manifest only: the type, constructor and config come straight from the `embedded-ads111x` crate. The address is the element's, and the config is the crate's own default, passed as a fixed constructor argument."
+    category "sensor"
+
+    dependency "embedded-ads111x" { version "0.1.3" }
+
+    bus "i2c" {
+        address allowed="0x48..=0x4B"
+    }
+
+    codegen {
+        runtime "blocking" {
+            type "embedded_ads111x::ADS111x<espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>>"
+            constructor "embedded_ads111x::ADS111x::new({bus_device}, {address}, embedded_ads111x::ADS111xConfig::default())"
+            endpoint "espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>"
+        }
+    }
+
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "`boot` builds the ADC during `Devices::new`; `deferred` stores the bus and constructs it in `init()`."
+    }
+    example "minimal" #"<ads111x id="adc" bus="$i2c0" address="0x48" />"#
+    example "deferred" #"<ads111x id="adc" bus="$i2c0" address="0x48" init="deferred" />"#
+    see_also "peripherals/i2c"
+}

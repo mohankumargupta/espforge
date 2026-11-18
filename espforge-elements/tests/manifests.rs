@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use espforge_schema::{AddressNeed, AttrKind, DeviceRecipe, Element, Schema};
+use espforge_schema::{AddressNeed, AttrKind, CtorArg, DeviceRecipe, Element, Schema};
 
 fn load_v1() -> Schema {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -58,19 +58,22 @@ fn assert_recipe_eq(tag: &str, v1: &DeviceRecipe, v2: &DeviceRecipe) {
         v1.address_default, v2.address_default,
         "{tag}: address default"
     );
-    assert_eq!(
-        v1.args.iter().map(|arg| &arg.name).collect::<Vec<_>>(),
-        v2.args.iter().map(|arg| &arg.name).collect::<Vec<_>>(),
-        "{tag}: argument names"
-    );
+    assert_eq!(v1.args.len(), v2.args.len(), "{tag}: argument count");
     for (left, right) in v1.args.iter().zip(&v2.args) {
-        assert_eq!(left.map, right.map, "{tag}: map for `{}`", left.name);
-        assert_eq!(left.pin, right.pin, "{tag}: pin for `{}`", left.name);
-        assert_eq!(
-            left.direction, right.direction,
-            "{tag}: direction for `{}`",
-            left.name
-        );
+        match (left, right) {
+            (CtorArg::Address, CtorArg::Address) => {}
+            (CtorArg::Slot(left), CtorArg::Slot(right)) => {
+                assert_eq!(left.name, right.name, "{tag}: argument name");
+                assert_eq!(left.map, right.map, "{tag}: map for `{}`", left.name);
+                assert_eq!(left.pin, right.pin, "{tag}: pin for `{}`", left.name);
+                assert_eq!(
+                    left.direction, right.direction,
+                    "{tag}: direction for `{}`",
+                    left.name
+                );
+            }
+            _ => panic!("{tag}: argument kind changed: {left:?} vs {right:?}"),
+        }
     }
     assert!(
         v1.deps.iter().all(|dep| v2.deps.contains(dep)),
