@@ -10,13 +10,13 @@
 //! # Per-instance storage
 //!
 //! A singleton never hides its storage in a `static`: `I2cBus::build_in`,
-//! `SpiBus::build_in`/`build_write_only_in`, `Wifi::start_in` and
+//! `SpiBus::build_in`/`build_write_only_in`, `WifiStation::new` and
 //! `HttpClient::new_in` take a `&'static` storage value (`I2cBusStorage`,
 //! `SpiBusStorage`, `WifiStorage`, `HttpClientStorage`) that the generated code
 //! declares once per element. Two buses, two radios or two clients therefore
 //! cannot share a cell, and a cell can never be initialised twice because no
 //! element's storage is reused. The older constructors (`I2cBus::build`,
-//! `SpiBus::build`, `Wifi::start`, `HttpClient::new`) are gone: a project that
+//! `SpiBus::build`, `Wifi::start_in`, `HttpClient::new`) are gone: a project that
 //! pins an earlier runtime must be regenerated to get the `*_in` call sites.
 
 #![cfg_attr(not(test), no_std)]

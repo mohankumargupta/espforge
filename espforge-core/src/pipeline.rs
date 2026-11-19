@@ -4,6 +4,8 @@
 //! One function, so the commands cannot disagree. Nothing here prints: the
 //! binary decides how a failure looks.
 
+use std::path::Path;
+
 use espf::diag::junk_diagnostics;
 use espf::parser::{Parsed, parse_espf};
 use espforge_diagnostics::{Diagnostic, Diagnostics};
@@ -13,6 +15,8 @@ use espforge_elements::{
 };
 
 use crate::answers::Overrides;
+use crate::source::Source;
+use crate::substitutions;
 
 // ---------------------------------------------------------------- validation
 
@@ -91,6 +95,28 @@ pub fn validate_with<'a>(
     overrides: &Overrides,
     manifests: &[(String, String)],
 ) -> Result<Checked<'a>, Invalid> {
+    validate_with_dir(src, overrides, manifests, None)
+}
+
+/// [`validate_with`] for a project on disk.
+///
+/// `env:NAME` resolves against `substitutions.env` in the spec's directory; an
+/// embedded example has no directory and reads only the process environment.
+pub fn validate_source<'a>(
+    source: &'a Source,
+    overrides: &Overrides,
+    manifests: &[(String, String)],
+) -> Result<Checked<'a>, Invalid> {
+    validate_with_dir(&source.text, overrides, manifests, source.dir.as_deref())
+}
+
+/// The front half, with the directory substitutions are read from.
+fn validate_with_dir<'a>(
+    src: &'a str,
+    overrides: &Overrides,
+    manifests: &[(String, String)],
+    dir: Option<&Path>,
+) -> Result<Checked<'a>, Invalid> {
     let session = match Session::compose(manifests) {
         Ok(session) => session,
         Err(errors) => {
@@ -101,7 +127,12 @@ pub fn validate_with<'a>(
             return Err(Invalid::Message(message));
         }
     };
-    validate_parsed(src, overrides, session)
+    validate_parsed(src, overrides, session, dir)
+}
+
+/// The process environment, which wins over `substitutions.env`.
+fn process_env(name: &str) -> Option<String> {
+    std::env::var_os(name).map(|value| value.to_string_lossy().into_owned())
 }
 
 /// The spec pipeline itself, against this run's schema.
@@ -109,8 +140,9 @@ fn validate_parsed<'a>(
     src: &'a str,
     overrides: &Overrides,
     session: Session,
+    dir: Option<&Path>,
 ) -> Result<Checked<'a>, Invalid> {
-    let parsed = parse_espf(src);
+    let mut parsed = parse_espf(src);
 
     // 1. Syntax (junk lines) and structure (duplicate / missing sections).
     let mut errors = junk_diagnostics(&parsed.junk);
@@ -118,6 +150,13 @@ fn validate_parsed<'a>(
     if !errors.is_empty() {
         errors.sort_by_key(|e| e.primary.start);
         return Err(Invalid::Diagnostics(errors));
+    }
+
+    // 1b. `env:NAME` substitution, before any value is read: the resolved text
+    // is then checked exactly as if the author had typed it.
+    let substitution_errors = substitutions::resolve(&mut parsed, dir, &process_env);
+    if !substitution_errors.is_empty() {
+        return Err(Invalid::Diagnostics(substitution_errors));
     }
 
     // 2. `# espforge` core and `<options>` (the required sections exist now).
@@ -287,6 +326,95 @@ mod tests {
                 .iter()
                 .any(|d| d.message == "malformed node line"),
             "{diagnostics:?}"
+        );
+    }
+
+    /// A pin and an id read from `substitutions.env` beside the spec: the
+    /// resolved text is checked as if it had been typed.
+    const ENV_SPEC: &str = "# espforge\n\
+        \x20 <project name=\"env-blink\" />\n\
+        \x20 <chip type=\"esp32c3\" />\n\
+        \x20 <runtime type=\"blocking\" />\n\
+        # peripherals\n\
+        \x20 <gpio id=\"gpio18\" pin=\"env:LED_PIN\" direction=\"output\" />\n\
+        # devices\n\
+        \x20 <led id=\"env:LED_ID\" gpio=\"$gpio18\" />\n\
+        # services\n";
+
+    #[test]
+    fn an_env_attribute_reads_the_file_beside_the_spec() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("substitutions.env"),
+            "LED_PIN=18\nLED_ID=red_led\n",
+        )
+        .unwrap();
+        let c = validate_with_dir(ENV_SPEC, &Overrides::default(), &[], Some(dir.path()))
+            .ok()
+            .expect("the file resolves every marker");
+        assert_eq!(c.meta.name, "env-blink");
+        assert_eq!(c.board.devices[0].id().raw, "red_led");
+        assert!(
+            c.board
+                .resources
+                .claim_of(espforge_elements::Pin(18))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn an_undefined_name_is_reported_at_the_attribute() {
+        let err = validate_with_dir(ENV_SPEC, &Overrides::default(), &[], None)
+            .err()
+            .expect("the markers are undefined");
+        let Invalid::Diagnostics(diagnostics) = err else {
+            panic!("expected located diagnostics")
+        };
+        assert_eq!(
+            diagnostics[0].code,
+            espforge_diagnostics::codes::SUBSTITUTION_UNDEFINED
+        );
+        assert_eq!(&ENV_SPEC[diagnostics[0].primary.clone()], "env:LED_PIN");
+    }
+
+    /// A malformed `substitutions.env` is not a project's problem until it uses
+    /// one of its values.
+    #[test]
+    fn the_file_is_only_read_when_a_value_needs_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("substitutions.env"), "not a pair\n").unwrap();
+        validate_with_dir(hello(), &Overrides::default(), &[], Some(dir.path()))
+            .ok()
+            .expect("helloworld substitutes nothing");
+    }
+
+    /// The password reaches the element as the plain text the device sends,
+    /// not as a build-time `env!`.
+    #[test]
+    fn a_wifi_password_is_resolved_before_lowering() {
+        let src = espforge_examples::find("05.Networking/wifi_station")
+            .expect("the example exists")
+            .content
+            .replace(
+                "ssid=\"Wokwi-GUEST\" auth=\"open\"",
+                "ssid=\"env:WIFI_SSID\" password=\"env:WIFI_PASSWORD\" auth=\"wpa2\"",
+            );
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("substitutions.env"),
+            "WIFI_SSID=Lab\nWIFI_PASSWORD=secret12345\n",
+        )
+        .unwrap();
+        let c = validate_with_dir(&src, &Overrides::default(), &[], Some(dir.path()))
+            .ok()
+            .expect("the station resolves its credentials");
+        let espforge_elements::Service::WifiStation(station) = &c.board.services[0] else {
+            panic!("the service is a wifi station");
+        };
+        assert_eq!(station.ssid, "Lab");
+        assert_eq!(
+            station.password,
+            espforge_elements::services::wifi_station::Password::Literal("secret12345".into())
         );
     }
 }

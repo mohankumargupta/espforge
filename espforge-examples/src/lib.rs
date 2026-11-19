@@ -338,6 +338,19 @@ pub fn materialize_spec(
     })
 }
 
+/// The file a spec's `env:NAME` attributes read their values from.
+const SUBSTITUTIONS_FILE: &str = "substitutions.env";
+
+/// The commented-out template a scaffold gets, so a spec that uses `env:NAME`
+/// has somewhere to put the value and the file cannot be committed by accident.
+const SUBSTITUTIONS_TEMPLATE: &str = "\
+# substitutions.env -- values for `env:NAME` attributes in the spec.
+# This file is git-ignored: secrets and per-site values stay out of the repo.
+#
+# WIFI_SSID=MyNetwork
+# WIFI_PASSWORD=\"correct horse battery staple\"
+";
+
 /// The `(relative path, contents)` a scaffold writes, in embedded order.
 /// `spec` supplies the project's `.espf` in place of the example's own text.
 fn project_files(example: &Example, spec: &str) -> Vec<(String, Vec<u8>)> {
@@ -355,6 +368,18 @@ fn project_files(example: &Example, spec: &str) -> Vec<(String, Vec<u8>)> {
             file.contents.to_vec()
         };
         out.push((rel, contents));
+    }
+    if !out.iter().any(|(rel, _)| rel == SUBSTITUTIONS_FILE) {
+        out.push((
+            SUBSTITUTIONS_FILE.to_string(),
+            SUBSTITUTIONS_TEMPLATE.as_bytes().to_vec(),
+        ));
+    }
+    if !out.iter().any(|(rel, _)| rel == ".gitignore") {
+        out.push((
+            ".gitignore".to_string(),
+            format!("/{SUBSTITUTIONS_FILE}\n").into_bytes(),
+        ));
     }
     out
 }

@@ -299,7 +299,7 @@ fn invalid(
     code: DiagCode,
     issue: Issue<'_>,
 ) -> Reported {
-    let id = node.id;
+    let id = node.id.as_ref();
     let (code, label, span) = match issue {
         Issue::Unknown { attr, known } => (
             codes::ATTR_UNKNOWN,

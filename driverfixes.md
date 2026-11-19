@@ -1,5 +1,28 @@
 # `driverfixes.md`: Closing the Gaps That Keep Drivers Out of Pure KDL
 
+## Status: landed in `0.9.1`
+
+Everything below is implemented. The rest of this file is kept as the design
+record, not as a to-do list. Three deviations are worth recording:
+
+- **Milestone 4, Phase 4.4 (`stts22h-rs`) was dropped, not done.**
+  `stts22h-rs` and `bmi323-driver` build a typestate (`Stts22h<I2cBus<P>,
+  OnState>`) whose bus wrapper and bound are not public, so neither `type` nor
+  `endpoint` can name the field. Both moved to the deferred `driverglue.md`, as
+  recorded in `architecture/journey-driver-manifest-v2.md` §6.
+- **Milestone 4, Phase 4.1 step 3 was not needed.** `Dependency::from_package`
+  still sets `default_features: true`, because `PackageRef` — the v1 `crate`
+  block — has no such field. A v2 manifest's own `dependency` block carries
+  `default_features` directly and is what emission reads, so `#false` is
+  honoured everywhere it can be written.
+- **Milestone 6 is documentation.** The manifest reference at
+  `docs/002-external-driver-manifest.md` documents the generic `endpoint`, fixed
+  constructor arguments, `fallible #false` and the per-mode dependency keys.
+  There is no `espforge driver explain` subcommand (the phase hedged on that),
+  and `drivergap1.md` has been superseded by
+  `research/07-driver-external-limitations.md`. The four-condition gate in
+  Milestone 6 below is the standing regression check.
+
 **Baseline:** `espforge` workspace `0.9.0`, branch `dev`, with `drivers.md`
 Milestones 1–3 landed and `sht31` shipped as the first manifest-only driver
 (`espforge-drivers/manifests/sht31.kdl`, no module and no Cargo feature in
@@ -30,7 +53,7 @@ real:
 | 3 | Deferred init works for a manifest driver | `endpoint` is validated with `is_rust_path` (`espforge-schema/src/driver.rs:1106-1118`), and `espforge-schema/src/lib.rs:1633` refuses generics. Every real bus endpoint is generic, so `init="deferred"` is unreachable without a bundled alias. This is why `sht31` ships boot-only | **Gap — Milestone 1** |
 | 4 | Per-runtime features (`blocking_features`/`async_features`) needed by `stts22h-rs`, `bmi323-driver` | `Dependency` (`espforge-schema/src/lib.rs:199`) has one flat `features` list; `espforge-emit/src/codegen/cargo.rs:420-436` writes it once, for both runtimes; manifest-only packages hard-wire `default_features: true` (`Dependency::from_package`, `espforge-schema/src/lib.rs:225-231`) | **Gap — Milestone 4** |
 | 5 | `ws2812-rs` is blocked by "SPI `cs` is currently `required=#true`" | `<spi>`'s `cs` is optional (`espforge-schema/src/espf.schema.kdl:180`). The real blocker is `WS2812SPI { led: spi }` — a struct literal, which the "constructor is a call on a plain path" rule refuses | **Not a bus gap**; struct literals stay out of KDL (Milestone 5) |
-| 6 | 5 crates need ~15 lines of Rust glue | Correct. Builders, typestates and multi-object panels are not a manifest problem | **Out of scope** — a later `driver-glue.md` |
+| 6 | 5 crates need ~15 lines of Rust glue | Correct. Builders, typestates and multi-object panels are not a manifest problem | **Out of scope** — a later `driverglue.md` |
 
 Two supporting facts that shape the design:
 
@@ -483,7 +506,7 @@ templates would turn the manifest into a macro language.
 3. **Builders and typestates** (`hd44780-embedded-hal`, `epd-waveshare-async`,
    `epdsi`, `icm20948-async`, `lora-phy`). Each needs 10–20 lines that compose
    three or four upstream objects and, in two cases, run an `async`
-   initialization. Plan them as a follow-up `driver-glue.md` with one small
+   initialization. Plan them as a follow-up `driverglue.md` with one small
    Rust function per crate — not one wrapper struct per crate.
 
 Record the decision in `drivergap1.md` (one paragraph pointing here) so the

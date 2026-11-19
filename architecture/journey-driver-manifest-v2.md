@@ -235,7 +235,7 @@ composes two or three upstream objects rather than naming one constructor.
    public, so neither `type` nor `endpoint` can name the field. Each of these
    needs a small function that builds the device from the bus espforge already
    hands out — one function per crate, not one wrapper struct per crate, planned
-   in a follow-up `driver-glue.md`.
+   in a follow-up `driverglue.md`.
 
 The manifest's job ends where a value must be *computed*: it names a
 constructor, the constants that constructor takes, and the element attributes

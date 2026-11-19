@@ -116,39 +116,24 @@ impl Element for WifiStationElement {
                         ),
                     ));
                 }
-                Some(raw) => match raw.strip_prefix("env:") {
-                    Some(name) => {
-                        if !is_env_name(name) {
-                            return Err(cx.report(
-                                codes::COMPONENT_INVALID_ENV,
-                                span_of(node, "password"),
-                                "invalid environment variable name",
-                                format!(
-                                    "<wifi_station id=\"{}\"> env:{name} is not a variable name \
-                                     (letters, digits, `_`; not starting with a digit)",
-                                    id.raw
-                                ),
-                            ));
-                        }
-                        Password::Env(name.to_string())
+                Some(raw) => {
+                    // `env:NAME` has already been resolved by the pipeline, so
+                    // this is the value the device will send.
+                    let chars = raw.chars().count();
+                    if !(8..=63).contains(&chars) {
+                        return Err(cx.report(
+                            codes::COMPONENT_INVALID_PASSWORD,
+                            span_of(node, "password"),
+                            "invalid password",
+                            format!(
+                                "<wifi_station id=\"{}\"> password must be 8 to 63 characters, \
+                                 but this one is {chars}",
+                                id.raw
+                            ),
+                        ));
                     }
-                    None => {
-                        let chars = raw.chars().count();
-                        if !(8..=63).contains(&chars) {
-                            return Err(cx.report(
-                                codes::COMPONENT_INVALID_PASSWORD,
-                                span_of(node, "password"),
-                                "invalid password",
-                                format!(
-                                    "<wifi_station id=\"{}\"> password must be 8 to 63 characters, \
-                                     but this one is {chars}",
-                                    id.raw
-                                ),
-                            ));
-                        }
-                        Password::Literal(raw.to_string())
-                    }
-                },
+                    Password::Literal(raw.to_string())
+                }
             },
         };
 
@@ -178,8 +163,6 @@ pub enum Password {
     Open,
     /// A literal, compiled into the firmware verbatim.
     Literal(String),
-    /// `env:NAME`: a compile-time `env!("NAME")`.
-    Env(String),
 }
 
 impl Password {
@@ -188,10 +171,6 @@ impl Password {
         match self {
             Password::Open => quote! { "" },
             Password::Literal(text) => quote! { #text },
-            Password::Env(name) => {
-                let name = name.as_str();
-                quote! { env!(#name) }
-            }
         }
     }
 }
@@ -255,13 +234,6 @@ impl Lowered for WifiStationService {
     }
 }
 
-/// `[A-Za-z_][A-Za-z0-9_]*`.
-fn is_env_name(name: &str) -> bool {
-    !name.is_empty()
-        && !name.starts_with(|c: char| c.is_ascii_digit())
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
 /// The value span of one attribute on `node`, or the node itself.
 fn span_of(node: &ParsedNode<'_>, attr: &str) -> std::ops::Range<usize> {
     node.get_attr_spanned(attr)
@@ -271,7 +243,7 @@ fn span_of(node: &ParsedNode<'_>, attr: &str) -> std::ops::Range<usize> {
 
 /// This element's wording for a schema-level problem.
 fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
-    let id = node.id;
+    let id = node.id.as_ref();
     let (code, title, message, span) = match issue {
         Issue::Missing { attr } => (
             codes::COMPONENT_INVALID_WIFI,

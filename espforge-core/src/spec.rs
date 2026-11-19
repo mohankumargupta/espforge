@@ -42,7 +42,10 @@ fn chip_value(spec: &str) -> Result<(usize, &str), String> {
     };
 
     node.get_attr_spanned("type")
-        .map(|attr| (attr.val_offset, attr.val))
+        .map(|attr| {
+            let end = attr.val_offset + attr.val.len();
+            (attr.val_offset, &spec[attr.val_offset..end])
+        })
         .ok_or_else(|| "<chip> has no type attribute".to_string())
 }
 

@@ -1,6 +1,7 @@
 use crate::context::{AttrOp, ParsedNode, TagAttribute};
 use crate::diag::{JunkKind, JunkSpan};
 use espforge_diagnostics::{Diagnostic, codes};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use winnow::{
     ModalResult, Parser,
@@ -136,7 +137,7 @@ fn attribute<'a>(input: &mut &'a str, file: &str) -> ModalResult<TagAttribute<'a
         key,
         op,
         key_offset,
-        val,
+        val: Cow::Borrowed(val),
         val_offset,
     })
 }
@@ -167,8 +168,8 @@ fn parse_node<'a>(input: &mut &'a str, file: &str) -> ModalResult<ParsedNode<'a>
             let id = attributes
                 .iter()
                 .find(|a| a.key == "id" && a.op == AttrOp::Set)
-                .map(|a| a.val)
-                .unwrap_or("");
+                .map(|a| a.val.clone())
+                .unwrap_or(Cow::Borrowed(""));
             ParsedNode {
                 offset: tag_offset,
                 tag_name,

@@ -19,6 +19,7 @@
 //! | `E06xx` | pin devices |
 //! | `E07xx` | ownership and conflicts |
 //! | `E08xx` | services and driver routing |
+//! | `E12xx` | `env:NAME` substitutions |
 //!
 //! Every diagnostic carries a code from the moment it is constructed. There is
 //! no way to build one without it, and no title-to-code table.

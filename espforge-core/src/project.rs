@@ -79,7 +79,7 @@ pub fn generate_with(
     runtime_path: Option<PathBuf>,
 ) -> Result<Written, ProjectError> {
     let manifests = drivers::collect(source, &overrides.driver_dirs).map_err(ProjectError::User)?;
-    let mut checked = pipeline::validate_with(&source.text, overrides, &manifests.sources())?;
+    let mut checked = pipeline::validate_source(source, overrides, &manifests.sources())?;
     checked.notes.extend(manifests.warnings.iter().cloned());
     let used = drivers::used(checked.session.schema(), &manifests, &checked.board);
     // The lock lives beside the `.espf`, the same directory `check` and
@@ -156,7 +156,7 @@ fn verify_lock(out: &Path, used: &[UsedDriver]) -> Result<(), ProjectError> {
 /// Pure apart from reading the user's directory.
 pub fn check(source: &Source, overrides: &Overrides) -> Result<Vec<String>, ProjectError> {
     let manifests = drivers::collect(source, &overrides.driver_dirs).map_err(ProjectError::User)?;
-    let checked = pipeline::validate_with(&source.text, overrides, &manifests.sources())?;
+    let checked = pipeline::validate_source(source, overrides, &manifests.sources())?;
     let used = drivers::used(checked.session.schema(), &manifests, &checked.board);
     if !used.is_empty() {
         let existing = drivers::read_lock(source_dir(source)).map_err(ProjectError::User)?;

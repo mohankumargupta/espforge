@@ -504,7 +504,7 @@ impl<'s> LowerCx<'s> {
             .get_attr_spanned("id")
             .map(|attr| attr.val_offset..attr.val_offset + attr.val.len())
             .unwrap_or(node.offset..node.offset);
-        Ident::new(node.id, span)
+        Ident::new(node.id.as_ref(), span)
     }
 
     /// [`Self::ident`], or one diagnostic when the id names something the

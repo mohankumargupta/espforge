@@ -1263,24 +1263,6 @@ mod tests {
     }
 
     #[test]
-    fn an_env_password_names_a_variable_that_could_exist() {
-        let src = WIFI_STATION.replace("auth=\"open\"", "password=\"env:1bad\"");
-        let errors = lower_src_with(&src, embassy_meta()).unwrap_err();
-        assert_eq!(errors[0].code, codes::COMPONENT_INVALID_ENV);
-        assert_eq!(errors[0].message, "invalid environment variable name");
-
-        let src = WIFI_STATION.replace("auth=\"open\"", "password=\"env:WIFI_PASSWORD\"");
-        let board = lower_src_with(&src, embassy_meta()).expect("a good env name lowers");
-        let Service::WifiStation(station) = &board.services[0] else {
-            panic!("the service is a wifi station");
-        };
-        assert_eq!(
-            station.password,
-            crate::services::wifi_station::Password::Env("WIFI_PASSWORD".into())
-        );
-    }
-
-    #[test]
     fn a_wifi_radio_only_lowers_on_a_chip_that_has_one() {
         let h2 = Meta {
             chip: "esp32h2".into(),
@@ -1875,10 +1857,7 @@ driver "touch" {
         );
         // The address is the constructor's first argument after the bus, at
         // the position the manifest wrote `{address}`.
-        assert_eq!(
-            air.driver.args,
-            [crate::model::RustExpr::number(0x62)]
-        );
+        assert_eq!(air.driver.args, [crate::model::RustExpr::number(0x62)]);
         assert!(air.driver.pins.is_empty());
         assert_eq!(board.driver_features(), ["scd4x"]);
         assert!(board.driver_deps().is_empty());
@@ -2147,8 +2126,9 @@ driver "mode_probe" {
     /// Lower one probe project, on the runtime it names, against the per-mode
     /// fixture.
     fn lower_mode_probe(runtime: &str) -> Result<Board, Vec<Diagnostic>> {
-        let session = Session::compose(&[("mode-probe.schema.kdl".to_string(), MODE_PROBE.to_string())])
-            .expect("the probe schema loads");
+        let session =
+            Session::compose(&[("mode-probe.schema.kdl".to_string(), MODE_PROBE.to_string())])
+                .expect("the probe schema loads");
         let src = format!(
             "# espforge\n\
              \x20 <project name=\"mode\" />\n\

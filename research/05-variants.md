@@ -81,7 +81,7 @@ driver "sht3x" {
 For driver crates where variants share 90% of the manifest (`dependency`, `bus`, `attr`s, `map`s) **except** the `constructor` function, `type`, or a fixed config/address:
 
 * **Variant A — `variant` blocks in KDL v2:** Allow a `driver` to declare named presets (`variant "ads1115" { ... }`, `variant "ads1015" { ... }`), selected either by an `attr "model"` or by tag, where each `variant` can override `codegen.constructor`, `codegen.type`, or `bus.address` while inheriting everything else from the parent `driver`.
-* **Variant B — Thin Rust family glue in `espforge-drivers`:** (The `driver-glue.md` pattern already noted in `architecture/journey-driver-manifest-v2.md` §6 for `mipidsi` / builders / typestates.) Write one small factory function in Rust that takes a `Model` enum (from a KDL `map "model"`) and dispatches `match model { ... }` to call `new_ads1115` vs `new_ads1015` or `Builder::ili9341` vs `Builder::st7789`.
+* **Variant B — Thin Rust family glue in `espforge-drivers`:** (The `driverglue.md` pattern already noted in `architecture/journey-driver-manifest-v2.md` §6 for `mipidsi` / builders / typestates.) Write one small factory function in Rust that takes a `Model` enum (from a KDL `map "model"`) and dispatches `match model { ... }` to call `new_ads1115` vs `new_ads1015` or `Builder::ili9341` vs `Builder::st7789`.
 
 * **Pros:**
   * Solves the "different constructor paths / builder patterns" case (like `ads1x1x` and `mipidsi`) without duplicating 5 nearly identical `.kdl` files.
@@ -99,4 +99,4 @@ Use a **two-tier rule** depending on what kind of variant it is:
 1. **For identical chips or pure type/argument variants (`sht30/31/35`, `scd40/41`, `ssd1306` sizes):**
    * Use **Option 1** today (`sht3x` / `scd4x` / `ssd1306` with `attr` + `map`), and if you find users tripping over exact part names like `<sht30>`, add **Option 3 (`alias`)** as a small, clean schema upgrade.
 2. **For chip families with different constructors or address rules (`ads1015` vs `ads1115`, `bme280` vs `bmp280`):**
-   * Use **Option 2** (separate `.kdl` manifests sharing the same `dependency` crate) first—it works out of the box today, `Board::driver_dependencies()` already deduplicates the crate in `Cargo.toml`, and it avoids turning KDL into an inheritance language. Only reach for **Option 4B** (`driver-glue` Rust factory) when a crate like `mipidsi` uses builders/typestates that KDL can't express directly.
+   * Use **Option 2** (separate `.kdl` manifests sharing the same `dependency` crate) first—it works out of the box today, `Board::driver_dependencies()` already deduplicates the crate in `Cargo.toml`, and it avoids turning KDL into an inheritance language. Only reach for **Option 4B** (`driverglue` Rust factory) when a crate like `mipidsi` uses builders/typestates that KDL can't express directly.

@@ -155,8 +155,6 @@ codes! {
     COMPONENT_INVALID_PASSWORD = "E0619";
     /// `auth="open"` written together with a password.
     COMPONENT_OPEN_WITH_PASSWORD = "E0620";
-    /// A `password="env:NAME"` whose variable name is not an identifier.
-    COMPONENT_INVALID_ENV = "E0621";
     /// A `<wifi_station>` that cannot be built (missing or invalid attribute).
     COMPONENT_INVALID_WIFI = "E0622";
     /// An id the generated code already binds (`devices`, `ctx`, `__x`).
@@ -217,6 +215,13 @@ codes! {
     /// Two devices of one crate whose blocking and async features are
     /// mutually exclusive: a project cannot enable both halves.
     DEVICE_DRIVER_MODE_CONFLICT = "E0911";
+
+    /// `env:` with no name, or a name that is not an identifier.
+    SUBSTITUTION_INVALID_NAME = "E1201";
+    /// An `env:NAME` neither `substitutions.env` nor the environment defines.
+    SUBSTITUTION_UNDEFINED = "E1202";
+    /// A line in `substitutions.env` that is not `KEY=VALUE`.
+    SUBSTITUTION_FILE = "E1203";
 }
 
 #[cfg(test)]
@@ -271,6 +276,7 @@ mod tests {
                         | 701..=709
                         | 801..=807
                         | 901..=911
+                        | 1201..=1203
                 ),
                 "{} is outside the codes this slice defines",
                 code.as_str()

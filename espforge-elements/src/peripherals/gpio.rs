@@ -48,7 +48,7 @@ fn describe(
     node: &ParsedNode<'_>,
     issue: crate::attrs::Issue<'_>,
 ) -> Reported {
-    let id = node.id;
+    let id = node.id.as_ref();
     match issue {
         crate::attrs::Issue::Unknown { attr, known } => cx.report(
             codes::ATTR_UNKNOWN,

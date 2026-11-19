@@ -141,7 +141,7 @@ fn claim_bus_pin(
 
 /// This element's wording for a schema-level problem.
 fn describe(cx: &mut LowerCx<'_>, node: &ParsedNode<'_>, issue: Issue<'_>) -> Reported {
-    let id = node.id;
+    let id = node.id.as_ref();
     match issue {
         Issue::Unknown { attr, known } => cx.report(
             codes::ATTR_UNKNOWN,

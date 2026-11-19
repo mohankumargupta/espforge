@@ -64,6 +64,13 @@ delete it (or `.gitignore` it) at any time. Everything you control lives next to
 `rust-toolchain.toml`, `.cargo/*.toml`, and `Cargo.extra.toml` (extra `[dependencies]`,
 `[patch]`, `[profile]` and `[lints]` merged into the generated manifest).
 
+Values that do not belong in the spec — Wi-Fi credentials, a bench-specific pin — can be
+written as `env:NAME` in any attribute. `espforge` replaces them with `NAME` from
+`substitutions.env` beside the `.espf`, or from the process environment (which wins), and
+reports a missing name at the attribute instead of failing later inside `cargo`.
+`substitutions.env` is git-ignored rather than copied into `build/`; `espforge new` starts
+one with a commented example. See [research/09-substitutions.md](research/09-substitutions.md).
+
 If you want to see the examples in this repo in action, click [here](https://github.com/mohankumargupta/espforge_wokwi)
 
 If you want to see what is the generated rust no_std examples look like,
@@ -83,13 +90,7 @@ espforge driver list
 espforge driver verify
 espforge driver migrate old_driver.kdl --write
 ```
-
-Generation is offline. A fetched driver is cached under
-`$XDG_CACHE_HOME/espforge/drivers/<tag>/<version>/` and recorded in
-`.espforge/drivers.lock` with its manifest and payload hashes; only `driver
-add`, `driver update` and `driver verify --refresh` reach the network. See
-[`architecture/journey-driver-manifest-v2.md`](architecture/journey-driver-manifest-v2.md)
-for the manifest grammar.
+see https://github.com/mohankumargupta/espforge-building-blocks for working examples
 
 ## Prerequisites
 **Rust**: [Install Rust](https://rustup.rs/)

@@ -63,7 +63,7 @@ pub(crate) fn invalid_element(
     element: &ElementDef,
     issue: Issue<'_>,
 ) -> Reported {
-    let id = node.id;
+    let id = node.id.as_ref();
     let (code, title, message, span) = match issue {
         Issue::Missing { attr } => (
             codes::DEVICE_INVALID,

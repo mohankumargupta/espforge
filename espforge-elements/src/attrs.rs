@@ -148,7 +148,7 @@ pub fn key_span_of(node: &ParsedNode<'_>, attr: &str) -> std::ops::Range<usize> 
 
 fn shown<'a>(attr: &'a TagAttribute<'a>) -> Spanned<&'a str> {
     Spanned {
-        value: attr.val,
+        value: attr.val.as_ref(),
         span: span_of(attr),
     }
 }
@@ -213,7 +213,7 @@ pub fn flag_or<'a>(
 }
 
 fn flag_value<'a>(attr: &'a TagAttribute<'a>, name: &'a str) -> Result<Spanned<bool>, Issue<'a>> {
-    let value = match attr.val {
+    let value = match attr.val.as_ref() {
         "true" => true,
         "false" => false,
         other => return Err(invalid(name, other)),
@@ -312,7 +312,7 @@ fn number_value<'a>(attr: &'a TagAttribute<'a>, name: &'a str) -> Result<Spanned
         value: attr
             .val
             .parse::<u32>()
-            .map_err(|_| invalid(name, attr.val))?,
+            .map_err(|_| invalid(name, attr.val.as_ref()))?,
         span: span_of(attr),
     })
 }
@@ -326,9 +326,9 @@ fn in_range<'a>(
     let value = attr
         .val
         .parse::<u32>()
-        .map_err(|_| invalid(name, attr.val))?;
+        .map_err(|_| invalid(name, attr.val.as_ref()))?;
     if !(low..=high).contains(&value) {
-        return Err(invalid(name, attr.val));
+        return Err(invalid(name, attr.val.as_ref()));
     }
     Ok(value)
 }
@@ -360,7 +360,7 @@ fn hex_value<'a>(attr: &'a TagAttribute<'a>, name: &'a str) -> Result<Spanned<u8
         None => attr.val.parse::<u8>(),
     };
     Ok(Spanned {
-        value: parsed.map_err(|_| invalid(name, attr.val))?,
+        value: parsed.map_err(|_| invalid(name, attr.val.as_ref()))?,
         span: span_of(attr),
     })
 }
@@ -372,7 +372,7 @@ pub fn pin_or_ref<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<PinOrRe
     let span = span_of(attr);
     Ok(match attr.val.parse::<u8>() {
         Ok(pin) => PinOrRef::Pin(Spanned { value: pin, span }),
-        Err(_) => PinOrRef::Ref(Ref::at(attr.val, span)),
+        Err(_) => PinOrRef::Ref(Ref::at(attr.val.as_ref(), span)),
     })
 }
 
@@ -383,7 +383,7 @@ pub fn pin<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<Spanned<u8>, I
         value: attr
             .val
             .parse::<u8>()
-            .map_err(|_| invalid(name, attr.val))?,
+            .map_err(|_| invalid(name, attr.val.as_ref()))?,
         span: span_of(attr),
     })
 }
@@ -398,7 +398,7 @@ pub fn opt_pin<'a>(
             value: attr
                 .val
                 .parse::<u8>()
-                .map_err(|_| invalid(name, attr.val))?,
+                .map_err(|_| invalid(name, attr.val.as_ref()))?,
             span: span_of(attr),
         })),
         None => Ok(None),
@@ -408,7 +408,7 @@ pub fn opt_pin<'a>(
 /// A required `$`-reference to another element.
 pub fn reference<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<Ref<'a>, Issue<'a>> {
     let attr = find(node, name).ok_or(missing(name))?;
-    Ok(Ref::at(attr.val, span_of(attr)))
+    Ok(Ref::at(attr.val.as_ref(), span_of(attr)))
 }
 
 /// An optional `$`-reference to another element.
@@ -416,7 +416,7 @@ pub fn opt_reference<'a>(
     node: &'a ParsedNode<'a>,
     name: &'a str,
 ) -> Result<Option<Ref<'a>>, Issue<'a>> {
-    Ok(find(node, name).map(|attr| Ref::at(attr.val, span_of(attr))))
+    Ok(find(node, name).map(|attr| Ref::at(attr.val.as_ref(), span_of(attr))))
 }
 
 /// A required value from a generated `choices` enum.
@@ -467,7 +467,7 @@ fn parsed_value<'a, T: Copy>(
     parse: fn(&str) -> Option<T>,
 ) -> Result<Spanned<T>, Issue<'a>> {
     Ok(Spanned {
-        value: parse(attr.val).ok_or_else(|| invalid(name, attr.val))?,
+        value: parse(attr.val.as_ref()).ok_or_else(|| invalid(name, attr.val.as_ref()))?,
         span: span_of(attr),
     })
 }

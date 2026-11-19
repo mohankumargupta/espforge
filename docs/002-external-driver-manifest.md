@@ -141,3 +141,40 @@ Inside `constructor "..."`, `espforge` replaces `{holes}` from a closed set chec
 
 ### Why is `codegen` checked so strictly?
 Because a KDL manifest is generating Rust code! `espforge-schema/src/driver.rs` parses `type`, `constructor`, `endpoint`, and every `map` entry through `syn` when loading the `.kdl` file—so if you make a typo in a Rust type or write an unknown `{placeholder}`, `espforge` catches it immediately when reading the manifest rather than spitting out broken Rust in `src/generated.rs`.
+
+---
+
+## Dependencies: the crates a manifest-only driver names
+
+A driver without `feature` (one that is not built into `espforge-drivers`) names the crates it needs with `dependency`. Exactly one of `version`, `path` or `git` chooses the source, and `git` requires a pinned `rev`:
+
+```kdl
+dependency "embedded-sht3x" { version "0.2.0" }
+```
+
+Every dependency is written to the generated `Cargo.toml`, deduplicated by package. If two manifests name one package from different sources, generation stops with `DRIVER_DEPENDENCY_CONFLICT` and names both.
+
+### Per-mode features
+
+Some crates put their blocking and async APIs behind separate Cargo features, and some (like `bmi323-driver`) enable the async one by default. A single `features` list cannot express that — enabling both halves makes the crate fail to compile — so a dependency describes both modes:
+
+| Key | Meaning |
+|---|---|
+| `features "..."` | Features the **blocking** mode needs. |
+| `default_features #true` / `#false` | The blocking mode's `default-features`; defaults to `#true`. |
+| `async_features "..."` | Features the **async** mode needs. |
+| `async_default_features #true` / `#false` | The async mode's `default-features`; omit it to keep the blocking value. |
+| `modes_are_exclusive #true` | The crate's two APIs are one Cargo feature each, so they must not both be on. |
+
+```kdl
+dependency "bmi323-driver" {
+    version "0.2.0"
+    features "blocking"            # the blocking half
+    default_features #false        # ...which is the opt-in one here
+    async_features "async"         # the async half
+    async_default_features #true   # async is the crate's default
+    modes_are_exclusive #true      # never compile both halves
+}
+```
+
+Which set applies is the **board's** decision, not the manifest's: it resolves from the device's bus mode. An embassy project adds `async_features` to `features` and applies `async_default_features`. For an exclusive crate the async set *replaces* the blocking one, because Cargo features are additive and both halves would be compiled. Two devices of one exclusive crate in different modes are refused at lowering as `E0911` ("driver mode conflict"), naming both devices, the crate and both modes.

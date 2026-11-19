@@ -280,13 +280,13 @@ element "wifi_station" section="services" {
         help "The <wifi> radio this station uses."
     }
     attr "ssid" kind="str" required=#true {
-        help "1 to 32 bytes."
+        help "1 to 32 bytes. Any attribute value may be `env:NAME` (see the README's substitutions section)."
     }
     attr "auth" kind="choice" default="wpa2" {
         choices "open" "wpa2"
     }
     attr "password" kind="str" {
-        help "Literal, or env:NAME to read NAME at build time. Warns: the value is compiled into the firmware. Required unless auth=\"open\"."
+        help "Literal, or `env:NAME` resolved from `substitutions.env` (see the README). Warns: the value is compiled into the firmware. Required unless auth=\"open\"."
     }
     example "home network" #"<wifi_station id="home" wifi="$radio" ssid="my-network" password="secret12" />"#
     example "open network" #"<wifi_station id="home" wifi="$radio" ssid="my-network" auth="open" />"#

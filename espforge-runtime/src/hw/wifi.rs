@@ -35,6 +35,8 @@ pub enum WifiError {
     Radio(esp_radio::wifi::WifiError),
     /// An embassy task could not be spawned (pool exhausted).
     Spawn,
+    /// `start` was called twice on one station.
+    AlreadyStarted,
 }
 
 impl From<esp_radio::wifi::WifiError> for WifiError {
@@ -86,32 +88,8 @@ impl Wifi {
         wifi: WIFI<'static>,
         config: WifiConfig,
     ) -> Result<Self, WifiError> {
-        let mut controller = WifiController::new(wifi, ControllerConfig::default())?;
-        let interface = Interface::station();
-
-        let authentication = if config.password.is_empty() {
-            AuthenticationMethodConfig::Open
-        } else {
-            AuthenticationMethodConfig::Wpa2Personal(config.password.try_into()?)
-        };
-        let station = StationConfig::default()
-            .with_ssid(config.ssid.try_into()?)
-            .with_authentication(authentication);
-        controller.set_config(&Config::Station(station))?;
-
-        let rng = esp_hal::rng::Rng::new();
-        let seed = (u64::from(rng.random()) << 32) | u64::from(rng.random());
-
-        let (stack, runner) = embassy_net::new(
-            interface,
-            embassy_net::Config::dhcpv4(Default::default()),
-            storage.resources.init(StackResources::new()),
-            seed,
-        );
-
-        spawner.spawn(connection_task(controller).map_err(|_| WifiError::Spawn)?);
-        spawner.spawn(net_task(runner).map_err(|_| WifiError::Spawn)?);
-
+        let (stack, runner) = build_stack(storage);
+        spawn_station(spawner, wifi, config, runner)?;
         Ok(Self { stack })
     }
 
@@ -127,56 +105,103 @@ impl Wifi {
     }
 }
 
-/// A `<wifi_station>` service: the station's credentials, and once started,
-/// the running connection handle.
+/// A `<wifi_station>` service: the station's credentials, its stack, and once
+/// started, the running connection.
 ///
 /// It constructs in `Components::new` — no peripheral, no `unsafe` — and
 /// *starts* from `main` after `esp_rtos::start`, because the radio needs the
-/// scheduler and the heap. `start` therefore takes `&self` and parks the handle
-/// behind a `RefCell`, and `Components` never needs to be `mut`.
+/// scheduler and the heap. `start` therefore takes `&self` and parks the
+/// network runner behind a `RefCell`, and `Components` never needs to be `mut`.
 pub struct WifiStation {
     config: WifiConfig,
-    storage: &'static WifiStorage,
-    handle: RefCell<Option<Wifi>>,
+    /// Built in `new`, not in `start`: the generated `Services::new` builds a
+    /// network client with `station.stack()` *before* `main` starts the
+    /// station, so a stack that only exists after `start` made every
+    /// `<http_client>`/`<ntp>` project panic with "wifi station not started".
+    /// The radio, the association and DHCP still wait for `start`.
+    stack: Stack<'static>,
+    /// The runner `start` hands to the network task; `None` once started.
+    runner: RefCell<Option<Runner<'static, Interface>>>,
 }
 
 impl WifiStation {
-    /// `storage` is the station's own generated `static`; the station keeps the
-    /// reference so `start` needs no extra argument.
+    /// `storage` is the station's own generated `static`; its pool is taken
+    /// here, so `start` needs no extra argument.
     pub fn new(config: WifiConfig, storage: &'static WifiStorage) -> Self {
+        let (stack, runner) = build_stack(storage);
         Self {
             config,
-            storage,
-            handle: RefCell::new(None),
+            stack,
+            runner: RefCell::new(Some(runner)),
         }
     }
 
     /// Bring the radio up and spawn the association and network tasks. Returns
     /// right away; use [`WifiStation::wait_connected`] to wait for an address.
     pub fn start(&self, wifi: WIFI<'static>, spawner: &Spawner) -> Result<(), WifiError> {
-        let handle = Wifi::start_in(self.storage, spawner, wifi, self.config)?;
-        *self.handle.borrow_mut() = Some(handle);
-        Ok(())
-    }
-
-    /// The running handle. Panics if the station has not been started — the
-    /// generated `main` always starts it before building the services.
-    fn handle(&self) -> Wifi {
-        match &*self.handle.borrow() {
-            Some(handle) => *handle,
-            None => panic!("wifi station not started"),
-        }
+        let runner = self
+            .runner
+            .borrow_mut()
+            .take()
+            .ok_or(WifiError::AlreadyStarted)?;
+        spawn_station(spawner, wifi, self.config, runner)
     }
 
     /// The embassy-net stack, for network services (HTTP, HTTPS).
+    ///
+    /// Available before `start` as well: services are constructed with it and
+    /// only use it once the network tasks are running.
     pub fn stack(&self) -> Stack<'static> {
-        self.handle().stack()
+        self.stack
     }
 
     /// Wait until the link is up and DHCP has assigned an address.
     pub async fn wait_connected(&self) {
-        self.handle().wait_connected().await;
+        self.stack.wait_link_up().await;
+        self.stack.wait_config_up().await;
     }
+}
+
+/// Build the embassy-net stack and its runner without touching the radio.
+///
+/// Separate from association so a client can hold `stack()` at construction
+/// time (see [`WifiStation::stack`]); [`spawn_station`] is what configures and
+/// connects the radio, and it drives the same stack through this runner.
+fn build_stack(
+    storage: &'static WifiStorage,
+) -> (Stack<'static>, Runner<'static, Interface>) {
+    let rng = esp_hal::rng::Rng::new();
+    let seed = (u64::from(rng.random()) << 32) | u64::from(rng.random());
+    embassy_net::new(
+        Interface::station(),
+        embassy_net::Config::dhcpv4(Default::default()),
+        storage.resources.init(StackResources::new()),
+        seed,
+    )
+}
+
+/// Configure the station and spawn the association and network tasks.
+fn spawn_station(
+    spawner: &Spawner,
+    wifi: WIFI<'static>,
+    config: WifiConfig,
+    runner: Runner<'static, Interface>,
+) -> Result<(), WifiError> {
+    let mut controller = WifiController::new(wifi, ControllerConfig::default())?;
+
+    let authentication = if config.password.is_empty() {
+        AuthenticationMethodConfig::Open
+    } else {
+        AuthenticationMethodConfig::Wpa2Personal(config.password.try_into()?)
+    };
+    let station = StationConfig::default()
+        .with_ssid(config.ssid.try_into()?)
+        .with_authentication(authentication);
+    controller.set_config(&Config::Station(station))?;
+
+    spawner.spawn(connection_task(controller).map_err(|_| WifiError::Spawn)?);
+    spawner.spawn(net_task(runner).map_err(|_| WifiError::Spawn)?);
+    Ok(())
 }
 
 /// The interface a network provider satisfies.
