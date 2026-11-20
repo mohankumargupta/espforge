@@ -29,14 +29,32 @@ fn load_v2() -> Schema {
     espforge_elements::schema::compose(&[]).expect("the bundled v2 manifests load")
 }
 
-fn attr_map(element: &Element) -> BTreeMap<&str, (&AttrKind, bool, Option<&str>)> {
+/// The attribute kind, with the one deliberate widening folded in.
+///
+/// A v2 `pin` used to accept only a `$<gpio>` reference. It now accepts a bare
+/// GPIO number too (`clk="6"`), which is what a busless driver needs, so the
+/// same slot reads as `PinOrRef` before and after. A manifest that wants the
+/// strict form back writes `via="ref"` and gets `Ref` again. Any *other* kind
+/// change is still drift, and the oracle reports it.
+fn kind_for_migration(kind: &AttrKind) -> AttrKind {
+    match kind {
+        AttrKind::Ref { to } if to.as_slice() == ["gpio"] => AttrKind::PinOrRef,
+        other => other.clone(),
+    }
+}
+
+fn attr_map(element: &Element) -> BTreeMap<&str, (AttrKind, bool, Option<&str>)> {
     element
         .attrs
         .iter()
         .map(|attr| {
             (
                 attr.name.as_str(),
-                (&attr.kind, attr.required, attr.default.as_deref()),
+                (
+                    kind_for_migration(&attr.kind),
+                    attr.required,
+                    attr.default.as_deref(),
+                ),
             )
         })
         .collect()
@@ -69,6 +87,11 @@ fn assert_recipe_eq(tag: &str, v1: &DeviceRecipe, v2: &DeviceRecipe) {
                 assert_eq!(
                     left.direction, right.direction,
                     "{tag}: direction for `{}`",
+                    left.name
+                );
+                assert_eq!(
+                    left.open_drain, right.open_drain,
+                    "{tag}: open-drain for `{}`",
                     left.name
                 );
             }

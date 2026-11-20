@@ -19,6 +19,16 @@ use syn::{Expr, Type};
 
 use super::*;
 
+/// One `transport "<kind>" { bus { .. } codegen { .. } }` block.
+struct TransportDecl {
+    kind: String,
+    bus: BusDecl,
+    codegen: Codegen,
+    /// `dependency` blocks that amend the driver's crates for this transport.
+    dependencies: Vec<Dependency>,
+    span: Range<usize>,
+}
+
 /// One `bus "<kind>"` block.
 struct BusDecl {
     kind: String,
@@ -41,6 +51,10 @@ struct PinDecl {
     /// The input's internal pull resistor; unused for an output.
     pull: Pull,
     optional: bool,
+    /// `via="ref"`: the pin must be a `$<gpio>` reference, not a bare number.
+    /// The default (`pin_or_ref`) also accepts `clk="6"`, which is how a
+    /// busless driver names the lines it owns.
+    ref_only: bool,
     span: Range<usize>,
 }
 
@@ -86,6 +100,15 @@ struct RuntimeDecl {
     feature: Option<String>,
     /// `awaits #false`: the constructor is a plain `fn` on the async path.
     awaits: Option<bool>,
+    /// `then { call ".." }` steps, in written order.
+    steps: Vec<StepDecl>,
+    span: Range<usize>,
+}
+
+/// One `then { call "init({delay})" awaits #false }` step.
+struct StepDecl {
+    text: String,
+    awaits: bool,
     span: Range<usize>,
 }
 
@@ -153,6 +176,7 @@ pub(crate) fn parse_driver(node: &KdlNode, schema: &mut Schema, errors: &mut Vec
     let mut declared_attrs: Vec<AttrDef> = Vec::new();
     let mut parts: Vec<RecipePart> = Vec::new();
     let mut codegen: Option<Codegen> = None;
+    let mut transports: Vec<TransportDecl> = Vec::new();
     let mut examples: Vec<Example> = Vec::new();
     let mut see_also: Vec<String> = Vec::new();
 
@@ -210,7 +234,7 @@ pub(crate) fn parse_driver(node: &KdlNode, schema: &mut Schema, errors: &mut Vec
                 }
             }
             "dependency" => {
-                if let Some(dependency) = parse_dependency(child, &tag, errors) {
+                if let Some(dependency) = parse_dependency(child, &tag, false, errors) {
                     dependencies.push(dependency);
                 }
             }
@@ -218,7 +242,7 @@ pub(crate) fn parse_driver(node: &KdlNode, schema: &mut Schema, errors: &mut Vec
                 if bus.is_some() {
                     errors.push(err(node_range(child), "`bus` given twice", "keep one"));
                 } else {
-                    bus = parse_bus(child, errors);
+                    bus = parse_bus(child, None, errors);
                 }
             }
             "pin" => {
@@ -243,6 +267,22 @@ pub(crate) fn parse_driver(node: &KdlNode, schema: &mut Schema, errors: &mut Vec
                     codegen = parse_codegen(child, errors);
                 }
             }
+            "transport" => {
+                if let Some(transport) = parse_transport(child, errors) {
+                    if transports
+                        .iter()
+                        .any(|known| known.kind == transport.kind)
+                    {
+                        errors.push(err(
+                            transport.span,
+                            format!("duplicate `transport` `{}`", transport.kind),
+                            "each transport kind is declared once",
+                        ));
+                    } else {
+                        transports.push(transport);
+                    }
+                }
+            }
             "example" => parse_example(child, &mut examples, errors),
             "see_also" => {
                 for (target, target_span) in positional_strings(child, errors) {
@@ -261,7 +301,7 @@ pub(crate) fn parse_driver(node: &KdlNode, schema: &mut Schema, errors: &mut Vec
                 node_range(child),
                 format!("unknown node `{other}` in driver `{tag}`"),
                 "expected format_version, summary, description, category, dependency, bus, pin, \
-                 attr, compose, codegen, example or see_also",
+                 attr, compose, codegen, transport, example or see_also",
             )),
         }
     }
@@ -287,21 +327,45 @@ pub(crate) fn parse_driver(node: &KdlNode, schema: &mut Schema, errors: &mut Vec
             "every driver carries at least one `example \"title\" \"fragment\"`",
         ));
     }
-    let Some(bus) = bus else {
+    // A driver describes one transport at the top level (`bus` + `codegen`)
+    // or one per bus kind with `transport "<kind>" { .. }` blocks.
+    let multi = !transports.is_empty();
+    if multi && (bus.is_some() || codegen.is_some()) {
         errors.push(err(
             span.clone(),
-            format!("driver `{tag}` has no `bus`"),
-            "write `bus \"i2c\" { .. }`, `bus \"spi\" { .. }` or `bus \"uart\"`",
+            format!("driver `{tag}` declares both `transport` and a top-level `bus`/`codegen`"),
+            "a multi-transport driver keeps its bus and codegen inside each `transport` block",
         ));
         return;
-    };
-    let Some(codegen) = codegen else {
+    }
+    if multi && transports.len() < 2 {
         errors.push(err(
             span.clone(),
-            format!("driver `{tag}` has no `codegen`"),
-            "name at least one `runtime \"blocking\"` or `runtime \"async\"` block",
+            format!("driver `{tag}` declares only one `transport`"),
+            "two transports make a multi-transport driver; one is `bus \"..\"` + `codegen`",
         ));
         return;
+    }
+    let single: Option<(&BusDecl, &Codegen)> = if multi {
+        None
+    } else {
+        let Some(bus) = bus.as_ref() else {
+            errors.push(err(
+                span.clone(),
+                format!("driver `{tag}` has no `bus`"),
+                "write `bus \"i2c\" { .. }`, `bus \"spi\" { .. }` or `bus \"uart\"`",
+            ));
+            return;
+        };
+        let Some(codegen) = codegen.as_ref() else {
+            errors.push(err(
+                span.clone(),
+                format!("driver `{tag}` has no `codegen`"),
+                "name at least one `runtime \"blocking\"` or `runtime \"async\"` block",
+            ));
+            return;
+        };
+        Some((bus, codegen))
     };
 
     let mut attrs: Vec<AttrDef> = Vec::new();
@@ -314,24 +378,79 @@ pub(crate) fn parse_driver(node: &KdlNode, schema: &mut Schema, errors: &mut Vec
         help: None,
         span: tag_span.clone(),
     });
-    attrs.push(AttrDef {
-        name: "bus".into(),
-        kind: AttrKind::Ref {
-            to: vec![bus.kind.clone()],
-        },
-        required: true,
-        default: None,
-        range: None,
-        help: None,
-        span: bus.span.clone(),
-    });
-    add_bus_attrs(&bus, &mut attrs);
+    match &single {
+        // A busless driver consumes no peripheral, so it declares no `bus`
+        // attribute at all: writing `bus="$i2c0"` on it is an unknown
+        // attribute, which is the diagnostic a reader needs.
+        Some((bus, _)) => {
+            if bus.kind == "none" {
+                if pins.is_empty() {
+                    errors.push(err(
+                        span.clone(),
+                        format!("driver `{tag}` declares no pin"),
+                        "a `bus \"none\"` driver owns the lines it claims: declare at least one \
+                         `pin`",
+                    ));
+                    return;
+                }
+            } else {
+                attrs.push(AttrDef {
+                    name: "bus".into(),
+                    kind: AttrKind::Ref {
+                        to: vec![bus.kind.clone()],
+                    },
+                    required: true,
+                    default: None,
+                    range: None,
+                    help: None,
+                    span: bus.span.clone(),
+                });
+            }
+            add_bus_attrs(bus, &mut attrs);
+        }
+        // A multi-transport element accepts the union of its transports' bus
+        // attributes. Which are required is decided by the bus the spec binds
+        // to, so each is optional here and lowering enforces the one it chose.
+        None => {
+            let kinds: Vec<String> = transports
+                .iter()
+                .map(|transport| transport.kind.clone())
+                .filter(|kind| kind != "none")
+                .collect();
+            if !kinds.is_empty() {
+                attrs.push(AttrDef {
+                    name: "bus".into(),
+                    kind: AttrKind::Ref { to: kinds },
+                    // Omitting the bus selects the manifest's own busless
+                    // variant, when it has one.
+                    required: !transports
+                        .iter()
+                        .any(|transport| transport.kind == "none"),
+                    default: None,
+                    range: None,
+                    help: None,
+                    span: span.clone(),
+                });
+            }
+            for transport in &transports {
+                add_union_bus_attrs(&transport.bus, &mut attrs);
+            }
+        }
+    }
     for pin in &pins {
+        // `pin_or_ref` by default: a busless driver names its lines as bare
+        // numbers (`clk="6"`), and a bus device keeps `$<gpio>` working too.
+        // `via="ref"` restores the strict reference and its direction check.
+        let kind = if pin.ref_only {
+            AttrKind::Ref {
+                to: vec!["gpio".into()],
+            }
+        } else {
+            AttrKind::PinOrRef
+        };
         attrs.push(AttrDef {
             name: pin.name.clone(),
-            kind: AttrKind::Ref {
-                to: vec!["gpio".into()],
-            },
+            kind,
             required: !pin.optional,
             default: None,
             range: None,
@@ -351,32 +470,82 @@ pub(crate) fn parse_driver(node: &KdlNode, schema: &mut Schema, errors: &mut Vec
         }
     }
 
-    let Some(recipe) = build_recipe(
-        &tag,
-        &bus,
-        &pins,
-        &attrs,
-        &codegen,
-        &dependencies,
-        &parts,
-        errors,
-    ) else {
-        return;
+    // Build one recipe per transport. Every transport shares the driver's
+    // pins, attributes and `compose` blocks; only its bus and codegen differ.
+    let (recipe, transport_recipes) = if let Some((bus, codegen)) = single {
+        let Some(recipe) = build_recipe(
+            &tag,
+            bus,
+            &pins,
+            &attrs,
+            codegen,
+            &dependencies,
+            &parts,
+            errors,
+        ) else {
+            return;
+        };
+        (recipe, Vec::new())
+    } else {
+        let mut built: Vec<DeviceRecipe> = Vec::new();
+        for transport in &transports {
+            // A transport may amend the driver's dependency set: a dual-bus
+            // crate enables only the selected transport's Cargo feature.
+            let mut merged = dependencies.clone();
+            for dependency in &transport.dependencies {
+                absorb_dependency(&mut merged, dependency, &tag, transport, errors);
+            }
+            let Some(mut recipe) = build_recipe(
+                &tag,
+                &transport.bus,
+                &pins,
+                &attrs,
+                &transport.codegen,
+                &merged,
+                &parts,
+                errors,
+            ) else {
+                return;
+            };
+            recipe.dependencies = merged;
+            built.push(recipe);
+        }
+        // The element's own list is the union: it answers "what does this
+        // driver name at all" for readers that do not pick a transport.
+        // Emission reads each recipe's own list, so a project never enables
+        // the features of a transport it did not use.
+        for dependency in built
+            .iter()
+            .flat_map(|recipe| recipe.dependencies.iter())
+        {
+            match dependencies
+                .iter_mut()
+                .find(|known| known.package == dependency.package)
+            {
+                Some(known) if known.same_source(dependency) => known.absorb(dependency),
+                Some(_) => {}
+                None => dependencies.push(dependency.clone()),
+            }
+        }
+        let first = built
+            .first()
+            .cloned()
+            .expect("a multi-transport driver declares at least two transports");
+        (first, built)
     };
 
     let kind = category.clone().unwrap_or_else(|| "device".to_string());
-    let recipe = DeviceRecipe {
-        address: bus.address,
-        address_default: bus.address_default,
-        address_allowed: bus.address_allowed,
-        kind,
-        ..recipe
-    };
+    let mut recipe = recipe;
+    recipe.kind = kind.clone();
+    recipe.transports = transport_recipes;
+    for transport in &mut recipe.transports {
+        transport.kind = kind.clone();
+    }
 
     // v1 compatibility fields: `package` is the implementation crate, `expose`
     // the auxiliary ones. The emitter reads `dependencies` first; the pair is
     // kept so path resolution and lock v1 readers see the same shape.
-    let package = if codegen.feature.is_none() {
+    let package = if recipe.feature.is_empty() {
         implementation_dependency(&recipe, &dependencies)
     } else {
         None
@@ -413,6 +582,195 @@ pub(crate) fn parse_driver(node: &KdlNode, schema: &mut Schema, errors: &mut Vec
         source: None,
         span,
     });
+}
+
+/// Parse one `transport` block of a multi-transport `driver`.
+fn parse_transport(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<TransportDecl> {
+    let span = node_range(node);
+    let mut names = positional_strings(node, errors);
+    if names.is_empty() {
+        errors.push(err(
+            span,
+            "`transport` has no kind",
+            "write `transport \"i2c\" { .. }`",
+        ));
+        return None;
+    }
+    let (kind, kind_span) = names.remove(0);
+    if !matches!(kind.as_str(), "i2c" | "spi" | "uart" | "none") {
+        errors.push(err(
+            kind_span,
+            format!("`{kind}` is not a bus kind"),
+            "write `transport \"i2c\"`, `\"spi\"`, `\"uart\"` or `\"none\"`",
+        ));
+        return None;
+    }
+
+    let mut bus = None;
+    let mut codegen = None;
+    let mut dependencies = Vec::new();
+    for child in children(node) {
+        match child.name().value() {
+            "bus" => {
+                if bus.is_some() {
+                    errors.push(err(node_range(child), "`bus` given twice", "keep one"));
+                } else {
+                    bus = parse_bus(child, Some(&kind), errors);
+                }
+            }
+            "codegen" => {
+                if codegen.is_some() {
+                    errors.push(err(node_range(child), "`codegen` given twice", "keep one"));
+                } else {
+                    codegen = parse_codegen(child, errors);
+                }
+            }
+            "dependency" => {
+                if let Some(dependency) = parse_dependency(child, &kind, true, errors) {
+                    dependencies.push(dependency);
+                }
+            }
+            other => errors.push(err(
+                node_range(child),
+                format!("unknown node `{other}` in `transport \"{kind}\"`"),
+                "expected `bus`, `codegen` or `dependency`",
+            )),
+        }
+    }
+
+    let Some(bus) = bus else {
+        errors.push(err(
+            span.clone(),
+            format!("`transport \"{kind}\"` has no `bus`"),
+            "write `bus \"<kind>\" { .. }` inside the transport",
+        ));
+        return None;
+    };
+    if bus.kind != kind {
+        errors.push(err(
+            bus.span.clone(),
+            format!("`transport \"{kind}\"` declares a `{}` bus", bus.kind),
+            "the transport's kind and its bus agree",
+        ));
+        return None;
+    }
+    let Some(codegen) = codegen else {
+        errors.push(err(
+            span.clone(),
+            format!("`transport \"{kind}\"` has no `codegen`"),
+            "name at least one `runtime \"blocking\"` or `runtime \"async\"` block",
+        ));
+        return None;
+    };
+    Some(TransportDecl {
+        kind,
+        bus,
+        codegen,
+        dependencies,
+        span,
+    })
+}
+
+/// [`add_bus_attrs`] for one transport of a multi-transport driver.
+///
+/// The element accepts the union of every transport's bus attributes, so each
+/// is optional here: which one is required is decided by the bus the spec binds
+/// to, and lowering refuses a missing `address` or `cs` then.
+fn add_union_bus_attrs(bus: &BusDecl, attrs: &mut Vec<AttrDef>) {
+    match bus.kind.as_str() {
+        "i2c" => {
+            if matches!(bus.address, AddressNeed::None) && bus.address_allowed.is_none() {
+                return;
+            }
+            attrs.push(AttrDef {
+                name: "address".into(),
+                kind: AttrKind::Hex,
+                required: false,
+                default: bus
+                    .address_default
+                    .map(|address| format!("0x{address:02X}")),
+                range: None,
+                help: Some("7-bit I2C slave address.".into()),
+                span: bus.span.clone(),
+            });
+        }
+        "spi" => {
+            attrs.push(AttrDef {
+                name: "cs".into(),
+                kind: AttrKind::PinOrRef,
+                required: false,
+                default: None,
+                range: None,
+                help: Some("Chip-select GPIO number or a <gpio> reference.".into()),
+                span: bus.span.clone(),
+            });
+            if bus.spi_config {
+                attrs.push(AttrDef {
+                    name: "mode".into(),
+                    kind: AttrKind::Choice(vec!["0".into(), "1".into(), "2".into(), "3".into()]),
+                    required: false,
+                    default: Some(bus.mode.clone().unwrap_or_else(|| "0".into())),
+                    range: None,
+                    help: Some("SPI mode applied before each transaction.".into()),
+                    span: bus.span.clone(),
+                });
+                attrs.push(AttrDef {
+                    name: "frequency".into(),
+                    kind: AttrKind::Freq,
+                    required: false,
+                    default: Some(bus.frequency.clone().unwrap_or_else(|| "40000kHz".into())),
+                    range: None,
+                    help: Some("SPI clock applied before each transaction.".into()),
+                    span: bus.span.clone(),
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Fold one `transport`-scoped `dependency` into a recipe's dependency set.
+///
+/// A source-less block (`dependency "bme280" { features "i2c" }`) amends the
+/// crate the driver already declares; one that repeats a source must agree with
+/// it.
+fn absorb_dependency(
+    dependencies: &mut Vec<Dependency>,
+    dependency: &Dependency,
+    tag: &str,
+    transport: &TransportDecl,
+    errors: &mut Vec<SchemaError>,
+) {
+    let Some(known) = dependencies
+        .iter_mut()
+        .find(|known| known.package == dependency.package)
+    else {
+        if dependency.version.is_none() && dependency.path.is_none() && dependency.git.is_none() {
+            errors.push(err(
+                transport.span.clone(),
+                format!(
+                    "`dependency` `{}` in `transport \"{}\"` of `{tag}` names no source",
+                    dependency.package, transport.kind
+                ),
+                "name a `version`, `path` or `git`, or declare the crate at the driver level",
+            ));
+        } else {
+            dependencies.push(dependency.clone());
+        }
+        return;
+    };
+    if !known.same_source(dependency) {
+        errors.push(err(
+            transport.span.clone(),
+            format!(
+                "`dependency` `{}` in `transport \"{}\"` of `{tag}` names another source",
+                dependency.package, transport.kind
+            ),
+            "a transport adds features to the driver's crate, it does not replace it",
+        ));
+        return;
+    }
+    known.absorb(dependency);
 }
 
 fn add_bus_attrs(bus: &BusDecl, attrs: &mut Vec<AttrDef>) {
@@ -503,6 +861,7 @@ fn implementation_dependency(
 fn parse_dependency(
     node: &KdlNode,
     tag: &str,
+    amendment: bool,
     errors: &mut Vec<SchemaError>,
 ) -> Option<Dependency> {
     let span = node_range(node);
@@ -566,7 +925,9 @@ fn parse_dependency(
         .into_iter()
         .filter(|chosen| *chosen)
         .count();
-    if chosen != 1 {
+    // A `transport` block may amend a crate the driver already declares, so
+    // it is allowed to name features alone.
+    if chosen != 1 && !(amendment && chosen == 0) {
         errors.push(err(
             span.clone(),
             format!("`dependency` `{package}` in `{tag}` names {chosen} sources"),
@@ -624,23 +985,37 @@ fn child_flag_option(node: &KdlNode, key: &str) -> Option<bool> {
     None
 }
 
-fn parse_bus(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<BusDecl> {
+fn parse_bus(
+    node: &KdlNode,
+    transport_kind: Option<&str>,
+    errors: &mut Vec<SchemaError>,
+) -> Option<BusDecl> {
     let span = node_range(node);
     let mut names = positional_strings(node, errors);
-    if names.is_empty() {
-        errors.push(err(
-            span,
-            "`bus` has no kind",
-            "write `bus \"i2c\"`, `bus \"spi\"` or `bus \"uart\"`",
-        ));
-        return None;
-    }
-    let (kind, kind_span) = names.remove(0);
-    if !matches!(kind.as_str(), "i2c" | "spi" | "uart") {
+    // Inside a `transport` block the kind is the transport's own, so `bus
+    // { .. }` names no kind and `bus "i2c" { .. }` must agree with it.
+    let (kind, kind_span) = if !names.is_empty() {
+        names.remove(0)
+    } else {
+        match transport_kind {
+            Some(kind) => (kind.to_string(), span.clone()),
+            None => {
+                errors.push(err(
+                    span,
+                    "`bus` has no kind",
+                    "write `bus \"i2c\"`, `bus \"spi\"` or `bus \"uart\"`",
+                ));
+                return None;
+            }
+        }
+    };
+    // `none` is a busless driver: its transport is the pins it claims, so it
+    // declares no peripheral and no `bus=` attribute.
+    if !matches!(kind.as_str(), "i2c" | "spi" | "uart" | "none") {
         errors.push(err(
             kind_span,
             format!("`{kind}` is not a bus kind"),
-            "write `bus \"i2c\"`, `bus \"spi\"` or `bus \"uart\"`",
+            "write `bus \"i2c\"`, `bus \"spi\"`, `bus \"uart\"` or `bus \"none\"`",
         ));
         return None;
     }
@@ -811,6 +1186,11 @@ fn parse_bus(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<BusDecl> {
                 format!("unknown node `{other}` in `bus \"uart\"`"),
                 "a uart bus has no bus-level configuration",
             )),
+            ("none", other) => errors.push(err(
+                node_range(child),
+                format!("unknown node `{other}` in `bus \"none\"`"),
+                "a busless driver has no bus-level configuration",
+            )),
             _ => {}
         }
     }
@@ -832,11 +1212,13 @@ fn parse_pin(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<PinDecl> {
             "output" => PinDirection::Output,
             "input" => PinDirection::Input,
             "bidirectional" => PinDirection::Bidirectional,
+            "open_drain" | "open-drain" => PinDirection::OpenDrain,
             other => {
                 errors.push(err(
                     at,
                     format!("`{other}` is not a pin direction"),
-                    "write `direction=\"output\"`, `\"input\"` or `\"bidirectional\"`",
+                    "write `direction=\"output\"`, `\"input\"`, `\"bidirectional\"` or \
+                     `\"open_drain\"`",
                 ));
                 PinDirection::Output
             }
@@ -845,10 +1227,10 @@ fn parse_pin(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<PinDecl> {
     };
     let level = match prop(node, "default_level", errors) {
         Some((level, at)) => {
-            if !matches!(direction, PinDirection::Output) {
+            if !matches!(direction, PinDirection::Output | PinDirection::OpenDrain) {
                 errors.push(err(
                     at.clone(),
-                    "`default_level` is for an output pin",
+                    "`default_level` is for a driven pin",
                     "an input starts at its pull resistor and a bidirectional line \
                      starts released; drop `default_level`",
                 ));
@@ -905,12 +1287,29 @@ fn parse_pin(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<PinDecl> {
         ));
     }
 
+    let ref_only = match prop(node, "via", errors) {
+        Some((spelling, at)) => match spelling.as_str() {
+            "ref" => true,
+            "pin_or_ref" => false,
+            other => {
+                errors.push(err(
+                    at,
+                    format!("`{other}` is not a pin form"),
+                    "write `via=\"ref\"` for a `$<gpio>` reference, or drop it",
+                ));
+                false
+            }
+        },
+        None => false,
+    };
+
     Some(PinDecl {
         name,
         direction,
         level,
         pull,
         optional,
+        ref_only,
         span,
     })
 }
@@ -1194,10 +1593,17 @@ fn parse_runtime(
                     );
                 }
             }
+            // `then { call "init({delay})" awaits #true }`: a method call the
+            // device runs after its constructor returns, in the order written.
+            "then" => {
+                if let Some(step) = parse_step(child, asynchronous, errors) {
+                    runtime.steps.push(step);
+                }
+            }
             other => errors.push(err(
                 node_range(child),
                 format!("unknown node `{other}` in `runtime`"),
-                "expected type, constructor, endpoint, feature or awaits",
+                "expected type, constructor, endpoint, feature, awaits or then",
             )),
         }
     }
@@ -1216,6 +1622,174 @@ fn parse_runtime(
         ));
     }
     Some(runtime)
+}
+
+/// One `then` step: a single method call on the device the constructor built.
+///
+/// The receiver is the generated local, never text: a manifest may name the
+/// order of calls and their arguments, and nothing else.
+fn parse_step(
+    node: &KdlNode,
+    asynchronous: bool,
+    errors: &mut Vec<SchemaError>,
+) -> Option<StepDecl> {
+    let span = node_range(node);
+    let mut call_text = None;
+    let mut saw_call = false;
+    // A blocking step is a plain call; an async one is awaited unless it says
+    // the crate's `init` is a synchronous `fn`.
+    let mut awaits = asynchronous;
+    for child in children(node) {
+        match child.name().value() {
+            "call" => {
+                saw_call = true;
+                // `awaits` is a line of its own, as it is in `runtime`; writing
+                // it beside the string would make it a second argument.
+                if child
+                    .entries()
+                    .iter()
+                    .filter(|entry| entry.name().is_none())
+                    .any(|entry| entry.value().as_string() == Some("awaits"))
+                {
+                    errors.push(err(
+                        node_range(child),
+                        "`awaits` is a step line, not part of `call`",
+                        "keep `call \"..\"` and write `awaits #false` on the next line",
+                    ));
+                    continue;
+                }
+                let Some((text, at)) = positional_strings(child, errors).into_iter().next() else {
+                    errors.push(err(
+                        node_range(child),
+                        "`call` takes a string",
+                        "write `call \"init({delay})\"`",
+                    ));
+                    continue;
+                };
+                if call_text.is_some() {
+                    errors.push(err(
+                        node_range(child),
+                        "`then` has two `call`s",
+                        "one method call per `then`",
+                    ));
+                    continue;
+                }
+                if text.trim_start().starts_with("self.") {
+                    errors.push(err(
+                        at,
+                        "a `then` step takes no receiver",
+                        "write `call \"init({delay})\"`: the device is the receiver",
+                    ));
+                    continue;
+                }
+                match crate::syntax::step_call(&text) {
+                    Ok(call) => {
+                        if !matches!(
+                            call.as_syn(),
+                            Expr::MethodCall(method) if crate::syntax::is_step_receiver(&method.receiver)
+                        ) {
+                            errors.push(err(
+                                at,
+                                "a `then` step must be one method call on the device",
+                                "write `call \"init({delay})\"`: the step names no receiver",
+                            ));
+                            continue;
+                        }
+                    }
+                    Err((message, label)) => {
+                        errors.push(err(at, message, label));
+                        continue;
+                    }
+                }
+                call_text = Some(text);
+            }
+            // `awaits #false`: a step's call is a plain `fn`, the same flag
+            // the constructor's own `awaits` uses.
+            "awaits" => {
+                if !asynchronous {
+                    errors.push(err(
+                        node_range(child),
+                        "`awaits` belongs to the async runtime",
+                        "a blocking step is a plain method call",
+                    ));
+                }
+                awaits = asynchronous
+                    && child
+                        .entries()
+                        .iter()
+                        .find(|entry| entry.name().is_none())
+                        .map(|entry| entry.value().as_bool() != Some(false))
+                        .unwrap_or(true);
+            }
+            other => errors.push(err(
+                node_range(child),
+                format!("unknown node `{other}` in `then`"),
+                "write `then { call \"init({delay})\" }`",
+            )),
+        }
+    }
+    if call_text.is_none() && !saw_call {
+        errors.push(err(
+            span.clone(),
+            "`then` has no `call`",
+            "write `then { call \"init({delay})\" }`",
+        ));
+    }
+    call_text.map(|text| StepDecl {
+        text,
+        awaits,
+        span,
+    })
+}
+
+/// The `then` steps of one runtime block, checked against the constructor.
+///
+/// A step resolves from the constructor's own arguments, so every hole it
+/// names must be one of them: a step has no other way to reach a value.
+fn parse_steps(
+    runtime: Option<&RuntimeDecl>,
+    args: &[crate::CtorArg],
+    errors: &mut Vec<SchemaError>,
+) -> Vec<crate::Step> {
+    let Some(runtime) = runtime else {
+        return Vec::new();
+    };
+    let known: Vec<&str> = args
+        .iter()
+        .filter_map(|arg| match arg {
+            crate::CtorArg::Address => Some("address"),
+            crate::CtorArg::Slot(arg) => Some(arg.name.as_str()),
+            crate::CtorArg::Fixed { .. } => None,
+        })
+        .collect();
+    let mut steps = Vec::new();
+    for decl in &runtime.steps {
+        let mut usable = true;
+        let names = crate::syntax::substitute(&decl.text)
+            .map(|(_, names)| names)
+            .unwrap_or_default();
+        for name in names {
+            // `{dc_pin}` is the spelling the phase-8 format uses; `{dc}` is
+            // the pin's own name, and both mean the same claimed line.
+            let pin = name.strip_suffix("_pin").unwrap_or(name.as_str());
+            if !known.iter().any(|arg| *arg == name.as_str() || *arg == pin) {
+                errors.push(err(
+                    decl.span.clone(),
+                    format!("`{{{name}}}` in a `then` step is not a constructor argument"),
+                    "a step reads only the values the constructor already takes",
+                ));
+                usable = false;
+            }
+        }
+        if usable {
+            steps.push(crate::Step {
+                text: decl.text.clone(),
+                awaits: decl.awaits,
+                span: decl.span.clone(),
+            });
+        }
+    }
+    steps
 }
 
 fn parse_map(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<MapDecl> {
@@ -1402,9 +1976,7 @@ fn build_recipe(
     )?;
     // The address keeps the place the manifest gave it: directly after the
     // bus, which is what both the crate's `new` and a deferred factory expect.
-    let address_at = ctor_args
-        .iter()
-        .position(|spec| spec.name() == Some("address"));
+    let address_at = ctor_args.iter().position(|spec| spec.uses("address"));
     if let Some(index) = address_at {
         if index != 0 {
             errors.push(err(
@@ -1459,6 +2031,7 @@ fn build_recipe(
                 map: None,
                 pin: Some(pin_template(pin.direction, pin.level, pin.pull)),
                 direction: pin.direction,
+                open_drain: matches!(pin.direction, PinDirection::OpenDrain),
                 level: Some(pin.level.word()),
                 pull: Some(pin.pull.word()),
                 span: at,
@@ -1491,6 +2064,7 @@ fn build_recipe(
             map: Some(entries),
             pin: None,
             direction: PinDirection::Output,
+            open_drain: false,
             level: None,
             pull: None,
             span: at,
@@ -1509,7 +2083,12 @@ fn build_recipe(
             ),
         ));
     }
-    let (runtimes, async_mode) = match (&codegen.blocking, &codegen.asynchronous) {
+    // A `then` step runs on the device the constructor built, so it may only
+    // name values the constructor already takes: emission fills a step from
+    // the same arguments, and there is nothing else it could reach.
+    let steps = parse_steps(codegen.blocking.as_ref(), &args, errors);
+    let async_steps = parse_steps(codegen.asynchronous.as_ref(), &args, errors);
+    let (runtimes, mut async_mode) = match (&codegen.blocking, &codegen.asynchronous) {
         (Some(_), Some(runtime)) => {
             let (async_ty, async_span) = runtime.ty.clone()?;
             validate_type(&async_ty, async_span.clone(), errors);
@@ -1557,6 +2136,7 @@ fn build_recipe(
                     new: Some(async_new),
                     feature: runtime.feature.clone(),
                     endpoint: runtime.endpoint.clone(),
+                    steps: Vec::new(),
                     awaits: runtime.awaits.unwrap_or(true),
                 },
             )
@@ -1577,12 +2157,14 @@ fn build_recipe(
                     new: Some(new.clone()),
                     feature: runtime.feature.clone(),
                     endpoint: endpoint.clone(),
+                    steps: Vec::new(),
                     awaits: runtime.awaits.unwrap_or(true),
                 },
             )
         }
         (None, None) => unreachable!("checked above"),
     };
+    async_mode.steps = async_steps;
 
     Some(DeviceRecipe {
         bus: bus.kind.clone(),
@@ -1596,6 +2178,7 @@ fn build_recipe(
             .map(|dependency| dependency.package.clone())
             .collect(),
         args,
+        steps,
         parts: parts.to_vec(),
         runtimes,
         async_mode,
@@ -1614,6 +2197,8 @@ fn build_recipe(
         address: bus.address,
         address_default: bus.address_default,
         address_allowed: bus.address_allowed,
+        dependencies: Vec::new(),
+        transports: Vec::new(),
         span: codegen.span.clone(),
     })
 }
@@ -1640,6 +2225,14 @@ impl CtorSpec {
         }
     }
 
+    /// Whether this argument fills `name`, as a slot or inside an expression.
+    fn uses(&self, name: &str) -> bool {
+        match self {
+            CtorSpec::Placeholder { name: known, .. } => known == name,
+            CtorSpec::Fixed { text, .. } => crate::syntax::uses_placeholder(text, name),
+        }
+    }
+
     fn span(&self) -> &Range<usize> {
         match self {
             CtorSpec::Placeholder { span, .. } | CtorSpec::Fixed { span, .. } => span,
@@ -1655,6 +2248,88 @@ impl CtorSpec {
             CtorSpec::Fixed { text, .. } => Some((None, Some(text.as_str()))),
         }
     }
+}
+
+/// The holes a fixed argument may carry inside an expression.
+///
+/// Every other slot is a whole argument: a probe line is claimed and deferred on
+/// its own, and a mapped value is resolved by the position it sits in. The bus
+/// and the address are values the element passes through to a nested
+/// constructor, so they may sit where the crate asks for them.
+const WRAPPED_HOLES: [&str; 3] = ["bus_device", "spi_device", "address"];
+
+/// Check a fixed argument's holes, returning the names it carries.
+///
+/// An empty list is today's argument: a value the manifest already knows.
+fn wrapped_argument(argument: &Expr, first: bool) -> Result<Vec<String>, (String, String)> {
+    let holes = sentinels(&quote::quote!(#argument).to_string());
+    if holes.is_empty() {
+        return Ok(holes);
+    }
+    if let Some(unknown) = holes
+        .iter()
+        .find(|hole| !WRAPPED_HOLES.contains(&hole.as_str()))
+    {
+        return Err((
+            format!("`{{{unknown}}}` must be an argument of its own"),
+            "only `{bus_device}`, `{spi_device}` and `{address}` may sit inside an expression".into(),
+        ));
+    }
+    let buses = holes
+        .iter()
+        .filter(|hole| matches!(hole.as_str(), "bus_device" | "spi_device"))
+        .count();
+    if buses > 1 {
+        return Err((
+            "the constructor takes the bus twice".into(),
+            "write `{bus_device}` once: one bus wrapper per argument".into(),
+        ));
+    }
+    if buses == 0 {
+        return Err((
+            "`{address}` must come directly after the bus argument".into(),
+            "write `Type::new({bus_device}, {address})`".into(),
+        ));
+    }
+    if !first {
+        return Err((
+            "the bus argument must come first".into(),
+            "put the wrapper constructor at the front of the constructor".into(),
+        ));
+    }
+    Ok(holes)
+}
+
+/// The `{name}` holes a substituted expression still carries, in order and
+/// without repeats.
+fn sentinels(tokens: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = tokens;
+    while let Some(at) = rest.find("__espforge_") {
+        rest = &rest[at + "__espforge_".len()..];
+        let end = rest
+            .find(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .unwrap_or(rest.len());
+        let name = &rest[..end];
+        if !name.is_empty() && !out.iter().any(|known| known == name) {
+            out.push(name.to_string());
+        }
+        rest = &rest[end..];
+    }
+    out
+}
+
+/// A fixed argument's text with its holes spelled `{name}` again.
+///
+/// Longer names go first so `{bus_device_extra}` is not rewritten by the
+/// `{bus_device}` replacement.
+fn template_text(argument: &Expr, mut holes: Vec<String>) -> String {
+    let mut text = quote::quote!(#argument).to_string();
+    holes.sort_by_key(|hole| std::cmp::Reverse(hole.len()));
+    for hole in holes {
+        text = text.replace(&format!("__espforge_{hole}"), &format!("{{{hole}}}"));
+    }
+    text
 }
 
 /// A constructor argument reduced to what two constructors must agree on.
@@ -1676,7 +2351,14 @@ fn parse_constructor(
     ctx: &ConstructorCtx<'_>,
     errors: &mut Vec<SchemaError>,
 ) -> Option<ConstructorArgs> {
-    let mut allowed: Vec<&str> = vec!["bus_device", "cs_pin", "spi_device", "address"];
+    // A busless constructor takes no bus and no address: its slots are the
+    // declared pins, mapped attributes and fixed expressions.
+    let busless = ctx.bus.kind == "none";
+    let mut allowed: Vec<&str> = if busless {
+        Vec::new()
+    } else {
+        vec!["bus_device", "cs_pin", "spi_device", "address"]
+    };
     allowed.extend(ctx.attrs.iter().map(|attr| attr.name.as_str()));
     for pin in ctx.pins {
         allowed.push(pin.name.as_str());
@@ -1738,27 +2420,22 @@ fn parse_constructor(
             _ => None,
         };
         let Some(placeholder) = placeholder else {
-            // The text is the substituted one, so a leftover sentinel means the
-            // manifest wrote a hole inside a compound expression.
-            let text = quote::quote!(#argument).to_string();
-            if text.contains("__espforge_") {
-                errors.push(err(
-                    span.clone(),
-                    "a fixed constructor argument takes no `{placeholder}`",
-                    "write the value there, or make the whole argument a slot",
-                ));
-                continue;
+            // A fixed argument may still hole out the bus and the address: a
+            // driver that takes a wrapper (`I2CExpander::new({bus_device},
+            // {address})`) is manifest-only too.
+            match wrapped_argument(&argument, args.is_empty()) {
+                Ok(holes) => args.push(CtorSpec::Fixed {
+                    text: template_text(&argument, holes),
+                    span: span.clone(),
+                }),
+                Err((message, label)) => errors.push(err(span.clone(), message, label)),
             }
-            args.push(CtorSpec::Fixed {
-                text,
-                span: span.clone(),
-            });
             continue;
         };
         let resolved = resolve_pin(ctx.pins, &placeholder)
             .map(str::to_string)
             .unwrap_or_else(|| placeholder.clone());
-        if args.iter().any(|known| known.name() == Some(resolved.as_str())) {
+        if args.iter().any(|known| known.uses(&resolved)) {
             errors.push(err(
                 span.clone(),
                 format!("`{{{placeholder}}}` appears twice in the constructor"),
@@ -1810,15 +2487,34 @@ fn parse_constructor(
             span: span.clone(),
         });
     }
-    let first = args.first().and_then(CtorSpec::name);
-    if !matches!(first, Some("bus_device" | "spi_device")) {
-        errors.push(err(
-            span,
-            "the constructor must take the bus first",
-            "write `({bus_device}, ..)` or `({spi_device}, ..)`",
-        ));
+    // A busless constructor has no bus to consume, so every argument stays.
+    if busless {
+        return Some((new, args));
     }
-    Some((new, args.into_iter().skip(1).collect()))
+
+    // A wrapper constructor takes the bus inside its first argument; a plain
+    // one takes it as its own first argument. Either way the bus is consumed
+    // once, at the front, and what follows is the device's own arguments.
+    let wrapped = matches!(
+        args.first(),
+        Some(CtorSpec::Fixed { text, .. })
+            if crate::syntax::uses_placeholder(text, "bus_device")
+                || crate::syntax::uses_placeholder(text, "spi_device")
+    );
+    if !wrapped {
+        let first = args.first().and_then(CtorSpec::name);
+        if !matches!(first, Some("bus_device" | "spi_device")) {
+            errors.push(err(
+                span,
+                "the constructor must take the bus first",
+                "write `({bus_device}, ..)` or `({spi_device}, ..)`",
+            ));
+        }
+        if !args.is_empty() {
+            args.remove(0);
+        }
+    }
+    Some((new, args))
 }
 
 fn placeholder_of(path: &syn::Path) -> Option<String> {
@@ -2045,6 +2741,11 @@ fn pin_template(direction: PinDirection, level: Level, pull: Pull) -> String {
             "espforge_runtime::Bidirectional::new(unsafe {{ registry.peripherals.GPIO{{n}}.clone_unchecked() }}, esp_hal::gpio::Pull::{})",
             pull.word()
         ),
+        PinDirection::OpenDrain => format!(
+            "espforge_runtime::OpenDrainPin::new(unsafe {{ registry.peripherals.GPIO{{n}}.clone_unchecked() }}, esp_hal::gpio::Level::{}, esp_hal::gpio::Pull::{})",
+            level.word(),
+            pull.word()
+        ),
     }
 }
 
@@ -2075,6 +2776,269 @@ driver "demo" {
     example "minimal" #"<demo id="d" bus="$i2c0" />"#
 }
 "##;
+
+    /// A `bus "none"` driver: no bus peripheral, no `bus` attribute, and a
+    /// constructor that takes only its own pins and mapped values.
+    const BUSLESS: &str = r##"
+driver "hx711" {
+    format_version 2
+    summary "HX711 load-cell ADC"
+    category "sensor"
+    dependency "loadcell" { version "0.2.0" }
+    bus "none"
+    pin "sck" direction="output" default_level="low"
+    pin "dout" direction="input" pull="none"
+    codegen {
+        fallible #false
+        map "delay" { "runtime" { expr "espforge_runtime::Delay::new()" } }
+        runtime "blocking" {
+            type "loadcell::hx711::HX711<espforge_runtime::OutputPin, espforge_runtime::InputPin, espforge_runtime::Delay>"
+            constructor "loadcell::hx711::HX711::new({sck}, {dout}, {delay})"
+        }
+    }
+    attr "delay" kind="choice" default="runtime" { choices "runtime" }
+    example "minimal" #"<hx711 id="scale" sck="4" dout="5" />"#
+}
+"##;
+
+    /// A dual-bus part declares one `transport` block per bus kind. The
+    /// element accepts the union of their bus attributes, each optional, and
+    /// keeps one recipe per kind.
+    const MULTI: &str = r##"
+driver "dual" {
+    format_version 2
+    summary "Dual-bus sensor"
+    category "sensor"
+    dependency "dual" { version "1.0.0" }
+
+    transport "i2c" {
+        bus { address default="0x76" }
+        codegen {
+            fallible #false
+            runtime "blocking" {
+                type "dual::i2c::Dual"
+                constructor "dual::i2c::Dual::new({bus_device}, {address})"
+            }
+        }
+        dependency "dual" { features "i2c" }
+    }
+    transport "spi" {
+        bus { mode 3 frequency "10000kHz" }
+        codegen {
+            fallible #false
+            runtime "blocking" {
+                type "dual::spi::Dual"
+                constructor "dual::spi::Dual::new({spi_device})"
+            }
+        }
+        dependency "dual" { features "spi" }
+    }
+
+    example "i2c" #"<dual id="d" bus="$i2c0" address="0x76" />"#
+    example "spi" #"<dual id="d" bus="$spi2" cs="10" />"#
+}
+"##;
+
+    #[test]
+    fn a_multi_transport_driver_loads_one_recipe_per_kind() {
+        let schema = load(MULTI).expect("the driver loads");
+        let element = schema.element("dual").expect("tag");
+        let recipe = element.device_recipe.as_ref().expect("a recipe");
+        assert_eq!(recipe.bus, "i2c", "the first transport is the element's own");
+        assert_eq!(recipe.transports.len(), 2);
+        assert_eq!(recipe.transports[0].bus, "i2c");
+        assert_eq!(recipe.transports[1].bus, "spi");
+        assert_eq!(recipe.transports[1].ty, "dual::spi::Dual");
+        assert!(recipe.transports[1].spi_config);
+
+        // The union of bus attributes is optional: which one is required is
+        // decided by the bus the spec binds to, at lowering time.
+        let bus = element
+            .attrs
+            .iter()
+            .find(|attr| attr.name == "bus")
+            .expect("the bus attribute");
+        assert!(bus.required);
+        assert!(matches!(
+            &bus.kind,
+            AttrKind::Ref { to } if to.as_slice() == ["i2c", "spi"]
+        ));
+        for name in ["address", "cs", "mode", "frequency"] {
+            let attr = element
+                .attrs
+                .iter()
+                .find(|attr| attr.name == name)
+                .unwrap_or_else(|| panic!("`{name}` is in the union"));
+            assert!(!attr.required, "`{name}` is optional on the element");
+        }
+        let mode = element
+            .attrs
+            .iter()
+            .find(|attr| attr.name == "mode")
+            .expect("mode is in the union");
+        assert_eq!(mode.default.as_deref(), Some("3"));
+
+        // Only the selected transport's Cargo features reach the project.
+        assert_eq!(recipe.transports[0].dependencies[0].features, ["i2c"]);
+        assert_eq!(recipe.transports[1].dependencies[0].features, ["spi"]);
+    }
+
+    #[test]
+    fn a_multi_transport_driver_keeps_its_bus_and_codegen_in_the_transports() {
+        let bad = MULTI.replace(
+            "    transport \"i2c\" {",
+            "    bus \"i2c\" {}\n    codegen {}\n    transport \"i2c\" {",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("both `transport`")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_single_transport_block_is_not_multi_transport() {
+        let text = r##"
+driver "dual" {
+    format_version 2
+    summary "One bus"
+    dependency "dual" { version "1.0.0" }
+    transport "i2c" {
+        bus { address default="0x76" }
+        codegen {
+            fallible #false
+            runtime "blocking" {
+                type "dual::i2c::Dual"
+                constructor "dual::i2c::Dual::new({bus_device}, {address})"
+            }
+        }
+    }
+    example "i2c" #"<dual id="d" bus="$i2c0" />"#
+}
+"##;
+        let errors = load(text).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("only one `transport`")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_transport_kind_must_match_its_bus() {
+        let bad = MULTI.replace(
+            "    transport \"spi\" {\n        bus { mode 3 frequency \"10000kHz\" }",
+            "    transport \"uart\" {\n        bus \"spi\" { mode 3 frequency \"10000kHz\" }",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("declares a `spi` bus")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_duplicate_transport_kind_is_refused() {
+        let bad = MULTI
+            .replace("    transport \"spi\" {", "    transport \"i2c\" {")
+            .replace(
+                "bus { mode 3 frequency \"10000kHz\" }",
+                "bus { address default=\"0x77\" }",
+            );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "duplicate `transport` `i2c`"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_busless_driver_loads_without_a_bus_attribute() {
+        let schema = load(BUSLESS).expect("the driver loads");
+        let element = schema.element("hx711").expect("tag");
+        let recipe = element.device_recipe.as_ref().expect("a recipe");
+        assert_eq!(recipe.bus, "none");
+        assert_eq!(recipe.new, "loadcell::hx711::HX711::new");
+        assert_eq!(recipe.args.len(), 3, "two pins and the delay map");
+        assert!(
+            !element.attrs.iter().any(|attr| attr.name == "bus"),
+            "a busless driver declares no `bus` attribute"
+        );
+        let sck = element
+            .attrs
+            .iter()
+            .find(|attr| attr.name == "sck")
+            .expect("the pin is declared");
+        assert!(
+            matches!(sck.kind, AttrKind::PinOrRef),
+            "a busless driver names its lines by number"
+        );
+        assert!(element.attrs.iter().any(|attr| attr.name == "delay"));
+    }
+
+    #[test]
+    fn an_open_drain_pin_is_a_bidirectional_claim() {
+        let text = BUSLESS
+            .replace(
+                "direction=\"output\" default_level=\"low\"",
+                "direction=\"open_drain\" default_level=\"high\"",
+            )
+            .replace(
+                "direction=\"input\" pull=\"none\"",
+                "direction=\"open_drain\" default_level=\"high\"",
+            );
+        let schema = load(&text).expect("open-drain pins load");
+        let recipe = schema
+            .element("hx711")
+            .expect("tag")
+            .device_recipe
+            .clone()
+            .expect("a recipe");
+        let drains: Vec<_> = recipe
+            .args
+            .iter()
+            .filter_map(|arg| arg.slot())
+            .filter(|arg| arg.direction == PinDirection::OpenDrain)
+            .collect();
+        assert_eq!(drains.len(), 2);
+        assert!(drains.iter().all(|arg| arg.open_drain));
+    }
+
+    #[test]
+    fn a_busless_driver_cannot_take_a_bus() {
+        let text = BUSLESS.replace(
+            "HX711::new({sck}, {dout}, {delay})",
+            "HX711::new({bus_device}, {sck}, {dout}, {delay})",
+        );
+        let errors = load(&text).unwrap_err();
+        assert!(
+            format!("{errors:?}").contains("bus_device"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_busless_driver_needs_a_pin() {
+        let text = BUSLESS
+            .replace(
+                "    pin \"sck\" direction=\"output\" default_level=\"low\"\n",
+                "",
+            )
+            .replace("    pin \"dout\" direction=\"input\" pull=\"none\"\n", "")
+            .replace("HX711::new({sck}, {dout}, {delay})", "HX711::new({delay})");
+        let errors = load(&text).unwrap_err();
+        assert!(
+            format!("{errors:?}").contains("declares no pin"),
+            "{errors:?}"
+        );
+    }
 
     #[test]
     fn a_v2_driver_loads_into_the_device_model() {
@@ -2256,21 +3220,157 @@ driver "demo" {
         assert_eq!(text(&recipe.args[2]), "20");
     }
 
-    /// A fixed argument is an expression, not a template: a slot inside one
-    /// would reach emission as a sentinel.
+    /// A driver that takes a wrapper around the bus is still manifest-only: the
+    /// bus and the address may sit inside the first argument.
     #[test]
-    fn a_fixed_argument_takes_no_placeholder() {
+    fn a_wrapper_argument_takes_the_bus_and_the_address() {
+        let wrapped = DRIVER.replace(
+            "constructor \"demo::Demo::new({bus_device}, {address})\"",
+            "constructor \"demo::Demo::new(expander::Expander::new({bus_device}, {address}), 20)\"",
+        );
+        let schema = load(&wrapped).expect("a wrapped constructor loads");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert_eq!(recipe.new, "demo::Demo::new");
+        assert_eq!(recipe.args.len(), 2);
+        let text = |arg: &crate::CtorArg| match arg {
+            crate::CtorArg::Fixed { text, .. } => text.clone(),
+            other => panic!("a fixed argument, not {other:?}"),
+        };
+        let expander = text(&recipe.args[0]);
+        assert!(expander.contains("{bus_device}"), "{expander}");
+        assert!(expander.contains("{address}"), "{expander}");
+        assert_eq!(text(&recipe.args[1]), "20");
+    }
+
+    /// Every other slot is a whole argument: a probe line is claimed on its own
+    /// and a mapped value is resolved by the position it sits in.
+    #[test]
+    fn a_slot_must_be_an_argument_of_its_own() {
         let bad = DRIVER.replace(
             "constructor \"demo::Demo::new({bus_device}, {address})\"",
-            "constructor \"demo::Demo::new({bus_device}, {address}, demo::wrap({address}))\"",
+            "constructor \"demo::Demo::new({bus_device}, demo::wrap({init}))\"",
         );
         let errors = load(&bad).unwrap_err();
         assert!(
             errors
                 .iter()
-                .any(|error| error.message == "a fixed constructor argument takes no `{placeholder}`"),
+                .any(|error| error.message == "`{init}` must be an argument of its own"),
             "{errors:?}"
         );
+    }
+
+    /// The address rides with the bus, wherever the bus is.
+    #[test]
+    fn a_wrapped_address_needs_the_bus_beside_it() {
+        let bad = DRIVER.replace(
+            "constructor \"demo::Demo::new({bus_device}, {address})\"",
+            "constructor \"demo::Demo::new({bus_device}, demo::wrap({address}))\"",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("must come directly after the bus argument")),
+            "{errors:?}"
+        );
+    }
+
+    /// A constructor plus the calls the device needs after it: the manifest
+    /// names the order of calls, and nothing else.
+    #[test]
+    fn a_then_step_runs_after_the_constructor() {
+        let text = DRIVER.replace(
+            "            endpoint \"demo::Endpoint\"\n",
+            "            endpoint \"demo::Endpoint\"\n            then { call \"set_address({address})\" }\n",
+        );
+        let schema = load(&text).expect("a step loads");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert_eq!(recipe.steps.len(), 1);
+        assert_eq!(recipe.steps[0].text, "set_address({address})");
+        assert!(!recipe.steps[0].awaits, "a blocking step is a plain call");
+        let call = recipe.steps[0].call().expect("a parsed call");
+        assert!(call.text().contains("__espforge_receiver"), "{call:?}");
+        assert!(call.text().contains("__espforge_address"), "{call:?}");
+        assert!(recipe.async_mode.steps.is_empty());
+    }
+
+    /// A step reads only what the constructor already takes: a value it cannot
+    /// reach is a manifest error, not a `rustc` one.
+    #[test]
+    fn a_then_step_names_only_constructor_values() {
+        let bad = DRIVER.replace(
+            "            endpoint \"demo::Endpoint\"\n",
+            "            endpoint \"demo::Endpoint\"\n            then { call \"init({init})\" }\n",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error.message
+                == "`{init}` in a `then` step is not a constructor argument"),
+            "{errors:?}"
+        );
+    }
+
+    /// A step takes no receiver text: the generated code calls it on the value
+    /// it just built, which is what keeps a manifest from reaching elsewhere.
+    #[test]
+    fn a_then_step_takes_no_receiver() {
+        let bad = DRIVER.replace(
+            "            endpoint \"demo::Endpoint\"\n",
+            "            endpoint \"demo::Endpoint\"\n            then { call \"self.init()\" }\n",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "a `then` step takes no receiver"),
+            "{errors:?}"
+        );
+    }
+
+    /// `awaits` is the async runtime's: a blocking step is a plain call.
+    #[test]
+    fn awaits_belongs_to_the_async_runtime() {
+        let bad = DRIVER.replace(
+            "            endpoint \"demo::Endpoint\"\n",
+            "            endpoint \"demo::Endpoint\"\n            then {\n                call \"init()\"\n                awaits #true\n            }\n",
+        );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "`awaits` belongs to the async runtime"),
+            "{errors:?}"
+        );
+    }
+
+    /// Steps are per runtime: the async half may call a synchronous `init`
+    /// even though its constructor is awaited.
+    #[test]
+    fn an_async_step_says_when_it_is_not_awaited() {
+        let dual = DRIVER.replace(
+            "        runtime \"blocking\" {\n            type \"demo::Demo\"\n            constructor \"demo::Demo::new({bus_device}, {address})\"\n            endpoint \"demo::Endpoint\"\n        }\n",
+            "        runtime \"blocking\" {\n            type \"demo::Demo\"\n            constructor \"demo::Demo::new({bus_device}, {address})\"\n            endpoint \"demo::Endpoint\"\n        }\n        runtime \"async\" {\n            type \"demo::Demo\"\n            constructor \"demo::Demo::new({bus_device}, {address})\"\n            endpoint \"demo::Endpoint\"\n            then {\n                call \"init()\"\n                awaits #false\n            }\n        }\n",
+        );
+        let schema = load(&dual).expect("a dual-mode driver loads");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert!(recipe.steps.is_empty());
+        assert_eq!(recipe.async_mode.steps.len(), 1);
+        assert!(!recipe.async_mode.steps[0].awaits);
     }
 
     /// Two constructors of one driver take the same things: a dual-mode
@@ -2507,7 +3607,7 @@ driver "pinned" {
         assert!(
             errors.iter().any(|error| error
                 .message
-                .contains("`default_level` is for an output pin")),
+                .contains("`default_level` is for a driven pin")),
             "{errors:?}"
         );
     }
@@ -2546,7 +3646,7 @@ driver "pinned" {
         assert!(
             errors.iter().any(|error| error
                 .message
-                .contains("`default_level` is for an output pin")),
+                .contains("`default_level` is for a driven pin")),
             "{errors:?}"
         );
     }

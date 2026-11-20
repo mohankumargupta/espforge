@@ -131,7 +131,23 @@ mod hw {
     pub use ota::*;
 
     use esp_hal::gpio::Level;
-    use esp_hal::gpio::{Flex, Input, InputConfig, InputPin, Pin, Pull};
+    // `InputPin` names the esp-hal trait here; the public `InputPin`/`OutputPin`
+    // names below are the concrete wrappers a manifest's type string spells.
+    use esp_hal::gpio::InputPin as EspInputPin;
+    use esp_hal::gpio::{Flex, Input, InputConfig, Pin, Pull};
+
+    /// The concrete output wrapper a manifest names in its `type` string.
+    pub type OutputPin = esp_hal::gpio::Output<'static>;
+
+    /// The concrete input wrapper a manifest names in its `type` string.
+    pub type InputPin = esp_hal::gpio::Input<'static>;
+
+    /// The pin wrappers, re-exported so a manifest never spells
+    /// `esp_hal::gpio::..` itself: an `esp-hal` upgrade then changes this crate
+    /// and no external manifest.
+    pub mod gpio {
+        pub use esp_hal::gpio::{Flex, Input, Output};
+    }
 
     /// Delay handle stored on the generated `Context`.
     ///
@@ -165,6 +181,17 @@ mod hw {
         pub fn delay_ns(&self, ns: u32) {
             self.inner.delay_nanos(ns);
         }
+
+        /// Busy-waits for `us` microseconds, always synchronously.
+        ///
+        /// Bit-banged parts (`hx711`'s clock, a DHT start pulse, a TM1637
+        /// start condition) need microsecond-scale slots that must not yield
+        /// mid-transfer, so this is deliberately not `delay_ms`: on an embassy
+        /// board `delay_ms` is async and would let another task run between two
+        /// edges of one frame.
+        pub fn delay_us_blocking(&self, us: u32) {
+            self.inner.delay_micros(us);
+        }
     }
 
     impl Default for Delay {
@@ -178,6 +205,16 @@ mod hw {
     impl embedded_hal::delay::DelayNs for Delay {
         fn delay_ns(&mut self, ns: u32) {
             self.inner.delay_nanos(ns);
+        }
+    }
+
+    /// The async wait an embassy-only crate takes. Both traits are implemented:
+    /// a blocking driver keeps the busy-wait above, and an async one awaits the
+    /// executor's timer instead of spinning.
+    #[cfg(feature = "embassy")]
+    impl embedded_hal_async::delay::DelayNs for Delay {
+        async fn delay_ns(&mut self, ns: u32) {
+            embassy_time::Timer::after(embassy_time::Duration::from_nanos(ns as u64)).await;
         }
     }
 
@@ -246,7 +283,7 @@ mod hw {
         /// `pin` is the input pin moved in by value. `pull_up` selects the
         /// internal pull resistor: a pulled-up button reads low when pressed
         /// (the pin wired to ground through the switch).
-        pub fn new(pin: impl InputPin + 'static, pull_up: bool) -> Self {
+        pub fn new(pin: impl EspInputPin + 'static, pull_up: bool) -> Self {
             let pull = if pull_up { Pull::Up } else { Pull::None };
             Button {
                 pin: Input::new(pin, InputConfig::default().with_pull(pull)),
@@ -326,6 +363,112 @@ mod hw {
         /// Whether the line reads low.
         pub fn is_low(&self) -> bool {
             self.pin.is_low()
+        }
+    }
+
+    /// The standard digital traits, so a crate generic over
+    /// `InputPin + OutputPin` accepts a shared line directly.
+    ///
+    /// `set_high` drives the line high; `release` stays the way to go high-Z,
+    /// because a driver that relies on the pull-up must not drive high.
+    impl embedded_hal::digital::ErrorType for Bidirectional {
+        type Error = core::convert::Infallible;
+    }
+
+    impl embedded_hal::digital::InputPin for Bidirectional {
+        fn is_high(&mut self) -> Result<bool, Self::Error> {
+            Ok(self.pin.is_high())
+        }
+
+        fn is_low(&mut self) -> Result<bool, Self::Error> {
+            Ok(self.pin.is_low())
+        }
+    }
+
+    impl embedded_hal::digital::OutputPin for Bidirectional {
+        fn set_low(&mut self) -> Result<(), Self::Error> {
+            self.drive(Level::Low);
+            Ok(())
+        }
+
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            self.drive(Level::High);
+            Ok(())
+        }
+    }
+
+    /// A GPIO line that is only ever pulled low or released.
+    ///
+    /// This is the electrical contract `tm1637`, `dht11`/`dht22` and 1-Wire
+    /// share: an external pull-up supplies the high level, the driver shorts the
+    /// line to ground to signal a zero, and letting go is how it signals a one.
+    /// Driving the line high would fight another device that is driving it low,
+    /// so `set_high` releases instead of driving.
+    pub struct OpenDrainPin {
+        pin: Flex<'static>,
+        pull: Pull,
+    }
+
+    impl OpenDrainPin {
+        /// `pin` is the line moved in by value; `level` is the idle level it is
+        /// left at (high for a released bus line) and `pull` the resistor it
+        /// reads through.
+        pub fn new(pin: impl Pin + 'static, level: Level, pull: Pull) -> Self {
+            let mut pin = Flex::new(pin);
+            pin.apply_input_config(&InputConfig::default().with_pull(pull));
+            pin.set_input_enable(true);
+            pin.set_level(level);
+            pin.set_output_enable(false);
+            Self { pin, pull }
+        }
+
+        /// Pull the line low: the output driver on, sinking the pull-up.
+        pub fn drive_low(&mut self) {
+            self.pin.set_level(Level::Low);
+            self.pin.set_output_enable(true);
+        }
+
+        /// Release the line: the output driver off, so the pull-up sets it high.
+        pub fn release(&mut self) {
+            self.pin.set_output_enable(false);
+        }
+
+        /// The level the line reads.
+        pub fn level(&self) -> Level {
+            self.pin.level()
+        }
+
+        /// The resistor this line reads through.
+        pub fn pull(&self) -> Pull {
+            self.pull
+        }
+    }
+
+    impl embedded_hal::digital::ErrorType for OpenDrainPin {
+        type Error = core::convert::Infallible;
+    }
+
+    impl embedded_hal::digital::InputPin for OpenDrainPin {
+        fn is_high(&mut self) -> Result<bool, Self::Error> {
+            Ok(self.pin.is_high())
+        }
+
+        fn is_low(&mut self) -> Result<bool, Self::Error> {
+            Ok(self.pin.is_low())
+        }
+    }
+
+    /// `set_high` **releases** the line rather than driving it: on an open-drain
+    /// bus a driven high would fight any other device pulling low.
+    impl embedded_hal::digital::OutputPin for OpenDrainPin {
+        fn set_low(&mut self) -> Result<(), Self::Error> {
+            self.drive_low();
+            Ok(())
+        }
+
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            self.release();
+            Ok(())
         }
     }
 

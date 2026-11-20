@@ -518,12 +518,14 @@ pub fn resolve_package_paths(board: &mut Board, project_dir: &Path) -> Result<()
     let root = project_dir
         .canonicalize()
         .unwrap_or_else(|_| project_dir.to_path_buf());
-    for device in board.devices.iter_mut().filter_map(|device| match device {
-        espforge_elements::Device::Bus(device) => Some(device),
+    for (driver, tag) in board.devices.iter_mut().filter_map(|device| match device {
+        espforge_elements::Device::Bus(device) => Some((&mut device.driver, device.tag.as_str())),
+        espforge_elements::Device::Pins(device) => {
+            Some((&mut device.driver, device.tag.as_str()))
+        }
         espforge_elements::Device::Pin(_) => None,
     }) {
-        let base = device
-            .driver
+        let base = driver
             .manifest
             .as_deref()
             .and_then(|manifest| Path::new(manifest).parent())
@@ -537,17 +539,17 @@ pub fn resolve_package_paths(board: &mut Board, project_dir: &Path) -> Result<()
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| base.clone())
         };
-        for dependency in &mut device.driver.dependencies {
+        for dependency in &mut driver.dependencies {
             let Some(path) = dependency.path.clone() else {
                 continue;
             };
-            let resolved = resolve_one(&base, &allowed, &device.tag, &dependency.package, &path)?;
+            let resolved = resolve_one(&base, &allowed, tag, &dependency.package, &path)?;
             dependency.path = Some(resolved);
         }
-        if let Some(package) = &mut device.driver.package
+        if let Some(package) = &mut driver.package
             && let Some(path) = package.path.clone()
         {
-            let resolved = resolve_one(&base, &allowed, &device.tag, &package.package, &path)?;
+            let resolved = resolve_one(&base, &allowed, tag, &package.package, &path)?;
             package.path = Some(resolved);
         }
     }

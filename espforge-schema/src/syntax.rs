@@ -130,6 +130,46 @@ impl RustExpr {
             lit: syn::Lit::Str(syn::LitStr::new(value, Span::call_site())),
         })))
     }
+
+    /// Whether a `{slot}` the schema left for emission is still in the node.
+    ///
+    /// A constructor may wrap the bus (`I2CExpander::new({bus_device}, 0x27)`),
+    /// and the endpoint does not exist until `Devices::new` builds it, so that
+    /// one argument keeps its hole until emission fills it.
+    pub fn has_placeholder(&self) -> bool {
+        self.text().contains(SENTINEL)
+    }
+
+    /// The expression with every `__espforge_name` path replaced by its value.
+    ///
+    /// Replacing a path node, not text: a hole stands for one expression, and
+    /// the AST keeps its precedence whatever the value is.
+    pub fn splice(&self, values: &BTreeMap<String, RustExpr>) -> RustExpr {
+        if !self.has_placeholder() {
+            return self.clone();
+        }
+        struct Filler<'a> {
+            values: &'a BTreeMap<String, RustExpr>,
+        }
+
+        impl VisitMut for Filler<'_> {
+            fn visit_expr_mut(&mut self, node: &mut Expr) {
+                if let Expr::Path(path) = node
+                    && path.qself.is_none()
+                    && let Some(slot) = sentinel_slot(&path.path)
+                    && let Some(replacement) = self.values.get(&slot)
+                {
+                    *node = replacement.as_syn().clone();
+                    return;
+                }
+                visit_mut::visit_expr_mut(self, node);
+            }
+        }
+
+        let mut filled = self.as_syn().clone();
+        Filler { values }.visit_expr_mut(&mut filled);
+        RustExpr::from_syn(filled)
+    }
 }
 
 impl RustPath {
@@ -310,6 +350,67 @@ impl ServiceExprTemplate {
         .visit_expr_mut(&mut filled);
         RustExpr::from_syn(filled)
     }
+}
+
+/// The placeholder a `then` step calls the device through.
+///
+/// Emission splices it for the local the constructor's value was built into;
+/// nothing else in the generated code may call a step.
+pub const STEP_RECEIVER: &str = "receiver";
+
+/// The same placeholder as the identifier a parsed step carries.
+const STEP_RECEIVER_IDENT: &str = "__espforge_receiver";
+
+/// A `then` step as a parsed method call on the device.
+///
+/// The receiver stays a placeholder: the device does not exist when the
+/// manifest is read, and only emission knows the local it became.
+pub(crate) fn step_call(text: &str) -> Result<RustExpr, (String, String)> {
+    let (substituted, _) = substitute(text)?;
+    RustExpr::parse(&format!("{STEP_RECEIVER_IDENT}.{substituted}"))
+        .map_err(|error| (format!("`{text}` is not a Rust expression"), error.to_string()))
+}
+
+/// Whether a parsed step's receiver is the device placeholder.
+pub(crate) fn is_step_receiver(receiver: &Expr) -> bool {
+    matches!(receiver, Expr::Path(path) if path.qself.is_none() && path.path.is_ident(STEP_RECEIVER_IDENT))
+}
+
+/// Whether `text` writes the hole `{name}`, outside a string literal.
+///
+/// A `{` inside a string is text, not a hole: the emitted Rust may legitimately
+/// carry braces there.
+pub fn uses_placeholder(text: &str, name: &str) -> bool {
+    let mut rest = text;
+    let mut in_string = false;
+    let mut escaped = false;
+    while let Some(character) = rest.chars().next() {
+        rest = &rest[character.len_utf8()..];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' => {
+                let Some((hole, after)) = rest.split_once('}') else {
+                    return false;
+                };
+                if hole.trim() == name {
+                    return true;
+                }
+                rest = after;
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// The slot name a single-ident sentinel path carries.

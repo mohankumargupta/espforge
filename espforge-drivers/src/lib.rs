@@ -54,6 +54,18 @@ pub const MANIFESTS: &[(&str, &str)] = &[
         "espforge-drivers/manifests/mhz19b.kdl",
         include_str!("../manifests/mhz19b.kdl"),
     ),
+    (
+        "espforge-drivers/manifests/hx711.kdl",
+        include_str!("../manifests/hx711.kdl"),
+    ),
+    (
+        "espforge-drivers/manifests/dht22.kdl",
+        include_str!("../manifests/dht22.kdl"),
+    ),
+    (
+        "espforge-drivers/manifests/tm1637.kdl",
+        include_str!("../manifests/tm1637.kdl"),
+    ),
 ];
 
 /// The concatenation of [`MANIFESTS`], for callers that take one schema text.
@@ -79,13 +91,21 @@ pub const DRIVERS_SCHEMA_KDL: &str = concat!(
     "\n",
     include_str!("../manifests/mhz19b.kdl"),
     "\n",
+    include_str!("../manifests/hx711.kdl"),
+    "\n",
+    include_str!("../manifests/dht22.kdl"),
+    "\n",
+    include_str!("../manifests/tm1637.kdl"),
+    "\n",
 );
 
 /// Every bundled tag, in manifest order.
 ///
-/// `sht31`, `sht4x`, `ads111x`, `bme680` and `mhz19b` are manifest only: they
-/// name `embedded-sht3x`, `sht4x`, `embedded-ads111x`, `bosch-bme680` and
-/// `edrv-mhz19` directly, so they have no feature and no module below.
+/// `sht31`, `sht4x`, `ads111x`, `bme680`, `mhz19b`, `hx711`, `dht22` and
+/// `tm1637` are manifest only: they name `embedded-sht3x`, `sht4x`,
+/// `embedded-ads111x`, `bosch-bme680`, `edrv-mhz19`, `loadcell`,
+/// `dht-embedded` and `tm1637-embedded-hal` directly, so they have no feature
+/// and no module below.
 pub const TAGS: &[&str] = &[
     "ssd1306",
     "ili9341",
@@ -96,6 +116,9 @@ pub const TAGS: &[&str] = &[
     "ads111x",
     "bme680",
     "mhz19b",
+    "hx711",
+    "dht22",
+    "tm1637",
 ];
 
 #[cfg(all(

@@ -247,6 +247,25 @@ fn field_type(tag: &str, attr: &AttrDef, enums: &mut Vec<String>) -> (String, St
             }
         }
         (AttrKind::Hex, true, _) => ("Spanned<u8>".to_string(), format!("hex(node, {lit})?")),
+        (AttrKind::Hex, false, Some(default)) => {
+            let default = hex_default(tag, name, default);
+            (
+                "Spanned<u8>".to_string(),
+                format!("hex_or(node, {lit}, {default:#04X})?"),
+            )
+        }
+        // An optional number keeps its schema `range`, so the generated reader
+        // and `dynamic_attrs` refuse exactly the same values.
+        (AttrKind::U32, false, None) => match attr.range {
+            Some((low, high)) => (
+                "Option<Spanned<u32>>".to_string(),
+                format!("opt_number_in(node, {lit}, {low}, {high})?"),
+            ),
+            None => (
+                "Option<Spanned<u32>>".to_string(),
+                format!("opt_number(node, {lit})?"),
+            ),
+        },
         (AttrKind::Hex, false, None) => (
             "Option<Spanned<u8>>".to_string(),
             format!("opt_hex(node, {lit})?"),
@@ -254,6 +273,10 @@ fn field_type(tag: &str, attr: &AttrDef, enums: &mut Vec<String>) -> (String, St
         (AttrKind::PinOrRef, true, _) => (
             "PinOrRef<'a>".to_string(),
             format!("pin_or_ref(node, {lit})?"),
+        ),
+        (AttrKind::PinOrRef, false, None) => (
+            "Option<PinOrRef<'a>>".to_string(),
+            format!("opt_pin_or_ref(node, {lit})?"),
         ),
         (AttrKind::Pin, true, _) => ("Spanned<u8>".to_string(), format!("pin(node, {lit})?")),
         (AttrKind::Pin, false, None) => (
@@ -272,6 +295,10 @@ fn field_type(tag: &str, attr: &AttrDef, enums: &mut Vec<String>) -> (String, St
                 format!("flag_or(node, {lit}, {default})?"),
             )
         }
+        (AttrKind::Bool, false, None) => (
+            "Option<Spanned<bool>>".to_string(),
+            format!("opt_flag(node, {lit})?"),
+        ),
         (AttrKind::Ref { .. }, true, _) => {
             ("Ref<'a>".to_string(), format!("reference(node, {lit})?"))
         }
@@ -308,6 +335,18 @@ fn field_type(tag: &str, attr: &AttrDef, enums: &mut Vec<String>) -> (String, St
             kind.display()
         ),
     }
+}
+
+/// A `0x..` or decimal byte default, read the way `attrs::hex` reads a value.
+fn hex_default(tag: &str, name: &str, default: &str) -> u8 {
+    let parsed = match default
+        .strip_prefix("0x")
+        .or_else(|| default.strip_prefix("0X"))
+    {
+        Some(hex) => u8::from_str_radix(hex, 16),
+        None => default.parse::<u8>(),
+    };
+    parsed.unwrap_or_else(|_| panic!("`{tag}.{name}` default `{default}` is not a byte"))
 }
 
 /// A generated enum for one `kind="choice"` attribute.

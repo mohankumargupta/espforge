@@ -352,10 +352,7 @@ impl AsyncSpiBus {
             return Ok(());
         }
         let mut bus = self.inner.lock().await;
-        bus.apply_config(&EspConfig::from(config))
-            .map_err(SpiError::Config)?;
-        self.applied.store(key, Ordering::Relaxed);
-        Ok(())
+        apply_config_locked(&mut bus, self.applied, config)
     }
 }
 
@@ -412,14 +409,17 @@ impl ConfiguredSpiDevice {
         &mut self,
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), SpiError> {
+        // Apply the part's mode and clock while its chip select is still
+        // deasserted. `apply_config` can change CPOL/CPHA, and a clock edge
+        // that reaches a selected slave is a phantom bit: the part latches a
+        // byte before its first real transfer. A configuration failure returns
+        // here, with CS untouched.
+        self.bus.configure(self.config)?;
         self.cs.set_level(self.polarity.asserted());
-        let result = (|| {
-            self.bus.configure(self.config)?;
-            critical_section::with(|cs| {
-                let mut bus = self.bus.inner.borrow(cs).borrow_mut();
-                run_ops(&mut *bus, &self.delay, operations)
-            })
-        })();
+        let result = critical_section::with(|cs| {
+            let mut bus = self.bus.inner.borrow(cs).borrow_mut();
+            run_ops(&mut *bus, &self.delay, operations)
+        });
         self.cs.set_level(self.polarity.idle());
         result
     }
@@ -521,48 +521,21 @@ impl ConfiguredAsyncSpiDevice {
         &mut self,
         operations: &mut [embedded_hal::spi::Operation<'_, u8>],
     ) -> Result<(), SpiError> {
+        // One lock covers the configuration change and the transfer. Two parts
+        // with different modes share this bus: releasing the lock between
+        // `configure` and the operations would let another task apply its own
+        // mode while this device's CS is asserted.
+        let inner = self.bus.inner;
+        let applied = self.bus.applied;
+        let mut bus = inner.lock().await;
+        // As on the blocking device, configure before asserting CS so a clock
+        // polarity change never reaches a selected slave. A failure returns
+        // with CS untouched.
+        apply_config_locked(&mut bus, applied, self.config)?;
         self.cs.set_level(self.polarity.asserted());
-        let result = self.run(operations).await;
+        let result = run_ops_async(&mut bus, &self.delay, operations).await;
         self.cs.set_level(self.polarity.idle());
         result
-    }
-
-    /// Apply the configuration and run the operations, with CS already
-    /// asserted. Split out so the release path runs exactly once.
-    async fn run(
-        &mut self,
-        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
-    ) -> Result<(), SpiError> {
-        self.bus.configure(self.config).await?;
-        let mut bus = self.bus.inner.lock().await;
-        for op in operations.iter_mut() {
-            match op {
-                embedded_hal::spi::Operation::Read(buf) => {
-                    embedded_hal_async::spi::SpiBus::read(&mut *bus, buf)
-                        .await
-                        .map_err(|_| SpiError::Bus)?
-                }
-                embedded_hal::spi::Operation::Write(buf) => {
-                    embedded_hal_async::spi::SpiBus::write(&mut *bus, buf)
-                        .await
-                        .map_err(|_| SpiError::Bus)?
-                }
-                embedded_hal::spi::Operation::Transfer(read, write) => {
-                    embedded_hal_async::spi::SpiBus::transfer(&mut *bus, read, write)
-                        .await
-                        .map_err(|_| SpiError::Bus)?
-                }
-                embedded_hal::spi::Operation::TransferInPlace(buf) => {
-                    embedded_hal_async::spi::SpiBus::transfer_in_place(&mut *bus, buf)
-                        .await
-                        .map_err(|_| SpiError::Bus)?
-                }
-                embedded_hal::spi::Operation::DelayNs(ns) => {
-                    self.delay.delay_ns((*ns).try_into().unwrap_or(u32::MAX));
-                }
-            }
-        }
-        Ok(())
     }
 
     pub async fn write(&mut self, bytes: &[u8]) -> Result<(), SpiError> {
@@ -587,6 +560,64 @@ impl ConfiguredAsyncSpiDevice {
         self.transaction(&mut [embedded_hal::spi::Operation::TransferInPlace(buf)])
             .await
     }
+}
+
+/// Apply `config` to a locked controller, updating the bus's shared key.
+///
+/// Takes the guard's contents rather than the handle so the device's
+/// transaction can hold **one** lock across the configuration change and the
+/// operations: a second acquisition would let another task reconfigure the
+/// bus between the two.
+#[cfg(feature = "embassy")]
+fn apply_config_locked(
+    bus: &mut Spi<'static, esp_hal::Async>,
+    applied: &AtomicU32,
+    config: SpiConfig,
+) -> Result<(), SpiError> {
+    let key = packed(config);
+    if applied.load(Ordering::Relaxed) == key {
+        return Ok(());
+    }
+    bus.apply_config(&EspConfig::from(config))
+        .map_err(SpiError::Config)?;
+    applied.store(key, Ordering::Relaxed);
+    Ok(())
+}
+
+#[cfg(feature = "embassy")]
+async fn run_ops_async(
+    bus: &mut Spi<'static, esp_hal::Async>,
+    delay: &Delay,
+    operations: &mut [embedded_hal::spi::Operation<'_, u8>],
+) -> Result<(), SpiError> {
+    for op in operations.iter_mut() {
+        match op {
+            embedded_hal::spi::Operation::Read(buf) => {
+                embedded_hal_async::spi::SpiBus::read(&mut *bus, buf)
+                    .await
+                    .map_err(|_| SpiError::Bus)?
+            }
+            embedded_hal::spi::Operation::Write(buf) => {
+                embedded_hal_async::spi::SpiBus::write(&mut *bus, buf)
+                    .await
+                    .map_err(|_| SpiError::Bus)?
+            }
+            embedded_hal::spi::Operation::Transfer(read, write) => {
+                embedded_hal_async::spi::SpiBus::transfer(&mut *bus, read, write)
+                    .await
+                    .map_err(|_| SpiError::Bus)?
+            }
+            embedded_hal::spi::Operation::TransferInPlace(buf) => {
+                embedded_hal_async::spi::SpiBus::transfer_in_place(&mut *bus, buf)
+                    .await
+                    .map_err(|_| SpiError::Bus)?
+            }
+            embedded_hal::spi::Operation::DelayNs(ns) => {
+                delay.delay_ns((*ns).try_into().unwrap_or(u32::MAX));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "embassy")]

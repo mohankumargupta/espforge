@@ -26,9 +26,9 @@ use crate::devices::{invalid_element, invalid_id, span_of, unknown_gpio, wrong_d
 use crate::element::{Element, LowerCx, Reported, Section, is_rust_ident};
 use crate::generated;
 use crate::model::{
-    Bus, BusDevice, BusTransport, ClaimedPin, CsPolarity, Device, Direction, Driver, FactoryArg,
-    I2cTransport, Ident, Init, Owner, OwnerKind, Pin, PinUse, Runtime,
-    SpiConfig as DeviceSpiConfig, SpiTransport, UartTransport,
+    Bus, BusDevice, BusId, BusTransport, ClaimedPin, CsPolarity, Device, Direction, Driver,
+    FactoryArg, I2cTransport, Ident, Init, Owner, OwnerKind, Pin, PinUse, PinsDevice, Runtime,
+    SpiConfig as DeviceSpiConfig, SpiTransport, Step, UartTransport,
 };
 
 /// The interpreter for one schema element that declares a `device_recipe`.
@@ -86,7 +86,7 @@ impl Element for DeviceRecipeElement {
 
         // 3. the composite's own device.
         let device = lower_recipe(cx, node, tag, element, recipe, &id, &Bindings::none())?;
-        cx.push_device(Device::Bus(device));
+        cx.push_device(device);
 
         // 4. one device per composed part, on the composite's bus. A part's
         // attributes come from the composite's own (`from=`) or are fixed by
@@ -128,7 +128,7 @@ impl Element for DeviceRecipeElement {
                 &part_id,
                 &Bindings::of(part),
             )?;
-            cx.push_device(Device::Bus(device));
+            cx.push_device(device);
         }
         Ok(())
     }
@@ -146,64 +146,194 @@ fn lower_recipe<'s>(
     node: &ParsedNode<'_>,
     tag: &str,
     element: &'s espforge_schema::Element,
-    recipe: &'s DeviceRecipe,
+    element_recipe: &'s DeviceRecipe,
     id: &Ident,
     bindings: &Bindings<'s>,
-) -> Result<BusDevice, Reported> {
+) -> Result<Device, Reported> {
     // 3. the bus peripheral, of the kind the recipe declares.
     //
     // Whether the bus is blocking or async is a property of the bus, not
     // of the project: a blocking display on an embassy board is legal, so
     // the scheduler is no longer consulted here.
+    // A busless driver (`bus "none"`) declares no `bus=` attribute: it owns the
+    // pins it claims, so there is no peripheral to resolve and no kind to match.
     let bus_attr = "bus";
-    let reference = attrs::reference(node, bus_attr)
-        .map_err(|issue| invalid_element(cx, node, tag, element, issue))?;
-    let bus_name = reference.name;
-    let Some(bus) = cx.bus_by_name(bus_name) else {
-        return Err(cx.report(
-            codes::DEVICE_UNKNOWN_COMPONENT,
-            span_of(node, bus_attr),
-            "unknown bus",
-            format!(
-                "<{tag} id=\"{}\"> refers to `{bus_name}`, which is not an <{}> in `# peripherals`",
-                id.raw, recipe.bus
-            ),
-        ));
-    };
-    let kind = match cx.bus(bus) {
-        Some(Bus::I2c { .. }) => "i2c",
-        Some(Bus::Spi { .. }) => "spi",
-        Some(Bus::Uart { .. }) => "uart",
-        None => {
+    // A multi-transport manifest keeps one recipe per bus kind and the spec's
+    // `bus=` picks one; a single-transport manifest has already picked.
+    let multi = !element_recipe.transports.is_empty();
+    // Kept outside the branch: the UART single-peer diagnostic names it.
+    let mut bus_name = "";
+    let (bus, kind): (Option<BusId>, &str) = if multi {
+        match attrs::opt_reference(node, bus_attr)
+            .map_err(|issue| invalid_element(cx, node, tag, element, issue))?
+        {
+            Some(reference) => {
+                bus_name = reference.name;
+                let Some(found) = cx.bus_by_name(bus_name) else {
+                    return Err(cx.report(
+                        codes::DEVICE_UNKNOWN_COMPONENT,
+                        span_of(node, bus_attr),
+                        "unknown bus",
+                        format!(
+                            "<{tag} id=\"{}\"> refers to `{bus_name}`, which is not a bus in `# \
+                             peripherals`",
+                            id.raw
+                        ),
+                    ));
+                };
+                let kind = match cx.bus(found) {
+                    Some(Bus::I2c { .. }) => "i2c",
+                    Some(Bus::Spi { .. }) => "spi",
+                    Some(Bus::Uart { .. }) => "uart",
+                    None => {
+                        return Err(cx.report(
+                            codes::DEVICE_INVALID,
+                            span_of(node, bus_attr),
+                            "unknown bus",
+                            format!(
+                                "<{tag} id=\"{}\"> binds to `{bus_name}`, which is not a bus",
+                                id.raw
+                            ),
+                        ));
+                    }
+                };
+                (Some(found), kind)
+            }
+            // No reference: the manifest's own busless variant, if it has one.
+            None => (None, "none"),
+        }
+    } else if element_recipe.bus == "none" {
+        (None, "none")
+    } else {
+        let reference = attrs::reference(node, bus_attr)
+            .map_err(|issue| invalid_element(cx, node, tag, element, issue))?;
+        bus_name = reference.name;
+        let Some(found) = cx.bus_by_name(bus_name) else {
             return Err(cx.report(
-                codes::DEVICE_INVALID,
+                codes::DEVICE_UNKNOWN_COMPONENT,
                 span_of(node, bus_attr),
                 "unknown bus",
                 format!(
-                    "<{tag} id=\"{}\"> binds to `{bus_name}`, which is not a bus",
-                    id.raw
+                    "<{tag} id=\"{}\"> refers to `{bus_name}`, which is not an <{}> in `# peripherals`",
+                    id.raw, element_recipe.bus
+                ),
+            ));
+        };
+        let kind = match cx.bus(found) {
+            Some(Bus::I2c { .. }) => "i2c",
+            Some(Bus::Spi { .. }) => "spi",
+            Some(Bus::Uart { .. }) => "uart",
+            None => {
+                return Err(cx.report(
+                    codes::DEVICE_INVALID,
+                    span_of(node, bus_attr),
+                    "unknown bus",
+                    format!(
+                        "<{tag} id=\"{}\"> binds to `{bus_name}`, which is not a bus",
+                        id.raw
+                    ),
+                ));
+            }
+        };
+        if kind != element_recipe.bus {
+            return Err(cx.report(
+                codes::DEVICE_INVALID,
+                span_of(node, bus_attr),
+                format!(
+                    "{} needs a {} bus",
+                    element_recipe.kind, element_recipe.bus
+                ),
+                format!(
+                    "<{tag} id=\"{}\"> binds to `{bus_name}`, which is an <{kind}>, but this \
+                         {} drives an <{}>",
+                    id.raw, element_recipe.kind, element_recipe.bus
                 ),
             ));
         }
+        (Some(found), kind)
     };
-    if kind != recipe.bus {
-        return Err(cx.report(
-            codes::DEVICE_INVALID,
-            span_of(node, bus_attr),
-            format!("{} needs a {} bus", recipe.kind, recipe.bus),
-            format!(
-                "<{tag} id=\"{}\"> binds to `{bus_name}`, which is an <{kind}>, but this \
-                     {} drives an <{}>",
-                id.raw, recipe.kind, recipe.bus
-            ),
-        ));
-    }
+
+    // The transport the spec selected. For a single-transport driver the
+    // manifest is the selection and the bus above already matched its kind.
+    let recipe: &'s DeviceRecipe = if multi {
+        let Some(selected) = element_recipe
+            .transports
+            .iter()
+            .find(|transport| transport.bus == kind)
+        else {
+            let supported: Vec<&str> = element_recipe
+                .transports
+                .iter()
+                .map(|transport| transport.bus.as_str())
+                .collect();
+            let (summary, label) = if kind == "none" {
+                (
+                    format!("{} needs a bus", element_recipe.kind),
+                    format!(
+                        "<{tag} id=\"{}\"> declares no `bus=`, and this {} has no busless \
+                         variant; it supports {}",
+                        id.raw,
+                        element_recipe.kind,
+                        supported.join(", ")
+                    ),
+                )
+            } else {
+                (
+                    format!("{} does not support this bus", element_recipe.kind),
+                    format!(
+                        "<{tag} id=\"{}\"> binds to `{bus_name}`, which is an <{kind}>, but this \
+                         {} supports {}",
+                        id.raw,
+                        element_recipe.kind,
+                        supported.join(", ")
+                    ),
+                )
+            };
+            return Err(cx.report(
+                codes::DEVICE_INVALID,
+                span_of(node, bus_attr),
+                summary,
+                label,
+            ));
+        };
+        // An attribute belongs to the transport it configures: `address=` on
+        // the SPI build of a dual-bus part is a typo, not a default.
+        let union: Vec<&str> = element_recipe
+            .transports
+            .iter()
+            .flat_map(transport_attrs)
+            .collect();
+        let allowed = transport_attrs(selected);
+        if let Some(name) = union.into_iter().find(|name| {
+            !allowed.contains(name)
+                && node
+                    .attributes
+                    .iter()
+                    .any(|attribute| attribute.key == *name)
+        }) {
+            return Err(cx.report(
+                codes::DEVICE_INVALID,
+                crate::attrs::key_span_of(node, name),
+                format!("`{name}` is not part of the {} transport", selected.bus),
+                format!(
+                    "<{tag} id=\"{}\"> builds the {} transport, which takes no `{name}`",
+                    id.raw, selected.bus
+                ),
+            ));
+        }
+        selected
+    } else {
+        element_recipe
+    };
+    let busless = recipe.bus == "none";
 
     // 5. the address an I2C part declares, or the chip select an SPI part
     // owns. Both live on the device now, not on a separate handle. A
     // composed part takes the address its `compose` block fixes.
     let literal_address = bindings.hex("address");
     let address = match recipe.address {
+        // A busless driver has no address to route or check.
+        _ if busless => None,
         AddressNeed::None => None,
         AddressNeed::Any | AddressNeed::Fixed(_) => {
             let read = match literal_address {
@@ -280,7 +410,7 @@ fn lower_recipe<'s>(
         }
     };
 
-    let cs = if kind == "spi" && element.attrs.iter().any(|attr| attr.name == "cs") {
+    let cs = if !busless && kind == "spi" && element.attrs.iter().any(|attr| attr.name == "cs") {
         // A composed part's chip select is one of the composite's pins.
         let pin = if let Some(source) = bindings.pin("cs") {
             let reference = attrs::reference(node, source)
@@ -291,8 +421,22 @@ fn lower_recipe<'s>(
             check_cs_direction(cx, node, tag, id, source, &gpio)?;
             gpio.pin
         } else {
-            let value = attrs::pin_or_ref(node, "cs")
-                .map_err(|issue| invalid_element(cx, node, tag, element, issue))?;
+            // The attribute is optional on the element (another transport may
+            // take no `cs`), so a missing one is reported here rather than by
+            // the schema reader.
+            let Some(value) = attrs::opt_pin_or_ref(node, "cs")
+                .map_err(|issue| invalid_element(cx, node, tag, element, issue))?
+            else {
+                return Err(cx.report(
+                    codes::DEVICE_INVALID,
+                    span_of(node, "cs"),
+                    format!("{} has no chip select", recipe.kind),
+                    format!(
+                        "<{tag} id=\"{}\"> binds to an SPI bus but declares no `cs`",
+                        id.raw
+                    ),
+                ));
+            };
             match value {
                 attrs::PinOrRef::Pin(pin) => pin.value,
                 attrs::PinOrRef::Ref(reference) => {
@@ -337,7 +481,7 @@ fn lower_recipe<'s>(
             ),
         ));
     }
-    let spi_config = if recipe.spi_config {
+    let spi_config = if !busless && recipe.spi_config {
         let mode = bindings
             .spelling(node, element, "mode")
             .parse::<u8>()
@@ -374,23 +518,33 @@ fn lower_recipe<'s>(
         };
         // An absent optional pin is not an error; anything else the reader
         // refuses (a malformed value) must be reported rather than swallowed.
-        let Some(reference) = attrs::opt_reference(node, source)
+        let Some(value) = attrs::opt_pin_or_ref(node, source)
             .map_err(|issue| invalid_element(cx, node, tag, element, issue))?
         else {
             continue;
         };
-        let Some(gpio) = cx.gpio(reference.name).cloned() else {
-            return Err(unknown_gpio(cx, node, tag, id, source, reference.name));
+        // `clk="6"` claims that GPIO directly; `clk="$gpio6"` is also checked
+        // against the direction the referenced `<gpio>` declared.
+        let (pin, declared) = match value {
+            attrs::PinOrRef::Pin(pin) => (pin.value, None),
+            attrs::PinOrRef::Ref(reference) => {
+                let Some(gpio) = cx.gpio(reference.name).cloned() else {
+                    return Err(unknown_gpio(cx, node, tag, id, source, reference.name));
+                };
+                (gpio.pin, Some((gpio.id.raw.clone(), gpio.direction)))
+            }
         };
         let wanted = direction(arg.direction);
-        if let Some(found) = gpio.direction.filter(|found| *found != wanted) {
+        if let Some((name, declared)) = declared
+            && let Some(found) = declared.filter(|found| *found != wanted)
+        {
             return Err(wrong_direction(
                 cx,
                 node,
                 tag,
-                &id,
+                id,
                 &arg.name,
-                &gpio.id.raw,
+                &name,
                 wanted,
                 found,
             ));
@@ -402,7 +556,7 @@ fn lower_recipe<'s>(
         };
         let claim = cx
             .claim_pin(
-                Pin(gpio.pin),
+                Pin(pin),
                 Owner::new(OwnerKind::Device(tag.to_string()), id.clone()),
                 node_span(node),
                 need,
@@ -433,6 +587,8 @@ fn lower_recipe<'s>(
     )?;
     let factory_args = slots.factory_args;
     let args = slots.args;
+    let steps = slots.steps;
+    let async_steps = slots.async_steps;
 
     // 8. the field type, with its command slots filled.
     let ty = ty_template.fill(&slots.types);
@@ -479,6 +635,8 @@ fn lower_recipe<'s>(
         pins,
         args,
         factory_args,
+        steps,
+        async_steps,
         runtimes: crate::model::RuntimeSet {
             blocking: recipe.runtimes.blocking,
             asynchronous: recipe.runtimes.asynchronous,
@@ -490,12 +648,41 @@ fn lower_recipe<'s>(
         async_feature: recipe.async_mode.feature.clone(),
         package: element.package.clone(),
         expose: element.expose.clone(),
-        dependencies: element.dependencies.clone(),
+        dependencies: if recipe.dependencies.is_empty() {
+            element.dependencies.clone()
+        } else {
+            recipe.dependencies.clone()
+        },
         manifest: element.source.clone(),
     };
 
-    // 10. the transport: one concrete bus kind, so emission never has to
-    // rediscover the bus from independent optional fields.
+    // 10. a busless driver is its pins: it leaves here with no bus id at all,
+    // so `Board::bus_mode` is never asked about a bus that does not exist.
+    if busless {
+        if recipe.runtimes.async_only() {
+            return Err(cx.report(
+                codes::DEVICE_INVALID,
+                span_of(node, "id"),
+                "async driver without a bus",
+                format!(
+                    "<{tag} id=\"{}\"> is an async driver with no bus; a GPIO-timed driver \
+                     cannot await a bus it does not have",
+                    id.raw
+                ),
+            ));
+        }
+        return Ok(Device::Pins(PinsDevice {
+            id: id.clone(),
+            tag: tag.to_string(),
+            driver,
+        }));
+    }
+    let Some(bus) = bus else {
+        unreachable!("a bus device resolved its bus above")
+    };
+
+    // 10b. one concrete bus kind, so emission never has to rediscover the bus
+    // from independent optional fields.
     let transport = match kind {
         "i2c" => {
             let Some(address) = address else {
@@ -593,12 +780,31 @@ fn lower_recipe<'s>(
         _ => unreachable!("the bus kind was checked against the recipe"),
     };
 
-    Ok(BusDevice {
+    Ok(Device::Bus(BusDevice {
         id: id.clone(),
         tag: tag.to_string(),
         driver,
         transport,
-    })
+    }))
+}
+
+/// The attributes one transport takes from the spec: the bus-level values the
+/// manifest synthesizes for that kind, and nothing else.
+///
+/// Lowering refuses an attribute that belongs to a transport the spec did not
+/// select (`address=` on an SPI build); this is the same list the manifest
+/// parser wrote into the element as each transport's bus attributes.
+fn transport_attrs(recipe: &DeviceRecipe) -> Vec<&'static str> {
+    match recipe.bus.as_str() {
+        "i2c" if !matches!(recipe.address, AddressNeed::None)
+            || recipe.address_allowed.is_some() =>
+        {
+            vec!["address"]
+        }
+        "spi" if recipe.spi_config => vec!["cs", "mode", "frequency"],
+        "spi" => vec!["cs"],
+        _ => Vec::new(),
+    }
 }
 
 /// Where a composed part's attributes come from.
@@ -692,6 +898,10 @@ struct Slots {
     args: Vec<RustExpr>,
     /// The same arguments, split for a deferred factory.
     factory_args: Vec<FactoryArg>,
+    /// The `then` steps of the blocking constructor.
+    steps: Vec<Step>,
+    /// The `then` steps of the async constructor.
+    async_steps: Vec<Step>,
     /// The values a type template takes, by slot name.
     types: BTreeMap<String, RustType>,
 }
@@ -714,6 +924,11 @@ fn slots(
     let mut args = Vec::new();
     let mut factory_args = Vec::new();
     let mut types = BTreeMap::new();
+    // What a `then` step may name: the constructor's own values, in the
+    // expression the call gets at boot and the one a factory rebuilds after
+    // boot. Anything else is a manifest error the schema already reported.
+    let mut boot_values: BTreeMap<String, RustExpr> = BTreeMap::new();
+    let mut factory_values: BTreeMap<String, RustExpr> = BTreeMap::new();
     for arg in &recipe.args {
         // `{address}` is filled from the element itself, at the position the
         // manifest gave it, and travels to a deferred factory as a constant.
@@ -724,13 +939,23 @@ fn slots(
             };
             let expression = RustExpr::number(address as u64);
             args.push(expression.clone());
-            factory_args.push(FactoryArg::Constant(expression));
+            factory_args.push(FactoryArg::Constant(expression.clone()));
+            boot_values.insert("address".to_string(), expression.clone());
+            factory_values.insert("address".to_string(), expression);
             continue;
         }
         // A fixed argument is the manifest's own expression; it rides the same
         // path, so boot, deferred and async agree on its position.
+        //
+        // `{address}` is the element's, and the element is the only thing that
+        // knows it. A `{bus_device}` hole stays a sentinel: the endpoint does
+        // not exist until emission builds the bus.
         if let CtorArg::Fixed { text, .. } = arg {
-            let expression = rust_expr(cx, node, tag, id, "a constructor argument", text)?;
+            let text = match address {
+                Some(address) => text.replace("{address}", &address.to_string()),
+                None => text.clone(),
+            };
+            let expression = rust_expr(cx, node, tag, id, "a constructor argument", &text)?;
             args.push(expression.clone());
             factory_args.push(FactoryArg::Constant(expression));
             continue;
@@ -763,7 +988,39 @@ fn slots(
                     }
                     None => RustExpr::none(),
                 };
-                args.push(expression);
+                args.push(expression.clone());
+                // A step may name the line as `{dc}` or `{dc_pin}`, and a
+                // deferred factory rebuilds it from the stored peripheral.
+                let rebuilt = match claimed {
+                    Some(_) => {
+                        let field = quote::format_ident!("pin_{}", arg.name);
+                        let build = crate::model::line_from(
+                            direction(arg.direction),
+                            arg.level,
+                            arg.pull,
+                            arg.open_drain,
+                            quote::quote! { self.#field },
+                        );
+                        let build = if optional {
+                            quote::quote! { self.#field.map(|pin| #build) }
+                        } else {
+                            build
+                        };
+                        rust_expr(
+                            cx,
+                            node,
+                            tag,
+                            id,
+                            &format!("the pin `{}`", arg.name),
+                            &build.to_string(),
+                        )?
+                    }
+                    None => RustExpr::none(),
+                };
+                for name in [arg.name.clone(), format!("{}_pin", arg.name)] {
+                    boot_values.insert(name.clone(), expression.clone());
+                    factory_values.insert(name, rebuilt.clone());
+                }
                 factory_args.push(match claimed {
                     Some(_) => FactoryArg::Pin {
                         name: arg.name.clone(),
@@ -771,6 +1028,7 @@ fn slots(
                         direction: direction(arg.direction),
                         level: arg.level,
                         pull: arg.pull,
+                        open_drain: arg.open_drain,
                     },
                     None => FactoryArg::Constant(RustExpr::none()),
                 });
@@ -785,15 +1043,57 @@ fn slots(
                 }
                 let expression = value.expr.unwrap_or_else(RustExpr::none);
                 args.push(expression.clone());
-                factory_args.push(FactoryArg::Constant(expression));
+                factory_args.push(FactoryArg::Constant(expression.clone()));
+                boot_values.insert(arg.name.clone(), expression.clone());
+                factory_values.insert(arg.name.clone(), expression);
             }
         }
     }
+    let steps = resolve_steps(cx, node, tag, id, &recipe.steps, &boot_values, &factory_values)?;
+    let async_steps = resolve_steps(
+        cx,
+        node,
+        tag,
+        id,
+        &recipe.async_mode.steps,
+        &boot_values,
+        &factory_values,
+    )?;
     Ok(Slots {
         args,
         factory_args,
+        steps,
+        async_steps,
         types,
     })
+}
+
+/// One runtime's `then` steps, with their argument holes filled.
+///
+/// The receiver stays a placeholder: emission is the only place that knows the
+/// local the device was built into.
+fn resolve_steps(
+    cx: &mut LowerCx<'_>,
+    node: &ParsedNode<'_>,
+    tag: &str,
+    id: &Ident,
+    steps: &[espforge_schema::Step],
+    boot: &BTreeMap<String, RustExpr>,
+    factory: &BTreeMap<String, RustExpr>,
+) -> Result<Vec<Step>, Reported> {
+    steps
+        .iter()
+        .map(|step| {
+            let call = step.call().map_err(|message| {
+                invalid_recipe(cx, node, tag, id, "a `then` step", &message)
+            })?;
+            Ok(Step {
+                boot: call.splice(boot),
+                factory: call.splice(factory),
+                awaits: step.awaits,
+            })
+        })
+        .collect()
 }
 
 /// The value one mapped `arg` resolves to.
@@ -954,6 +1254,9 @@ fn direction(value: espforge_schema::PinDirection) -> Direction {
         espforge_schema::PinDirection::Input => Direction::Input,
         espforge_schema::PinDirection::Output => Direction::Output,
         espforge_schema::PinDirection::Bidirectional => Direction::Bidirectional,
+        // An open-drain line is one the driver both drives and reads; the
+        // wrapper it is built into is chosen at emission from `open_drain`.
+        espforge_schema::PinDirection::OpenDrain => Direction::Bidirectional,
     }
 }
 

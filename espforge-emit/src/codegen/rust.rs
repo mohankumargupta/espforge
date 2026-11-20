@@ -191,14 +191,15 @@ fn generated(parts: &EmitParts, meta: &Meta) -> Result<String> {
 
 /// Fill the `Devices` and `Services` fields and initialisers, and collect the
 /// `main()` startup statements, by asking every pin device, raw bus, bus
-/// device and service to emit itself. An element's own file owns every token
-/// it prints.
+/// device, busless device and service to emit itself. An element's own file
+/// owns every token it prints.
 ///
 /// A station's provider local must exist before a client names it, and its
 /// storage static has always preceded the bus statics, so the station pass
 /// stays first. Pin devices and raw buses follow, then bus devices, then the
-/// protocol services that consume the station. That keeps the generated text
-/// stable while removing the old non-device pass.
+/// busless devices (which need no bus handle) and finally the protocol
+/// services that consume the station. That keeps the generated text stable
+/// while removing the old non-device pass.
 fn collect(board: &Board) -> EmitParts {
     let mut cx = EmitCx::with_main(MainCtx::default());
     for service in &board.services {
@@ -214,6 +215,14 @@ fn collect(board: &Board) -> EmitParts {
     espforge_elements::raw_bus::emit_raw_buses(board, &mut cx);
     for device in &board.devices {
         if let Device::Bus(device) = device {
+            device.emit(board, &mut cx);
+        }
+    }
+    // A busless driver owns no peripheral and builds no handle, so it has
+    // nothing to wait for: it is emitted after the bus devices and before the
+    // services that may consume it.
+    for device in &board.devices {
+        if let Device::Pins(device) = device {
             device.emit(board, &mut cx);
         }
     }
@@ -951,6 +960,8 @@ mod tests {
                 pins: Vec::new(),
                 args: Vec::new(),
                 factory_args: Vec::new(),
+                steps: Vec::new(),
+                async_steps: Vec::new(),
                 runtimes: espforge_elements::RuntimeSet::BLOCKING,
                 init: Init::Boot,
                 async_ty: None,
@@ -1025,6 +1036,8 @@ mod tests {
                 // fixed one in the element, so neither list carries it.
                 args: Vec::new(),
                 factory_args: Vec::new(),
+                steps: Vec::new(),
+                async_steps: Vec::new(),
                 runtimes: espforge_elements::RuntimeSet::BLOCKING,
                 init: Init::Boot,
                 async_ty: None,
@@ -1066,6 +1079,88 @@ mod tests {
         assert!(
             !text.contains(".map_err"),
             "an infallible deferred factory maps no error: {text}"
+        );
+    }
+
+    /// A wrapper constructor takes the bus inside its first argument: emission
+    /// fills the hole where the manifest put it, and no sentinel reaches Rust.
+    #[test]
+    fn a_wrapper_constructor_splices_the_bus_into_its_argument() {
+        use espforge_elements::model::{Bus, Init, RustExpr, RustPath, RustType};
+
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = empty_board(&case);
+        let owner = Owner::new(OwnerKind::I2c, Ident::new("i2c0", 0..0));
+        let sda = board
+            .resources
+            .claim(Pin(6), owner.clone(), 0..0, PinUse::Bidirectional)
+            .expect("sda is free");
+        let scl = board
+            .resources
+            .claim(Pin(7), owner, 0..0, PinUse::Bidirectional)
+            .expect("scl is free");
+        let bus = board.resources.add_bus(Bus::I2c {
+            id: Ident::new("i2c0", 0..0),
+            peripheral: "I2C0".into(),
+            sda,
+            scl,
+            khz: 400,
+        });
+        board.devices.push(Device::Bus(BusDevice {
+            id: Ident::new("lcd", 0..0),
+            tag: "hd44780".into(),
+            driver: Driver {
+                feature: String::new(),
+                deps: Vec::new(),
+                ty: RustType::parse("hd44780::Hd44780").expect("a display type"),
+                new: RustPath::parse("hd44780::Hd44780::new").expect("a constructor"),
+                fallible: true,
+                pins: Vec::new(),
+                args: vec![
+                    RustExpr::parse("hd44780::I2CExpander::new(__espforge_bus_device)")
+                        .expect("a wrapper argument"),
+                    RustExpr::number(0x27),
+                ],
+                factory_args: Vec::new(),
+                steps: Vec::new(),
+                async_steps: Vec::new(),
+                runtimes: espforge_elements::RuntimeSet::BLOCKING,
+                init: Init::Boot,
+                async_ty: None,
+                async_new: None,
+                async_awaits: true,
+                async_feature: None,
+                package: None,
+                expose: Vec::new(),
+                dependencies: Vec::new(),
+                manifest: None,
+            },
+            transport: BusTransport::I2c(I2cTransport {
+                bus,
+                address: 0x27,
+                endpoint: None,
+                async_endpoint: None,
+            }),
+        }));
+
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        assert!(
+            text.contains("hd44780::Hd44780::new("),
+            "the wrapper is the constructor's argument: {text}"
+        );
+        assert_eq!(
+            text.matches("hd44780::I2CExpander::new(").count(),
+            1,
+            "{text}"
+        );
+        assert_eq!(
+            text.matches("CriticalSectionDevice::new(").count(),
+            1,
+            "the endpoint is passed once: {text}"
+        );
+        assert!(
+            !text.contains("__espforge_"),
+            "no sentinel reaches Rust: {text}"
         );
     }
 
@@ -1171,6 +1266,8 @@ mod tests {
                         .expect("a rotation"),
                 ],
                 factory_args: Vec::new(),
+                steps: Vec::new(),
+                async_steps: Vec::new(),
                 runtimes: espforge_elements::RuntimeSet::BLOCKING,
                 init: espforge_elements::model::Init::Boot,
                 async_ty: None,
@@ -1224,6 +1321,64 @@ mod tests {
         assert!(lib.contains("& mut $ctx .devices"), "{lib}");
     }
 
+    /// A `then` step runs on the value the constructor built, in the manifest's
+    /// order, and its failure is that device's `Init`: a half-initialised
+    /// value never reaches app code.
+    #[test]
+    fn a_then_step_runs_on_the_value_the_constructor_built() {
+        use espforge_elements::model::{RustExpr, Step};
+
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = board_with_i2c(&case);
+        let mut dev = crate::codegen::test_support::device("demo", &[]);
+        if let Device::Bus(bus) = &mut dev {
+            bus.driver.steps = vec![Step {
+                boot: RustExpr::parse("__espforge_receiver.init(0x3F)").expect("a step"),
+                factory: RustExpr::parse("__espforge_receiver.init(0x3F)").expect("a step"),
+                awaits: false,
+            }];
+        }
+        board.devices.push(dev);
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        // The device becomes a local in `Devices::new`, the step follows it,
+        // and the field takes the value the step left behind.
+        assert!(text.contains("let mut demo_device"), "{text}");
+        assert!(text.contains(".init(0x3F)"), "{text}");
+        assert!(text.contains("demo: demo_device"), "{text}");
+        assert!(text.contains("espforge_drivers::demo::new("), "{text}");
+    }
+
+    /// A deferred device runs the same steps inside `init()`, not at boot.
+    #[test]
+    fn a_deferred_device_runs_its_steps_in_the_factory() {
+        use espforge_elements::model::{FactoryArg, Init, RustExpr, RustType, Step};
+
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = board_with_i2c(&case);
+        let mut dev = crate::codegen::test_support::device("demo", &[]);
+        if let Device::Bus(bus) = &mut dev {
+            bus.driver.init = Init::Deferred;
+            bus.driver.factory_args = vec![FactoryArg::Constant(RustExpr::number(0x3C))];
+            if let BusTransport::I2c(transport) = &mut bus.transport {
+                transport.endpoint = Some(
+                    RustType::parse("espforge_runtime::I2cEndpoint").expect("an endpoint"),
+                );
+            }
+            bus.driver.steps = vec![Step {
+                boot: RustExpr::parse("__espforge_receiver.init(0x3F)").expect("a step"),
+                factory: RustExpr::parse("__espforge_receiver.init(0x3F)").expect("a step"),
+                awaits: false,
+            }];
+        }
+        board.devices.push(dev);
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        assert!(text.contains("impl espforge_runtime::DeferredInit"), "{text}");
+        assert!(text.contains("let mut demo_device"), "{text}");
+        assert!(text.contains(".init(0x3F)"), "{text}");
+        assert!(text.contains("Ok(demo_device)"), "{text}");
+        assert!(text.contains("Deferred::new(DemoFactory"), "{text}");
+    }
+
     /// A device that drives an SPI bus builds the bus and its CS-wrapped
     /// handle inside `Devices::new`: `Components` never carries an `Option`,
     /// and nothing can be taken out from under the app at boot.
@@ -1274,6 +1429,8 @@ mod tests {
                         .expect("an orientation"),
                 ],
                 factory_args: Vec::new(),
+                steps: Vec::new(),
+                async_steps: Vec::new(),
                 runtimes: espforge_elements::RuntimeSet::BLOCKING,
                 init: espforge_elements::model::Init::Boot,
                 async_ty: None,
@@ -1325,6 +1482,34 @@ mod tests {
     /// Every device on an embassy board is stored in an `AsyncMutex`, so the
     /// one `device!` macro awaits a lock for a synchronous part just as it does
     /// for an async one, and the old aliases still resolve.
+    /// A busless driver builds no bus handle, but it still owns a `Devices`
+    /// field: the emitter's walk must reach it, not only the bus devices.
+    #[test]
+    fn a_busless_device_reaches_the_generated_struct() {
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = crate::codegen::test_support::board();
+        board.meta = case.meta.clone();
+        let Device::Bus(part) = crate::codegen::test_support::device("hx711", &[]) else {
+            panic!("the fixture builder makes a bus device")
+        };
+        board
+            .devices
+            .push(Device::Pins(espforge_elements::model::PinsDevice {
+                id: part.id,
+                tag: part.tag,
+                driver: part.driver,
+            }));
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        assert!(
+            text.contains("pub hx711: espforge_drivers::hx711,"),
+            "{text}"
+        );
+        assert!(
+            text.contains("hx711: espforge_drivers::hx711::new("),
+            "{text}"
+        );
+    }
+
     #[test]
     fn an_embassy_device_is_locked_through_a_guard() {
         let case = case("esp32c3", Runtime::Embassy, true, &[], &[]);

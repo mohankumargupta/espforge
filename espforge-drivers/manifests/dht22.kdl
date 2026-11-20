@@ -1,0 +1,30 @@
+driver "dht22" {
+    format_version 2
+    summary "DHT22 temperature and humidity sensor"
+    description "Reads temperature and humidity from the sensor's single-wire line. `dht-embedded` 0.4.0's `Dht22::new` returns the driver directly, so `fallible #false`. The line is driven low to start a conversion and then released for the sensor to pull high and pulse, so it is one open-drain pin with a pull-up rather than a separate input and output pin — the crate asks for a type implementing both traits. Its `NoopInterruptControl` is passed because espforge does not mask interrupts per read."
+    category "sensor"
+
+    dependency "dht-embedded" { version "0.4.0" }
+
+    bus "none"
+
+    pin "data" direction="open_drain" pull="up" default_level="high"
+
+    codegen {
+        fallible #false
+        map "delay" {
+            "runtime" { expr "espforge_runtime::Delay::new()" }
+        }
+        runtime "blocking" {
+            type "dht_embedded::Dht22<core::convert::Infallible, dht_embedded::NoopInterruptControl, espforge_runtime::Delay, espforge_runtime::OpenDrainPin>"
+            constructor "dht_embedded::Dht22::new(dht_embedded::NoopInterruptControl, {delay}, {data})"
+        }
+    }
+
+    attr "delay" kind="choice" default="runtime" {
+        choices "runtime"
+        help "The delay handle the driver takes; espforge always passes the runtime's own."
+    }
+
+    example "minimal" #"<dht22 id="air" data="6" />"#
+}

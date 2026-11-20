@@ -1,0 +1,31 @@
+driver "hx711" {
+    format_version 2
+    summary "HX711 24-bit load-cell amplifier"
+    description "Bit-bangs the HX711's two-wire interface to read raw load-cell counts. `loadcell` 0.3.0's `HX711::new(sck, dt, delay)` returns the driver directly, so `fallible #false`. PD_SCK idles low between conversions and DOUT is a plain input the chip drives; each reading is 25-27 clock pulses, so the delay handle must not yield in the middle of one (the blocking `espforge_runtime::Delay` does not)."
+    category "sensor"
+
+    dependency "loadcell" { version "0.3.0" }
+
+    bus "none"
+
+    pin "sck" direction="output" default_level="low"
+    pin "dout" direction="input" pull="none"
+
+    codegen {
+        fallible #false
+        map "delay" {
+            "runtime" { expr "espforge_runtime::Delay::new()" }
+        }
+        runtime "blocking" {
+            type "loadcell::hx711::HX711<espforge_runtime::OutputPin, espforge_runtime::InputPin, espforge_runtime::Delay>"
+            constructor "loadcell::hx711::HX711::new({sck}, {dout}, {delay})"
+        }
+    }
+
+    attr "delay" kind="choice" default="runtime" {
+        choices "runtime"
+        help "The delay handle the driver takes; espforge always passes the runtime's own."
+    }
+
+    example "minimal" #"<hx711 id="scale" sck="4" dout="5" />"#
+}

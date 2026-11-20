@@ -491,6 +491,46 @@ mod tests {
         lower_src_with(src, meta)
     }
 
+    /// A `bus "none"` driver binds to pins, not to a peripheral: it lowers to
+    /// `Device::Pins` and claims each line it declared. The bundled `hx711`
+    /// manifest supplies the recipe.
+    #[test]
+    fn a_busless_driver_lowers_to_pins() {
+        let session = Session::bundled();
+        let src = "# espforge\n\
+            \x20 <project name=\"scale\" />\n\
+            \x20 <chip type=\"esp32c3\" />\n\
+            \x20 <runtime type=\"blocking\" />\n\
+            # peripherals\n\
+            # devices\n\
+            \x20 <hx711 id=\"scale\" sck=\"4\" dout=\"5\" />\n\
+            # services\n";
+        let parsed = parse_espf(src);
+        let section = |name: &str| parsed.sections.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let board = lower(
+            meta(),
+            section("peripherals"),
+            section("devices"),
+            section("services"),
+            &session,
+        )
+        .expect("the busless driver lowers");
+        let Device::Pins(device) = &board.devices[0] else {
+            panic!("a busless driver is a pins device");
+        };
+        assert_eq!(device.tag, "hx711");
+        assert_eq!(device.id.raw, "scale");
+        assert_eq!(device.driver.pins.len(), 2, "both declared lines are claimed");
+        assert_eq!(
+            board.resources.claim_of(Pin(4)).unwrap().owner.kind,
+            OwnerKind::Device("hx711".into())
+        );
+        assert_eq!(
+            board.resources.claim_of(Pin(5)).unwrap().owner.kind,
+            OwnerKind::Device("hx711".into())
+        );
+    }
+
     #[test]
     fn blink_lowers_to_one_led_on_pin_18() {
         let board = lower_src(BLINK).expect("blink lowers");
@@ -609,7 +649,7 @@ mod tests {
         assert_eq!(errors[0].code, codes::DEVICE_UNSUPPORTED);
         assert_eq!(
             errors[0].message,
-            "`<pwm>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`, `<sht4x>`, `<ads111x>`, `<bme680>`, `<mhz19b>`"
+            "`<pwm>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`, `<sht4x>`, `<ads111x>`, `<bme680>`, `<mhz19b>`, `<hx711>`, `<dht22>`, `<tm1637>`"
         );
     }
 
@@ -2059,6 +2099,8 @@ driver "touch" {
                     pins: Vec::new(),
                     args: vec![crate::model::RustExpr::number(0x3C)],
                     factory_args: Vec::new(),
+                    steps: Vec::new(),
+                    async_steps: Vec::new(),
                     runtimes,
                     init: crate::model::Init::Boot,
                     async_ty: None,
@@ -2265,7 +2307,7 @@ driver "shared_async" {
         assert_eq!(errors[0].code, codes::DEVICE_UNSUPPORTED);
         assert_eq!(
             errors[0].message,
-            "`<st7789>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`, `<sht4x>`, `<ads111x>`, `<bme680>`, `<mhz19b>`"
+            "`<st7789>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`, `<sht4x>`, `<ads111x>`, `<bme680>`, `<mhz19b>`, `<hx711>`, `<dht22>`, `<tm1637>`"
         );
     }
 
@@ -2569,6 +2611,118 @@ driver "shared_async" {
             section("services"),
             &session,
         )
+    }
+
+    /// A dual-bus driver picks the recipe its `bus=` reference names: the
+    /// other transport's attributes and Cargo features are not part of that
+    /// build.
+    const DUAL_PROBE: &str = r##"
+driver "dual_probe" {
+    format_version 2
+    summary "Dual-bus probe"
+    category "sensor"
+    dependency "embedded-graphics" { version "0.8.1" }
+
+    transport "i2c" {
+        bus { address default="0x76" }
+        codegen {
+            fallible #false
+            runtime "blocking" {
+                type "dual::i2c::Dual"
+                constructor "dual::i2c::Dual::new({bus_device}, {address})"
+            }
+        }
+        dependency "embedded-graphics" { features "i2c" }
+    }
+    transport "spi" {
+        bus { mode 3 frequency "10000kHz" }
+        codegen {
+            fallible #false
+            runtime "blocking" {
+                type "dual::spi::Dual"
+                constructor "dual::spi::Dual::new({spi_device})"
+            }
+        }
+        dependency "embedded-graphics" { features "spi" }
+    }
+
+    example "i2c" #"<dual_probe id="p" bus="$i2c0" />"#
+    example "spi" #"<dual_probe id="p" bus="$spi2" cs="10" />"#
+}
+"##;
+
+    fn lower_dual_probe(peripherals: &str, device: &str) -> Result<Board, Vec<Diagnostic>> {
+        let session = Session::compose(&[(
+            "dual-probe.schema.kdl".to_string(),
+            DUAL_PROBE.to_string(),
+        )])
+        .expect("the probe schema loads");
+        let src = format!(
+            "# espforge\n\
+             \x20 <project name=\"probe\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             {peripherals}\
+             # devices\n\
+             {device}\
+             # services\n"
+        );
+        let parsed = parse_espf(&src);
+        let section = |name: &str| parsed.sections.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        lower(
+            meta(),
+            section("peripherals"),
+            section("devices"),
+            section("services"),
+            &session,
+        )
+    }
+
+    #[test]
+    fn a_dual_transport_driver_binds_the_bus_the_spec_names() {
+        let i2c = lower_dual_probe(
+            "  <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" frequency=\"100kHz\" />\n",
+            "  <dual_probe id=\"env\" bus=\"$i2c0\" address=\"0x76\" />\n",
+        )
+        .expect("the i2c transport lowers");
+        let device = i2c.devices[0].as_bus().expect("a bus device");
+        assert_eq!(device.driver.ty.text(), "dual::i2c::Dual");
+        assert!(
+            matches!(&device.transport, BusTransport::I2c(transport) if transport.address == 0x76),
+            "{:#?}",
+            device.transport
+        );
+        assert_eq!(device.driver.dependencies[0].features, ["i2c"]);
+
+        let spi = lower_dual_probe(
+            "  <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"9\" mode=\"0\" />\n",
+            "  <dual_probe id=\"env\" bus=\"$spi2\" cs=\"10\" />\n",
+        )
+        .expect("the spi transport lowers");
+        let device = spi.devices[0].as_bus().expect("a bus device");
+        assert_eq!(device.driver.ty.text(), "dual::spi::Dual");
+        assert!(
+            matches!(&device.transport, BusTransport::Spi(transport) if transport.cs.pin().0 == 10),
+            "{:#?}",
+            device.transport
+        );
+        assert_eq!(device.driver.dependencies[0].features, ["spi"]);
+    }
+
+    #[test]
+    fn a_dual_transport_driver_refuses_the_other_transports_attributes() {
+        let errors = lower_dual_probe(
+            "  <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"9\" mode=\"0\" />\n",
+            "  <dual_probe id=\"env\" bus=\"$spi2\" cs=\"10\" address=\"0x76\" />\n",
+        )
+        .unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "`address` is not part of the spi transport"),
+            "{errors:#?}"
+        );
     }
 
     /// A `bus "uart"` recipe becomes a device that owns the port: the transport

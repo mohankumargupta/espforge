@@ -212,6 +212,17 @@ pub fn flag_or<'a>(
     }
 }
 
+/// An optional `true` / `false`.
+pub fn opt_flag<'a>(
+    node: &'a ParsedNode<'a>,
+    name: &'a str,
+) -> Result<Option<Spanned<bool>>, Issue<'a>> {
+    match find(node, name) {
+        Some(attr) => Ok(Some(flag_value(attr, name)?)),
+        None => Ok(None),
+    }
+}
+
 fn flag_value<'a>(attr: &'a TagAttribute<'a>, name: &'a str) -> Result<Spanned<bool>, Issue<'a>> {
     let value = match attr.val.as_ref() {
         "true" => true,
@@ -307,6 +318,37 @@ pub fn number_in_or<'a>(
     })
 }
 
+/// An unsigned number, absent or written.
+pub fn opt_number<'a>(
+    node: &'a ParsedNode<'a>,
+    name: &'a str,
+) -> Result<Option<Spanned<u32>>, Issue<'a>> {
+    match find(node, name) {
+        Some(attr) => Ok(Some(number_value(attr, name)?)),
+        None => Ok(None),
+    }
+}
+
+/// An optional unsigned number with a schema `range`.
+///
+/// The range applies here exactly as it does in [`crate::dynamic_attrs`], so a
+/// project manifest and a generated `Attrs` refuse the same values.
+pub fn opt_number_in<'a>(
+    node: &'a ParsedNode<'a>,
+    name: &'a str,
+    low: u32,
+    high: u32,
+) -> Result<Option<Spanned<u32>>, Issue<'a>> {
+    let Some(attr) = find(node, name) else {
+        return Ok(None);
+    };
+    let value = in_range(attr, name, low, high)?;
+    Ok(Some(Spanned {
+        value,
+        span: span_of(attr),
+    }))
+}
+
 fn number_value<'a>(attr: &'a TagAttribute<'a>, name: &'a str) -> Result<Spanned<u32>, Issue<'a>> {
     Ok(Spanned {
         value: attr
@@ -350,6 +392,21 @@ pub fn opt_hex<'a>(
     }
 }
 
+/// A `0x..` or decimal byte, defaulted from the schema when absent.
+pub fn hex_or<'a>(
+    node: &'a ParsedNode<'a>,
+    name: &'a str,
+    default: u8,
+) -> Result<Spanned<u8>, Issue<'a>> {
+    match find(node, name) {
+        Some(attr) => hex_value(attr, name),
+        None => Ok(Spanned {
+            value: default,
+            span: Span::at_node(node),
+        }),
+    }
+}
+
 fn hex_value<'a>(attr: &'a TagAttribute<'a>, name: &'a str) -> Result<Spanned<u8>, Issue<'a>> {
     let parsed = match attr
         .val
@@ -374,6 +431,21 @@ pub fn pin_or_ref<'a>(node: &'a ParsedNode<'a>, name: &'a str) -> Result<PinOrRe
         Ok(pin) => PinOrRef::Pin(Spanned { value: pin, span }),
         Err(_) => PinOrRef::Ref(Ref::at(attr.val.as_ref(), span)),
     })
+}
+
+/// An optional `kind="pin_or_ref"` value.
+pub fn opt_pin_or_ref<'a>(
+    node: &'a ParsedNode<'a>,
+    name: &'a str,
+) -> Result<Option<PinOrRef<'a>>, Issue<'a>> {
+    let Some(attr) = find(node, name) else {
+        return Ok(None);
+    };
+    let span = span_of(attr);
+    Ok(Some(match attr.val.parse::<u8>() {
+        Ok(pin) => PinOrRef::Pin(Spanned { value: pin, span }),
+        Err(_) => PinOrRef::Ref(Ref::at(attr.val.as_ref(), span)),
+    }))
 }
 
 /// A required GPIO number.
@@ -531,5 +603,47 @@ mod tests {
         let n = node("peripherals", src);
         assert_eq!(pin(&n, "pin").unwrap().value, 18);
         assert_eq!(pin(&n, "missing"), Err(Issue::Missing { attr: "missing" }));
+    }
+
+    #[test]
+    fn optional_readers_return_none_rather_than_a_default() {
+        let n = node("devices", "# devices\n  <led id=\"l\" />\n");
+        assert_eq!(opt_number(&n, "depth"), Ok(None));
+        assert_eq!(opt_flag(&n, "irq"), Ok(None));
+        assert_eq!(opt_pin_or_ref(&n, "cs"), Ok(None));
+    }
+
+    #[test]
+    fn a_schema_default_fills_an_absent_value() {
+        let n = node("devices", "# devices\n  <led id=\"l\" />\n");
+        let address = hex_or(&n, "address", 0x3C).unwrap();
+        assert_eq!(address.value, 0x3C);
+        assert_eq!(address.span.start, n.offset, "a default is anchored at the node");
+    }
+
+    #[test]
+    fn an_optional_number_still_honours_its_range() {
+        let n = node("devices", "# devices\n  <led id=\"l\" depth=\"9\" />\n");
+        assert_eq!(
+            opt_number_in(&n, "depth", 0, 7),
+            Err(Issue::Invalid {
+                attr: "depth",
+                value: "9"
+            })
+        );
+    }
+
+    #[test]
+    fn a_pin_or_ref_reads_both_spellings() {
+        let numbered = node("devices", "# devices\n  <led id=\"l\" cs=\"9\" />\n");
+        assert!(matches!(
+            opt_pin_or_ref(&numbered, "cs"),
+            Ok(Some(PinOrRef::Pin(_)))
+        ));
+        let referenced = node("devices", "# devices\n  <led id=\"l\" cs=\"$gpio9\" />\n");
+        assert!(matches!(
+            opt_pin_or_ref(&referenced, "cs"),
+            Ok(Some(PinOrRef::Ref(_)))
+        ));
     }
 }

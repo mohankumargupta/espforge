@@ -1,0 +1,31 @@
+driver "tm1637" {
+    format_version 2
+    summary "TM1637 4-digit 7-segment display"
+    description "Drives the TM1637's two-wire interface to show digits. `tm1637-embedded-hal` 0.5.2's `TM1637::new` is a const fn returning the driver directly, so `fallible #false`. The position count and the blocking/async mode are generics: the declared type spells `4` and `Blocking`, and the constructor leaves them to inference, because a manifest constructor must be a plain `Type::new(..)` path and cannot carry a turbofish. The brightness and bit delay written here are the crate builder's defaults (`Brightness::L0`, 100 us). DIO is open-drain: the driver only ever drives it low and releases it, and it reads the display's acknowledge solely under the crate's `ack` feature, which the manifest leaves off."
+    category "display"
+
+    dependency "tm1637-embedded-hal" { version "0.5.2" }
+
+    bus "none"
+
+    pin "clk" direction="output" default_level="low"
+    pin "dio" direction="open_drain" pull="up" default_level="high"
+
+    codegen {
+        fallible #false
+        map "delay" {
+            "runtime" { expr "espforge_runtime::Delay::new()" }
+        }
+        runtime "blocking" {
+            type "tm1637_embedded_hal::TM1637<4, tm1637_embedded_hal::tokens::Blocking, espforge_runtime::OutputPin, espforge_runtime::OpenDrainPin, espforge_runtime::Delay>"
+            constructor "tm1637_embedded_hal::TM1637::new({clk}, {dio}, {delay}, tm1637_embedded_hal::Brightness::L0, 100)"
+        }
+    }
+
+    attr "delay" kind="choice" default="runtime" {
+        choices "runtime"
+        help "The delay handle the driver takes; espforge always passes the runtime's own."
+    }
+
+    example "minimal" #"<tm1637 id="display" clk="4" dio="5" />"#
+}

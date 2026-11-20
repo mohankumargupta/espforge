@@ -38,7 +38,9 @@ mod driver;
 mod requirement;
 pub mod syntax;
 
-pub use syntax::{MappedValue, RustExpr, RustPath, RustType, ServiceExprTemplate, TypeTemplate};
+pub use syntax::{
+    MappedValue, RustExpr, RustPath, RustType, ServiceExprTemplate, TypeTemplate, STEP_RECEIVER,
+};
 
 /// The core schema text, embedded at compile time.
 pub const SCHEMA_KDL: &str = include_str!("espf.schema.kdl");
@@ -458,6 +460,8 @@ pub struct AsyncMode {
     pub feature: Option<String>,
     /// The endpoint type the async constructor takes, for a deferred factory.
     pub endpoint: Option<String>,
+    /// The `then` steps the async constructor's device runs, in order.
+    pub steps: Vec<Step>,
     /// Whether the async constructor is an `async fn` that must be awaited.
     ///
     /// `runtime "async" { awaits #false }` names a crate whose `new()` is a
@@ -473,6 +477,7 @@ impl Default for AsyncMode {
             new: None,
             feature: None,
             endpoint: None,
+            steps: Vec::new(),
             // A driver with no async block never calls an async constructor,
             // so `true` is the value that changes nothing.
             awaits: true,
@@ -523,6 +528,10 @@ pub struct DeviceRecipe {
     /// One list holds the address, the slots and the fixed expressions, so
     /// nothing downstream has to insert an argument at a remembered index.
     pub args: Vec<CtorArg>,
+    /// The `then` steps the blocking constructor's device runs, in order.
+    ///
+    /// Empty for every recipe that is one call, which is nearly all of them.
+    pub steps: Vec<Step>,
     /// The bus modes the driver supports (`runtime "blocking"`).
     pub runtimes: Runtimes,
     /// The async half of the recipe (`runtime "async" { .. }`).
@@ -550,6 +559,21 @@ pub struct DeviceRecipe {
     /// one device per part, all on the parent's bus. Empty for every driver
     /// that is one part.
     pub parts: Vec<RecipePart>,
+    /// The crates this transport's codegen needs, with the driver's own
+    /// `dependency` blocks amended by the transport's.
+    ///
+    /// Empty for every single-transport manifest, where
+    /// [`Element::dependencies`] is the whole list. A multi-transport driver
+    /// fills it per transport so only the selected transport's Cargo features
+    /// are emitted.
+    pub dependencies: Vec<Dependency>,
+    /// One recipe per bus kind, for a multi-transport `driver`.
+    ///
+    /// Empty for a single-transport element, which this recipe alone
+    /// describes. When non-empty every transport is present, including this
+    /// recipe's own, and lowering selects one by the `bus=` reference's kind
+    /// (or by its absence, for a `bus "none"` variant).
+    pub transports: Vec<DeviceRecipe>,
     /// Span of the `device_recipe` node in the schema text.
     pub span: Range<usize>,
 }
@@ -599,6 +623,10 @@ pub enum CtorArg {
     Slot(DeviceArg),
     /// A fixed Rust expression the manifest writes verbatim
     /// (`ads111x::Ads111xConfig::default()`).
+    ///
+    /// It may carry `{bus_device}`, `{spi_device}` and `{address}`: a driver
+    /// that takes a wrapper around the bus
+    /// (`I2CExpander::new({bus_device}, {address})`) is still manifest-only.
     Fixed {
         /// The expression, as Rust tokens.
         text: String,
@@ -627,6 +655,31 @@ impl CtorArg {
     }
 }
 
+/// One `then { call ".." }` step: a method call the device runs after its
+/// constructor returns.
+///
+/// A step names no receiver: the generated code calls it on the value it just
+/// built, so a manifest can order calls but cannot reach any other object.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Step {
+    /// The call as the manifest wrote it, holes as `{name}` (`init({delay})`).
+    pub text: String,
+    /// Whether the call is awaited. Always `#false` on a blocking runtime.
+    pub awaits: bool,
+    /// Span of the `then` node in the schema text.
+    pub span: Range<usize>,
+}
+
+impl Step {
+    /// The step as a parsed method call on the device placeholder.
+    ///
+    /// Lowering splices the argument holes and leaves the receiver for
+    /// emission, which knows the local the device was built into.
+    pub fn call(&self) -> Result<RustExpr, String> {
+        syntax::step_call(&self.text).map_err(|(message, _)| message)
+    }
+}
+
 /// One `arg` of a [`DeviceRecipe`]: a slot the constructor takes, either a
 /// value mapped from the attribute's spelling or a claimed auxiliary pin.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -641,6 +694,10 @@ pub struct DeviceArg {
     pub pin: Option<String>,
     /// The direction the referenced `<gpio>` must declare (pin slots).
     pub direction: PinDirection,
+    /// Whether the line is open-drain (`direction="open_drain"`): the wrapper
+    /// releases for high instead of driving it, and the claimed use is
+    /// bidirectional either way.
+    pub open_drain: bool,
     /// The output level a pin slot starts at (`Low`/`High`), for a deferred
     /// factory that must build the line after boot.
     pub level: Option<&'static str>,
@@ -765,6 +822,13 @@ pub enum PinDirection {
     Output,
     /// A line the driver drives and reads (`esp_hal::gpio::Flex`).
     Bidirectional,
+    /// A line the driver only ever pulls low or releases, letting an external
+    /// pull-up supply the high level (`tm1637`, `dht11`/`dht22`, 1-Wire).
+    ///
+    /// A claimed `open_drain` line is a bidirectional one: the driver both
+    /// drives and reads it, and the difference from [`Self::Bidirectional`] is
+    /// which wrapper the constructor receives.
+    OpenDrain,
 }
 
 impl PinDirection {
@@ -774,6 +838,7 @@ impl PinDirection {
             PinDirection::Input => "input",
             PinDirection::Output => "output",
             PinDirection::Bidirectional => "bidirectional",
+            PinDirection::OpenDrain => "open_drain",
         }
     }
 }
@@ -2065,10 +2130,13 @@ fn parse_device_recipe(
         fallible: true,
         deps,
         args: ctor_args,
+        steps: Vec::new(),
         address,
         address_default: None,
         address_allowed: None,
         parts: Vec::new(),
+        dependencies: Vec::new(),
+        transports: Vec::new(),
         runtimes,
         async_mode,
         endpoint,
@@ -2481,6 +2549,7 @@ fn parse_device_arg(
         direction,
         // The v2 `pin "<name>"` declarations carry these; this older `arg`
         // form leaves them at the runtime's own defaults.
+        open_drain: false,
         level: None,
         pull: None,
         span,

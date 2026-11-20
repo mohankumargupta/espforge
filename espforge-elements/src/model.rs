@@ -905,12 +905,29 @@ pub enum PinDeviceKind {
 /// against 168 for `PinDevice`, because the driver record itself is large.
 /// That remaining size is recorded here rather than silenced with an `allow`;
 /// boxing the record is a separate change.
+/// A busless device: a driver whose transport is the pins it claimed.
+///
+/// `hx711`, `tm1637` and `dht11`/`dht22` talk over GPIO timing rather than a
+/// silicon bus, so there is no `BusId` and no shared peripheral to build. The
+/// claimed lines live in [`Driver::pins`], exactly as a bus device's
+/// auxiliary lines do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinsDevice {
+    pub id: Ident,
+    /// The schema tag, which names the recipe that built this.
+    pub tag: String,
+    /// Everything that is independent of a transport.
+    pub driver: Driver,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Device {
     /// A GPIO-backed device such as an LED or button.
     Pin(PinDevice),
     /// A driver bound to an I2C or SPI bus.
     Bus(BusDevice),
+    /// A driver bound to pins only (`bus "none"`).
+    Pins(PinsDevice),
 }
 
 impl Device {
@@ -919,6 +936,7 @@ impl Device {
         match self {
             Device::Pin(device) => &device.id,
             Device::Bus(device) => &device.id,
+            Device::Pins(device) => &device.id,
         }
     }
 
@@ -927,19 +945,32 @@ impl Device {
         match self {
             Device::Pin(device) => &device.tag,
             Device::Bus(device) => &device.tag,
+            Device::Pins(device) => &device.tag,
         }
     }
 
     pub fn as_pin(&self) -> Option<&PinDevice> {
         match self {
             Device::Pin(device) => Some(device),
-            Device::Bus(_) => None,
+            Device::Bus(_) | Device::Pins(_) => None,
         }
     }
 
     pub fn as_bus(&self) -> Option<&BusDevice> {
         match self {
             Device::Bus(device) => Some(device),
+            Device::Pin(_) | Device::Pins(_) => None,
+        }
+    }
+
+    /// The driver record, for every device that is a driver: bus and busless.
+    ///
+    /// A `<led>` has none: its recipe names one runtime type, not a crate,
+    /// a feature and a dependency set.
+    pub fn driver(&self) -> Option<&Driver> {
+        match self {
+            Device::Bus(device) => Some(&device.driver),
+            Device::Pins(device) => Some(&device.driver),
             Device::Pin(_) => None,
         }
     }
@@ -954,13 +985,14 @@ impl crate::element::Lowered for Device {
         match self {
             Device::Pin(device) => device.emit(board, cx),
             Device::Bus(device) => device.emit(board, cx),
+            Device::Pins(device) => device.emit(board, cx),
         }
     }
 
     fn overlay_attr(&self, attr: &str) -> Option<String> {
         match self {
             Device::Pin(device) => device.overlay_attr(attr),
-            Device::Bus(_) => None,
+            Device::Bus(_) | Device::Pins(_) => None,
         }
     }
 }
@@ -1159,7 +1191,25 @@ pub enum FactoryArg {
         level: Option<&'static str>,
         /// The input pull resistor (`None`/`Up`/`Down`).
         pull: Option<&'static str>,
+        /// Whether the line is open-drain: high is *released*, not driven.
+        open_drain: bool,
     },
+}
+
+/// One post-construction call a manifest declared with `then`.
+///
+/// A step names no receiver: the generated code calls it on the value the
+/// constructor just returned, so a manifest can order calls but cannot reach
+/// any other object.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Step {
+    /// The call at boot, on the local the device is built into.
+    pub boot: RustExpr,
+    /// The same call inside a deferred factory, where a pin is rebuilt from
+    /// the peripheral the factory stored instead of moved at boot.
+    pub factory: RustExpr,
+    /// Whether the call is awaited (`runtime "async"` only).
+    pub awaits: bool,
 }
 
 /// A bus-backed device: a driver for a specific part, plus one concrete bus
@@ -1210,6 +1260,10 @@ pub struct Driver {
     /// The same arguments as [`Self::args`], split into constants a deferred
     /// factory can recompute and pins it must store.
     pub factory_args: Vec<FactoryArg>,
+    /// The `then` steps the blocking constructor's device runs, in order.
+    pub steps: Vec<Step>,
+    /// The `then` steps the async constructor's device runs.
+    pub async_steps: Vec<Step>,
     /// The bus modes the driver's manifest declares it supports.
     pub runtimes: RuntimeSet,
     /// When the device is brought up.
@@ -1342,6 +1396,201 @@ impl BusDevice {
     }
 }
 
+impl crate::element::Lowered for PinsDevice {
+    fn id(&self) -> &Ident {
+        &self.id
+    }
+
+    /// Emit a driver with no bus.
+    ///
+    /// The shape mirrors [`BusDevice`]'s emission minus the endpoint: there is
+    /// no peripheral to build and no handle to pass, so every constructor
+    /// argument is the driver's own. A deferred device stores its raw pins and
+    /// rebuilds them in `init`, which is what makes `init="deferred"` legal for
+    /// a part that must be powered up before it is built.
+    fn emit(&self, board: &Board, cx: &mut crate::element::EmitCx) {
+        let PinsDevice { id, tag, driver } = self;
+        let name = format_ident!("{}", id.rust_name());
+        let ty = &driver.ty;
+        let new = &driver.new;
+        let args = constructor_args(driver, None);
+        let device = Literal::string(id.raw.as_str());
+        let fail = if !driver.fallible {
+            quote! {}
+        } else if driver.package.is_some() {
+            quote! {
+                .map_err(|_| espforge_runtime::DeviceError {
+                    device: #device,
+                    kind: espforge_runtime::DeviceErrorKind::Init,
+                })
+            }
+        } else {
+            quote! {
+                .map_err(|kind| espforge_runtime::DeviceError { device: #device, kind })
+            }
+        };
+        let check = if driver.fallible {
+            quote! { #fail? }
+        } else {
+            quote! {}
+        };
+
+        if driver.init == Init::Deferred {
+            let factory = format_ident!("{}", factory_name(&id.rust_name()));
+            let mut fields = Vec::new();
+            let mut pin_inits = Vec::new();
+            let mut call_args = Vec::new();
+            let values = BTreeMap::new();
+            for arg in &driver.factory_args {
+                match arg {
+                    FactoryArg::Pin {
+                        name,
+                        optional,
+                        direction,
+                        level,
+                        pull,
+                        open_drain,
+                    } => {
+                        let field = format_ident!("pin_{}", name);
+                        let pin = driver
+                            .pins
+                            .iter()
+                            .find(|(pin_name, _)| pin_name == name)
+                            .map(|(_, claim)| claim.pin().0)
+                            .unwrap_or_else(|| {
+                                panic!("deferred device `<{tag}>` has no pin `{name}`")
+                            });
+                        let raw = crate::bus_emit::gpio(pin);
+                        let gpio = format_ident!("GPIO{}", pin);
+                        let peripheral_ty = quote! { esp_hal::peripherals::#gpio<'static> };
+                        let field_ty = if *optional {
+                            quote! { Option<#peripheral_ty> }
+                        } else {
+                            peripheral_ty
+                        };
+                        fields.push(quote! { #field: #field_ty });
+                        pin_inits.push(if *optional {
+                            quote! { #field: Some(#raw) }
+                        } else {
+                            quote! { #field: #raw }
+                        });
+                        call_args.push(if *optional {
+                            let build =
+                                line_from(*direction, *level, *pull, *open_drain, quote! { pin });
+                            quote! { self.#field.map(|pin| #build) }
+                        } else {
+                            line_from(
+                                *direction,
+                                *level,
+                                *pull,
+                                *open_drain,
+                                quote! { self.#field },
+                            )
+                        });
+                    }
+                    FactoryArg::Constant(expression) => {
+                        let expression = expression.splice(&values);
+                        call_args.push(quote! { #expression });
+                    }
+                }
+            }
+            let construct = quote! { #new(#(#call_args),*) };
+            let steps = driver.steps.as_slice();
+            let factory_body = if steps.is_empty() {
+                if driver.fallible {
+                    quote! { #construct #fail }
+                } else {
+                    quote! { Ok(#construct) }
+                }
+            } else {
+                let local = format_ident!("{}_device", name);
+                let statements = step_statements(steps, &quote! { #local }, true, &device);
+                let constructed = if driver.fallible {
+                    quote! { #construct #fail }
+                } else {
+                    quote! { #construct }
+                };
+                quote! {
+                    #[allow(unused_mut)]
+                    let mut #local = #constructed;
+                    #(#statements)*
+                    Ok(#local)
+                }
+            };
+            cx.module_item(quote! {
+                /// Built during `Devices::new`, initialised after boot.
+                pub struct #factory {
+                    #(#fields,)*
+                }
+
+                impl espforge_runtime::DeferredInit for #factory {
+                    type Device = #ty;
+
+                    fn init(self) -> Result<Self::Device, espforge_runtime::DeviceError> {
+                        #factory_body
+                    }
+                }
+            });
+            let factory_expr = quote! {
+                #factory {
+                    #(#pin_inits,)*
+                }
+            };
+            if board.meta.runtime == Runtime::Embassy {
+                cx.device_field(quote! {
+                    pub #name: espforge_runtime::AsyncMutex<
+                        espforge_runtime::Deferred<#factory>,
+                    >,
+                });
+                cx.device_init(quote! {
+                    #name: espforge_runtime::AsyncMutex::new(
+                        espforge_runtime::Deferred::new(#factory_expr),
+                    ),
+                });
+            } else {
+                cx.device_field(quote! {
+                    pub #name: espforge_runtime::Deferred<#factory>,
+                });
+                cx.device_init(quote! {
+                    #name: espforge_runtime::Deferred::new(#factory_expr),
+                });
+            }
+            return;
+        }
+
+        let steps = driver.steps.as_slice();
+        let constructed = quote! { #new(#(#args),*) #check };
+        let value = if steps.is_empty() {
+            constructed
+        } else {
+            let local = format_ident!("{}_device", name);
+            let statements = step_statements(steps, &quote! { #local }, false, &device);
+            cx.device_prelude(quote! {
+                #[allow(unused_mut)]
+                let mut #local = #constructed;
+                #(#statements)*
+            });
+            quote! { #local }
+        };
+
+        if board.meta.runtime == Runtime::Embassy {
+            cx.device_field(quote! {
+                pub #name: espforge_runtime::AsyncMutex<#ty>,
+            });
+            cx.device_init(quote! {
+                #name: espforge_runtime::AsyncMutex::new(#value),
+            });
+        } else {
+            cx.device_field(quote! {
+                pub #name: #ty,
+            });
+            cx.device_init(quote! {
+                #name: #value,
+            });
+        }
+    }
+}
+
 impl crate::element::Lowered for BusDevice {
     fn id(&self) -> &Ident {
         &self.id
@@ -1370,7 +1619,6 @@ impl crate::element::Lowered for BusDevice {
             &driver.new
         };
         let deferred = async_bus || driver.init == Init::Deferred;
-        let args: Vec<TokenStream> = driver.args.iter().map(|arg| quote! { #arg }).collect();
 
         // Build the bus and the device's own handle inside `Devices::new`, so
         // the bus exists exactly once and nothing is exposed through a
@@ -1407,6 +1655,11 @@ impl crate::element::Lowered for BusDevice {
             // emission builds it once: lowering already refused a second bind.
             BusTransport::Uart(uart) => crate::bus_emit::uart_device(cx, board, uart.bus),
         };
+
+        // The endpoint is the constructor's first argument, unless the manifest
+        // wrapped it (`I2CExpander::new({bus_device}, {address})`): then the
+        // hole is filled here, where the bus finally exists.
+        let args = constructor_args(driver, Some(&handle));
 
         // A device constructor is fallible, and the error carries the element
         // id so a boot log names the part that did not answer.
@@ -1458,7 +1711,14 @@ impl crate::element::Lowered for BusDevice {
             // and CS lines at boot, before `app::setup` can power the part.
             let mut fields = vec![quote! { endpoint: #endpoint_ty }];
             let mut pin_inits = Vec::new();
-            let mut call_args = vec![quote! { self.endpoint }];
+            // A plain recipe passes the endpoint first; a wrapper recipe
+            // splices it into the expression the manifest wrote, and the value
+            // it splices is the field the factory stored.
+            let values = bus_values(&quote! { self.endpoint });
+            let mut call_args = Vec::new();
+            if !driver.args.first().is_some_and(RustExpr::has_placeholder) {
+                call_args.push(quote! { self.endpoint });
+            }
             // `factory_args` carries both the pins a factory stores and the
             // constants it passes, in the manifest's order.
             for arg in driver.factory_args.iter() {
@@ -1469,6 +1729,7 @@ impl crate::element::Lowered for BusDevice {
                         direction,
                         level,
                         pull,
+                        open_drain,
                     } => {
                         let field = format_ident!("pin_{}", name);
                         let pin = driver
@@ -1493,23 +1754,29 @@ impl crate::element::Lowered for BusDevice {
                         } else {
                             quote! { #field: #raw }
                         });
-                        let level = match level {
-                            Some("High") => quote! { esp_hal::gpio::Level::High },
-                            _ => quote! { esp_hal::gpio::Level::Low },
-                        };
-                        let pull = match pull {
-                            Some("Up") => quote! { esp_hal::gpio::Pull::Up },
-                            Some("Down") => quote! { esp_hal::gpio::Pull::Down },
-                            _ => quote! { esp_hal::gpio::Pull::None },
-                        };
                         call_args.push(if *optional {
-                            let build = line_build(*direction, &level, &pull, quote! { pin });
+                            let build = line_from(
+                                *direction,
+                                *level,
+                                *pull,
+                                *open_drain,
+                                quote! { pin },
+                            );
                             quote! { self.#field.map(|pin| #build) }
                         } else {
-                            line_build(*direction, &level, &pull, quote! { self.#field })
+                            line_from(
+                                *direction,
+                                *level,
+                                *pull,
+                                *open_drain,
+                                quote! { self.#field },
+                            )
                         });
                     }
-                    FactoryArg::Constant(expression) => call_args.push(quote! { #expression }),
+                    FactoryArg::Constant(expression) => {
+                        let expression = expression.splice(&values);
+                        call_args.push(quote! { #expression });
+                    }
                 }
             }
 
@@ -1521,10 +1788,31 @@ impl crate::element::Lowered for BusDevice {
             } else {
                 quote! { #new(#(#call_args),*) }
             };
-            let factory_body = if driver.fallible {
-                quote! { #construct #fail }
+            let steps = if async_bus {
+                driver.async_steps.as_slice()
             } else {
-                quote! { Ok(#construct) }
+                driver.steps.as_slice()
+            };
+            let factory_body = if steps.is_empty() {
+                if driver.fallible {
+                    quote! { #construct #fail }
+                } else {
+                    quote! { Ok(#construct) }
+                }
+            } else {
+                let local = format_ident!("{}_device", name);
+                let statements = step_statements(steps, &quote! { #local }, true, &device);
+                let constructed = if driver.fallible {
+                    quote! { #construct #fail }
+                } else {
+                    quote! { #construct }
+                };
+                quote! {
+                    #[allow(unused_mut)]
+                    let mut #local = #constructed;
+                    #(#statements)*
+                    Ok(#local)
+                }
             };
 
             let factory_impl = if async_bus {
@@ -1608,24 +1896,120 @@ impl crate::element::Lowered for BusDevice {
             return;
         }
 
+        // A `then` step runs on the value the constructor returned, so the
+        // device becomes a local in the prelude. A recipe with no steps keeps
+        // the inline initialiser it always had.
+        let steps = if async_bus {
+            driver.async_steps.as_slice()
+        } else {
+            driver.steps.as_slice()
+        };
+        let constructed = quote! { #new(#(#args),*) #check };
+        let value = if steps.is_empty() {
+            constructed
+        } else {
+            let local = format_ident!("{}_device", name);
+            let statements = step_statements(steps, &quote! { #local }, false, &device);
+            cx.device_prelude(quote! {
+                #[allow(unused_mut)]
+                let mut #local = #constructed;
+                #(#statements)*
+            });
+            quote! { #local }
+        };
+
         if board.meta.runtime == Runtime::Embassy {
             cx.device_field(quote! {
                 pub #name: espforge_runtime::AsyncMutex<#ty>,
             });
             cx.device_init(quote! {
-                #name: espforge_runtime::AsyncMutex::new(
-                    #new(#handle, #(#args),*) #check
-                ),
+                #name: espforge_runtime::AsyncMutex::new(#value),
             });
         } else {
             cx.device_field(quote! {
                 pub #name: #ty,
             });
             cx.device_init(quote! {
-                #name: #new(#handle, #(#args),*) #check,
+                #name: #value,
             });
         }
     }
+}
+
+/// The constructor's arguments, with the endpoint where the manifest put it.
+///
+/// A plain recipe passes the bus first. A wrapper recipe
+/// (`I2CExpander::new({bus_device}, {address})`) carries the hole inside its
+/// first argument, and this is the one place that knows how to fill it.
+fn constructor_args(driver: &Driver, handle: Option<&TokenStream>) -> Vec<TokenStream> {
+    let Some(handle) = handle else {
+        // A busless device has no endpoint: every argument is its own, and the
+        // schema has already refused a `{bus_device}` on one.
+        return driver
+            .args
+            .iter()
+            .map(|arg| {
+                let arg = arg.splice(&BTreeMap::new());
+                quote! { #arg }
+            })
+            .collect();
+    };
+    let values = bus_values(handle);
+    let mut args = Vec::new();
+    if !driver.args.first().is_some_and(RustExpr::has_placeholder) {
+        args.push(quote! { #handle });
+    }
+    args.extend(driver.args.iter().map(|arg| {
+        let arg = arg.splice(&values);
+        quote! { #arg }
+    }));
+    args
+}
+
+/// The endpoint under the names a constructor argument may hole out.
+fn bus_values(handle: &TokenStream) -> BTreeMap<String, RustExpr> {
+    let endpoint = RustExpr::parse(&handle.to_string()).expect("a bus handle is a Rust expression");
+    BTreeMap::from([
+        ("bus_device".to_string(), endpoint.clone()),
+        ("spi_device".to_string(), endpoint),
+    ])
+}
+
+/// The statements a `then` step contributes, in the manifest's order.
+///
+/// Each one names the device: a failing step is that device's `Init` error,
+/// so a half-initialised value never reaches app code, exactly as a failing
+/// constructor does not.
+fn step_statements(
+    steps: &[Step],
+    receiver: &TokenStream,
+    deferred: bool,
+    device: &Literal,
+) -> Vec<TokenStream> {
+    if steps.is_empty() {
+        return Vec::new();
+    }
+    let receiver =
+        RustExpr::parse(&receiver.to_string()).expect("a device local is a Rust expression");
+    let values = BTreeMap::from([(espforge_schema::STEP_RECEIVER.to_string(), receiver)]);
+    steps
+        .iter()
+        .map(|step| {
+            let call = if deferred { &step.factory } else { &step.boot };
+            let call = call.splice(&values);
+            let awaited = if step.awaits {
+                quote! { .await }
+            } else {
+                quote! {}
+            };
+            quote! {
+                #call #awaited.map_err(|_| espforge_runtime::DeviceError {
+                    device: #device,
+                    kind: espforge_runtime::DeviceErrorKind::Init,
+                })?;
+            }
+        })
+        .collect()
 }
 
 /// Everything the emitters need: the project settings, the resources it owns,
@@ -1676,21 +2060,18 @@ impl Board {
     pub fn driver_features(&self) -> Vec<&str> {
         self.devices
             .iter()
-            .filter_map(Device::as_bus)
-            // An external package names its own crate in `Cargo.toml`; its
-            // feature belongs to that crate, not to `espforge-drivers`.
-            .filter(|device| device.driver.package.is_none())
-            .map(|device| {
-                let asynchronous = self.bus_mode(device.bus()) == BusMode::Async;
-                if asynchronous {
-                    device
-                        .driver
-                        .async_feature
-                        .as_deref()
-                        .unwrap_or(&device.driver.feature)
-                } else {
-                    device.driver.feature.as_str()
+            .filter_map(|device| {
+                let driver = device.driver()?;
+                // An external package names its own crate in `Cargo.toml`; its
+                // feature belongs to that crate, not to `espforge-drivers`.
+                if driver.package.is_some() {
+                    return None;
                 }
+                Some(if self.device_is_async(device) {
+                    driver.async_feature.as_deref().unwrap_or(&driver.feature)
+                } else {
+                    driver.feature.as_str()
+                })
             })
             .fold(Vec::new(), |mut out, feature| {
                 if !out.contains(&feature) {
@@ -1698,6 +2079,16 @@ impl Board {
                 }
                 out
             })
+    }
+
+    /// Whether a device resolves to its async half: an async bus, or the
+    /// project's scheduler for a busless driver, which has no bus to ask.
+    fn device_is_async(&self, device: &Device) -> bool {
+        match device {
+            Device::Bus(bus) => self.bus_mode(bus.bus()) == BusMode::Async,
+            Device::Pin(_) => false,
+            Device::Pins(_) => self.meta.runtime == Runtime::Embassy,
+        }
     }
 
     /// The mode one bus is driven in, resolved from the drivers bound to it.
@@ -1746,8 +2137,8 @@ impl Board {
     pub fn driver_deps(&self) -> Vec<&str> {
         self.devices
             .iter()
-            .filter_map(Device::as_bus)
-            .flat_map(|device| device.driver.deps.iter().map(String::as_str))
+            .filter_map(Device::driver)
+            .flat_map(|driver| driver.deps.iter().map(String::as_str))
             .fold(Vec::new(), |mut out, dep| {
                 if !out.contains(&dep) {
                     out.push(dep);
@@ -1763,8 +2154,8 @@ impl Board {
     pub fn driver_packages(&self) -> Vec<&espforge_schema::PackageRef> {
         self.devices
             .iter()
-            .filter_map(Device::as_bus)
-            .filter_map(|device| device.driver.package.as_ref())
+            .filter_map(Device::driver)
+            .filter_map(|driver| driver.package.as_ref())
             .fold(Vec::new(), |mut out, package| {
                 if !out
                     .iter()
@@ -1786,20 +2177,22 @@ impl Board {
         let mut out: Vec<espforge_schema::Dependency> = Vec::new();
         let mut from: std::collections::BTreeMap<String, String> =
             std::collections::BTreeMap::new();
-        for device in self.devices.iter().filter_map(Device::as_bus) {
-            let mut dependencies = device.driver.dependencies.clone();
+        for device in self.devices.iter() {
+            let Some(driver) = device.driver() else {
+                continue;
+            };
+            let mut dependencies = driver.dependencies.clone();
             if dependencies.is_empty() {
-                if let Some(package) = &device.driver.package {
+                if let Some(package) = &driver.package {
                     dependencies.push(espforge_schema::Dependency::from_package(package));
                 }
                 dependencies.extend(
-                    device
-                        .driver
+                    driver
                         .expose
                         .iter()
                         .map(espforge_schema::Dependency::from_expose),
                 );
-                for dep in &device.driver.deps {
+                for dep in &driver.deps {
                     if !dependencies.iter().any(|known| &known.package == dep) {
                         dependencies.push(espforge_schema::Dependency {
                             package: dep.clone(),
@@ -1819,15 +2212,14 @@ impl Board {
             // Which half of a per-mode crate this project needs is the board's
             // decision, not the manifest's: the same driver resolves async on
             // an embassy project.
-            let asynchronous = self.bus_mode(device.bus()) == BusMode::Async;
+            let asynchronous = self.device_is_async(device);
             for dependency in &mut dependencies {
                 dependency.use_mode(asynchronous);
             }
-            let manifest = device
-                .driver
+            let manifest = driver
                 .manifest
                 .clone()
-                .unwrap_or_else(|| format!("bundled <{}>", device.tag));
+                .unwrap_or_else(|| format!("bundled <{}>", device.tag()));
             for dependency in dependencies {
                 match out
                     .iter_mut()
@@ -1874,8 +2266,8 @@ impl Board {
     pub fn expose_deps(&self) -> Vec<&espforge_schema::Expose> {
         self.devices
             .iter()
-            .filter_map(Device::as_bus)
-            .flat_map(|device| device.driver.expose.iter())
+            .filter_map(Device::driver)
+            .flat_map(|driver| driver.expose.iter())
             .fold(Vec::new(), |mut out, expose| {
                 if !out
                     .iter()
@@ -1888,12 +2280,37 @@ impl Board {
     }
 }
 
+/// The control line a deferred factory or a `then` step builds from the
+/// peripheral that was stored.
+///
+/// Lowering shares it so a step inside a factory names the same line the
+/// constructor does.
+pub(crate) fn line_from(
+    direction: Direction,
+    level: Option<&'static str>,
+    pull: Option<&'static str>,
+    open_drain: bool,
+    pin: TokenStream,
+) -> TokenStream {
+    let level = match level {
+        Some("High") => quote! { esp_hal::gpio::Level::High },
+        _ => quote! { esp_hal::gpio::Level::Low },
+    };
+    let pull = match pull {
+        Some("Up") => quote! { esp_hal::gpio::Pull::Up },
+        Some("Down") => quote! { esp_hal::gpio::Pull::Down },
+        _ => quote! { esp_hal::gpio::Pull::None },
+    };
+    line_build(direction, open_drain, &level, &pull, pin)
+}
+
 /// Build one deferred control line from the raw peripheral the factory stored.
 ///
 /// The line is not driven during `Devices::new`; this expression runs inside
 /// `Factory::init`, after `app::setup` had its chance to power the part.
 fn line_build(
     direction: Direction,
+    open_drain: bool,
     level: &TokenStream,
     pull: &TokenStream,
     pin: TokenStream,
@@ -1907,6 +2324,11 @@ fn line_build(
                 #pin,
                 esp_hal::gpio::InputConfig::default().with_pull(#pull),
             )
+        },
+        // An open-drain slot is a bidirectional claim, but the wrapper the
+        // driver receives differs: one that releases for high, not drives.
+        Direction::Bidirectional if open_drain => quote! {
+            espforge_runtime::OpenDrainPin::new(#pin, #level, #pull)
         },
         Direction::Bidirectional => quote! {
             espforge_runtime::Bidirectional::new(#pin, #pull)

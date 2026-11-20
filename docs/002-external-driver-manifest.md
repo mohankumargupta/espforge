@@ -92,6 +92,21 @@ A driver supports blocking mode, async mode, or both (one block for each). Insid
 * **`awaits #false`** *(only inside `runtime "async"`, optional)*  
   By default, an async factory calls `constructor(...).await`. If the crate's async `new()` is a regular synchronous `fn` (like `edrv_mhz19::MHZ19::new` in `mhz19b.kdl`), `awaits #false` tells `espforge` not to emit `.await`.
 
+* **`then { call "..." }`** *(optional, repeatable)*  
+  A method call the driver needs **after** it is constructed — `init()`, an initialisation sequence, a rotation:
+  ```kdl
+  runtime "async" {
+      constructor "epd_waveshare::Epd::new({bus_device}, {dc}, {reset})"
+      then { call "init({delay})" }
+      then { call "set_rotation({rotation})" }
+      then {
+          call "flush()"
+          awaits #false
+      }
+  }
+  ```
+  The generated code calls each step on the device it just built, in the order written, and a failure is that device's `Init` error, so a half-initialised value never reaches app code. A step names **no receiver** (write `init()`, not `self.init()`), and the only `{holes}` it may use are values the `constructor` already takes. `awaits` is a step of its own and defaults to the runtime's convention: on `runtime "async"` write `awaits #false` for a synchronous `fn`. A deferred device runs the same steps inside `init()`, not at boot.
+
 * **`feature "..."`** *(only inside `runtime "async"`, optional)*  
   Overrides the Cargo feature on `espforge-drivers` when running in async mode (e.g., `ssd1306-async` instead of `ssd1306`).
 

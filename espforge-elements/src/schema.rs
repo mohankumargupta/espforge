@@ -246,7 +246,7 @@ mod tests {
         }
         assert_eq!(
             composed.elements.len(),
-            core_schema().elements.len() + 9,
+            core_schema().elements.len() + 12,
             "the bundled driver elements are the only addition"
         );
     }

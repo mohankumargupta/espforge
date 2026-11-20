@@ -91,6 +91,8 @@ pub fn device(feature: &'static str, deps: &[&str]) -> Device {
             pins: Vec::new(),
             args: vec![espforge_elements::model::RustExpr::number(0x3C)],
             factory_args: Vec::new(),
+            steps: Vec::new(),
+            async_steps: Vec::new(),
             runtimes: espforge_elements::RuntimeSet::BLOCKING,
             init: espforge_elements::model::Init::Boot,
             async_ty: None,
