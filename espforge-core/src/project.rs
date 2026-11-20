@@ -101,7 +101,12 @@ pub fn generate_with(
     // embedded example has no project directory and always uses no drivers.
     if let Some(dir) = lock_dir {
         if !used.is_empty() {
-            drivers::write_lock(dir, &drivers::record(&used)).map_err(ProjectError::User)?;
+            // Merge, never replace: dropping an element for one run must not
+            // prune the entry that makes its cached manifest readable again
+            // when the element comes back.
+            let existing = drivers::read_lock(dir).map_err(ProjectError::User)?;
+            let lock = drivers::record_merged(existing, &used);
+            drivers::write_lock(dir, &lock).map_err(ProjectError::User)?;
         }
     }
     Ok(written)

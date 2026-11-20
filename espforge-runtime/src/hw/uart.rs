@@ -248,6 +248,17 @@ impl UartDevice<Async> {
         })
     }
 
+    /// The handle `device!` awaits.
+    ///
+    /// A UART is point-to-point but not exclusive: every operation already
+    /// takes this port's own mutex, and `read_line` releases it between idle
+    /// reads. Wrapping the port in the board's `AsyncMutex` as well would hold
+    /// a second lock across those awaits and starve every other task using the
+    /// port, so the macro gets a shared handle instead.
+    pub async fn lock(&self) -> &Self {
+        self
+    }
+
     pub async fn write_all(&self, data: &[u8]) -> Result<(), UartError> {
         let mut uart = self.inner.lock().await;
         let mut off = 0;

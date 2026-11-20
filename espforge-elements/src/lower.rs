@@ -2472,8 +2472,11 @@ driver "shared_async" {
         assert_eq!(errors[0].code, codes::CONFLICT_I2C_WIRING);
     }
 
+    /// `<spi>` ids are `spi2` only, so a second controller is a duplicate id,
+    /// refused before it claims a pin. The pin rollback this case used to
+    /// exercise is covered by the i2c and uart cases around it.
     #[test]
-    fn failed_bus_lowering_rolls_back_pins() {
+    fn a_second_spi_controller_is_refused_before_any_pin_is_claimed() {
         let src = "# espforge\n\
             \x20 <project name=\"spi\" />\n\
             \x20 <chip type=\"esp32c3\" />\n\
@@ -2481,19 +2484,14 @@ driver "shared_async" {
             # peripherals\n\
             \x20 <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"9\" mode=\"0\" />\n\
             \x20 <spi id=\"spi2\" sclk=\"10\" mosi=\"7\" miso=\"18\" mode=\"0\" />\n\
-            \x20 <spi id=\"spi2\" sclk=\"10\" mosi=\"19\" miso=\"20\" mode=\"0\" />\n\
             # devices\n\
             # services\n";
         let errors = lower_src(src).unwrap_err();
-        // The second bus claimed SCK 10 before MOSI 7 clashed; the third bus
-        // on 10 must not report that leftover claim.
         assert_eq!(errors.len(), 1, "{errors:#?}");
-        // Two `<spi>` nodes share the id text but not its span, so this is the
-        // ordinary pin conflict rather than the sclk/mosi self-clash wording.
-        assert_eq!(errors[0].code, codes::CONFLICT_PIN);
+        assert_eq!(errors[0].code, codes::ID_DUPLICATE);
         assert_eq!(
             errors[0].labels[0].text,
-            "<spi id=\"spi2\"> and <spi id=\"spi2\"> both use GPIO7"
+            "<spi id=\"spi2\">: `spi2` is already the id of <spi id=\"spi2\">"
         );
     }
 
@@ -3069,6 +3067,63 @@ driver "dual_probe" {
         let found: Vec<_> = errors.iter().map(|error| error.code).collect();
         assert!(found.contains(&codes::DEVICE_RESERVED_ID), "{found:?}");
         assert!(found.contains(&codes::COMPONENT_UNKNOWN_GPIO), "{found:?}");
+    }
+
+    // ---- duplicate identifiers ------------------------------------------
+
+    #[test]
+    fn two_devices_cannot_share_an_id() {
+        // The button is never lowered: its id is refused before its pin is
+        // claimed, so the duplicate is the only diagnostic.
+        let src = BLINK.replace(
+            "  <led id=\"red_led\" gpio=\"$gpio18\" />\n",
+            "  <led id=\"red_led\" gpio=\"$gpio18\" />\n  <button id=\"red_led\" gpio=\"$gpio18\" />\n",
+        );
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert_eq!(errors[0].code, codes::ID_DUPLICATE);
+        assert_eq!(errors[0].message, "duplicate device id");
+        assert_eq!(
+            errors[0].labels[0].text,
+            "<button id=\"red_led\">: `red_led` is already the id of <led id=\"red_led\">"
+        );
+        assert_eq!(&src[errors[0].primary.clone()], "red_led");
+    }
+
+    /// A device and a service both emit `__<ID>_STORAGE`, so the same name in
+    /// two sections is one static declared twice.
+    #[test]
+    fn a_service_cannot_share_an_id_with_a_device() {
+        let src = "# espforge\n\
+            \x20 <project name=\"dup\" />\n\
+            \x20 <chip type=\"esp32c3\" />\n\
+            \x20 <runtime type=\"embassy\" />\n\
+            # peripherals\n\
+            \x20 <wifi id=\"radio\" />\n\
+            \x20 <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n\
+            # devices\n\
+            \x20 <led id=\"home\" gpio=\"$gpio18\" />\n\
+            # services\n\
+            \x20 <wifi_station id=\"home\" wifi=\"$radio\" ssid=\"Wokwi-GUEST\" auth=\"open\" />\n";
+        let errors = lower_src_with(src, embassy_meta()).unwrap_err();
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert_eq!(errors[0].code, codes::ID_DUPLICATE);
+        assert_eq!(errors[0].message, "duplicate service id");
+        assert_eq!(
+            errors[0].labels[0].text,
+            "<wifi_station id=\"home\">: `home` is already the id of <led id=\"home\"> in another section"
+        );
+    }
+
+    /// A `<gpio>` id is a reference name only: nothing is emitted from it, so a
+    /// device may reuse it.
+    #[test]
+    fn a_gpio_may_share_an_id_with_a_device() {
+        let src = BLINK.replace(
+            "  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n",
+            "  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n  <gpio id=\"red_led\" pin=\"19\" direction=\"output\" />\n",
+        );
+        lower_src(&src).unwrap_or_else(|errors| panic!("a gpio id emits nothing: {errors:#?}"));
     }
 
     // ---- WS-D: the chip's pin table ----

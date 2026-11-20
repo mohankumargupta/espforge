@@ -435,6 +435,23 @@ pub fn record(used: &[UsedDriver]) -> DriversLock {
     lock
 }
 
+/// The lock a generation writes when the project already has one: every driver
+/// this run used replaces its entry, and entries for drivers this run did not
+/// use stay.
+///
+/// A spec that temporarily drops `<my_driver />` must not prune its entry: a
+/// cached manifest is only read back when the lock names it, so pruning would
+/// make restoring the element fail instead of restoring its driver.
+pub fn record_merged(existing: Option<DriversLock>, used: &[UsedDriver]) -> DriversLock {
+    let mut lock = existing.unwrap_or_default();
+    lock.version = LOCK_VERSION;
+    for driver in used {
+        lock.drivers
+            .insert(driver.tag.clone(), driver.entry.clone());
+    }
+    lock
+}
+
 /// Why a lock does not match the files on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LockProblem {
@@ -1548,6 +1565,36 @@ mod tests {
         let lock = record(&used);
         assert_eq!(lock.drivers.get("demo"), Some(&entry));
         assert!(verify(Some(&lock), &used).is_ok());
+    }
+
+    /// A spec that drops an element for one run must not prune that driver's
+    /// entry: the cached manifest is only read back when the lock names it.
+    #[test]
+    fn a_generation_keeps_entries_it_did_not_use() {
+        let cached = LockEntry {
+            source: "cache/cached/driver.kdl".into(),
+            manifest_sha256: sha256_hex(b"cached"),
+            ..LockEntry::default()
+        };
+        let existing = DriversLock {
+            version: LOCK_VERSION,
+            drivers: [("cached".to_string(), cached.clone())]
+                .into_iter()
+                .collect(),
+        };
+        let entry = LockEntry {
+            source: "drivers/demo.kdl".into(),
+            manifest_sha256: sha256_hex(b"demo"),
+            ..LockEntry::default()
+        };
+        let used = [UsedDriver {
+            tag: "demo".into(),
+            manifest: PathBuf::from("drivers/demo.kdl"),
+            entry: entry.clone(),
+        }];
+        let lock = record_merged(Some(existing), &used);
+        assert_eq!(lock.drivers.get("cached"), Some(&cached));
+        assert_eq!(lock.drivers.get("demo"), Some(&entry));
     }
 
     #[test]

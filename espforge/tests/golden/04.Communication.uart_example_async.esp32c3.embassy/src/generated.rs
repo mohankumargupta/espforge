@@ -10,9 +10,7 @@ impl PeripheralRegistry {
 }
 /// Constructed devices.
 pub struct Devices {
-    pub uart1: espforge_runtime::AsyncMutex<
-        espforge_runtime::UartDevice<esp_hal::Async>,
-    >,
+    pub uart1: espforge_runtime::UartDevice<esp_hal::Async>,
 }
 impl Devices {
     /// Build every declared device.
@@ -24,20 +22,18 @@ impl Devices {
         registry: &mut PeripheralRegistry,
     ) -> Result<Self, espforge_runtime::DeviceError> {
         Ok(Self {
-            uart1: espforge_runtime::AsyncMutex::new(
-                espforge_runtime::UartDevice::build(
-                        unsafe { registry.peripherals.UART1.clone_unchecked() },
-                        unsafe { registry.peripherals.GPIO6.clone_unchecked() },
-                        unsafe { registry.peripherals.GPIO5.clone_unchecked() },
-                        espforge_runtime::UartConfig {
-                            baudrate: 9600,
-                            data_bits: esp_hal::uart::DataBits::_8,
-                            parity: esp_hal::uart::Parity::None,
-                            stop_bits: esp_hal::uart::StopBits::_1,
-                        },
-                    )
-                    .expect("UART configuration failed"),
-            ),
+            uart1: espforge_runtime::UartDevice::build(
+                    unsafe { registry.peripherals.UART1.clone_unchecked() },
+                    unsafe { registry.peripherals.GPIO6.clone_unchecked() },
+                    unsafe { registry.peripherals.GPIO5.clone_unchecked() },
+                    espforge_runtime::UartConfig {
+                        baudrate: 9600,
+                        data_bits: esp_hal::uart::DataBits::_8,
+                        parity: esp_hal::uart::Parity::None,
+                        stop_bits: esp_hal::uart::StopBits::_1,
+                    },
+                )
+                .expect("UART configuration failed"),
         })
     }
 }
