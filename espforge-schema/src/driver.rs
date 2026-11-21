@@ -3832,6 +3832,20 @@ driver "{driver}" {{
         );
     }
 
+    /// A `value=` literal stands where a spec attribute would, so it must be a
+    /// value that attribute allows: a typo must not become the first choice.
+    #[test]
+    fn a_composition_literal_must_fit_its_attribute() {
+        let typo = COMPOSITE.replace("value=\"deferred\"", "value=\"defred\"");
+        let errors = load(&format!("{PART}{typo}")).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error
+                .message
+                .contains("`value=\"defred\"` is not a valid `init` for `<part>`")),
+            "{errors:?}"
+        );
+    }
+
     #[test]
     fn a_composition_must_fill_every_required_attribute() {
         let missing_cs = COMPOSITE.replace("        attr \"cs\" from=\"touch_cs\"\n", "");

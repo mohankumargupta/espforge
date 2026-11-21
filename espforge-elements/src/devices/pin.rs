@@ -64,6 +64,13 @@ impl Element for PinRecipeElement {
         let code = recipe.invalid;
         let pin_attr = recipe.pin.as_str();
 
+        // 0. a key the schema does not declare is a typo, not a default:
+        // without this, `activelow="true"` took `active_low`'s default
+        // instead of being refused.
+        if let Some(unknown) = attrs::unknown_attribute(element, node) {
+            return Err(invalid(cx, node, tag, pin_attr, code, element, unknown));
+        }
+
         // 1. the id, with the span of its own attribute.
         let id = cx.checked_ident(node, Section::Devices)?;
 
@@ -77,12 +84,12 @@ impl Element for PinRecipeElement {
         let direct = node.get_attr("pin").is_some();
         let pin_number = if direct {
             attrs::pin(node, "pin")
-                .map_err(|issue| invalid(cx, node, tag, pin_attr, code, issue))?
+                .map_err(|issue| invalid(cx, node, tag, pin_attr, code, element, issue))?
                 .value
         } else {
             // 3. the referenced `<gpio>`.
             let reference = attrs::reference(node, pin_attr)
-                .map_err(|issue| invalid(cx, node, tag, pin_attr, code, issue))?;
+                .map_err(|issue| invalid(cx, node, tag, pin_attr, code, element, issue))?;
             let Some(gpio) = cx.gpio(reference.name).cloned() else {
                 return Err(cx.report(
                     codes::COMPONENT_UNKNOWN_GPIO,
@@ -147,11 +154,11 @@ impl Element for PinRecipeElement {
         let kind = match recipe.direction {
             RecipeDirection::Output => PinDeviceKind::Output {
                 active_low: bool_of(node, element, "active_low")
-                    .map_err(|issue| invalid(cx, node, tag, pin_attr, code, issue))?,
+                    .map_err(|issue| invalid(cx, node, tag, pin_attr, code, element, issue))?,
             },
             RecipeDirection::Input => PinDeviceKind::Input {
                 pull_up: bool_of(node, element, "pull_up")
-                    .map_err(|issue| invalid(cx, node, tag, pin_attr, code, issue))?,
+                    .map_err(|issue| invalid(cx, node, tag, pin_attr, code, element, issue))?,
             },
         };
 
@@ -297,18 +304,29 @@ fn invalid(
     tag: &str,
     pin_attr: &str,
     code: DiagCode,
+    element: &espforge_schema::Element,
     issue: Issue<'_>,
 ) -> Reported {
     let id = node.id.as_ref();
     let (code, label, span) = match issue {
-        Issue::Unknown { attr, known } => (
-            codes::ATTR_UNKNOWN,
-            format!(
-                "<{tag} id=\"{id}\"> {}",
-                crate::attrs::unknown_attr(attr, known)
-            ),
-            crate::attrs::key_span_of(node, attr),
-        ),
+        // The schema definition names the accepted keys: the reader that found
+        // the typo carries none.
+        Issue::Unknown { attr, known } => {
+            let declared: Vec<&str> = element.attrs.iter().map(|a| a.name.as_str()).collect();
+            let known: &[&str] = if known.is_empty() {
+                declared.as_slice()
+            } else {
+                known
+            };
+            (
+                codes::ATTR_UNKNOWN,
+                format!(
+                    "<{tag} id=\"{id}\"> {}",
+                    crate::attrs::unknown_attr(attr, known)
+                ),
+                crate::attrs::key_span_of(node, attr),
+            )
+        }
         Issue::Missing { attr } if attr == pin_attr => (
             code,
             format!("<{tag} id=\"{id}\"> needs pin=\"<number>\" or {pin_attr}=\"$<gpio id>\""),

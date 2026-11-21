@@ -917,6 +917,27 @@ mod tests {
         assert_eq!(&src[errors[0].primary.clone()], "rot");
     }
 
+    /// A misspelled attribute on a pin device is a typo, not a default:
+    /// without the schema check, `activelow="true"` silently took
+    /// `active_low`'s default and the LED lit inverted.
+    #[test]
+    fn a_misspelled_pin_device_attribute_is_refused() {
+        let src = BLINK.replace(
+            "<led id=\"red_led\" gpio=\"$gpio18\" />",
+            "<led id=\"red_led\" gpio=\"$gpio18\" activelow=\"true\" />",
+        );
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::ATTR_UNKNOWN);
+        assert_eq!(errors[0].message, "invalid led");
+        assert!(errors[0].labels[0].text.contains("`activelow`"));
+        assert!(
+            errors[0].labels[0].text.contains("active_low"),
+            "the message names the keys the element does declare: {:?}",
+            errors[0].labels[0].text
+        );
+        assert_eq!(&src[errors[0].primary.clone()], "activelow");
+    }
+
     #[test]
     fn a_bus_pin_on_a_declared_gpio_points_at_the_gpio() {
         let src = I2C.replace(

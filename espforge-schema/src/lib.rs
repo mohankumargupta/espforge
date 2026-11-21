@@ -3566,11 +3566,11 @@ fn check_compositions(schema: &Schema, errors: &mut Vec<SchemaError>) {
             }
 
             for attr in &part.attrs {
-                if !part_element
+                let Some(declared) = part_element
                     .attrs
                     .iter()
-                    .any(|known| known.name == attr.name)
-                {
+                    .find(|known| known.name == attr.name)
+                else {
                     let known: Vec<&str> = part_element
                         .attrs
                         .iter()
@@ -3582,15 +3582,33 @@ fn check_compositions(schema: &Schema, errors: &mut Vec<SchemaError>) {
                         format!("the part declares: {}", known.join(", ")),
                     ));
                     continue;
-                }
-                if let PartSource::From(name) = &attr.source
-                    && !element.attrs.iter().any(|known| known.name == *name)
-                {
-                    errors.push(err(
-                        attr.span.clone(),
-                        format!("`{name}` is not an attribute of `{}`", element.tag),
-                        "`from=` names one of the composite's own `attr`s or `pin`s",
-                    ));
+                };
+                match &attr.source {
+                    PartSource::From(name) => {
+                        if !element.attrs.iter().any(|known| known.name == *name) {
+                            errors.push(err(
+                                attr.span.clone(),
+                                format!("`{name}` is not an attribute of `{}`", element.tag),
+                                "`from=` names one of the composite's own `attr`s or `pin`s",
+                            ));
+                        }
+                    }
+                    // A `value=` literal stands where a spec attribute would,
+                    // so it must be one of that attribute's values: otherwise
+                    // lowering's `unwrap_or(0)` turns `mode="fast"` into the
+                    // first mode instead of refusing it.
+                    PartSource::Value(value) => {
+                        if !literal_fits(declared, value) {
+                            errors.push(err(
+                                attr.span.clone(),
+                                format!(
+                                    "`value=\"{value}\"` is not a valid `{}` for `<{}>`",
+                                    attr.name, part.tag
+                                ),
+                                format!("`{}` takes {}", attr.name, declared.kind.display()),
+                            ));
+                        }
+                    }
                 }
             }
 
@@ -3610,6 +3628,35 @@ fn check_compositions(schema: &Schema, errors: &mut Vec<SchemaError>) {
                 }
             }
         }
+    }
+}
+
+/// Whether `value` is a value of `attr`'s kind, as a `compose` literal must be.
+///
+/// The same rules the readers apply, read from the schema: free text and
+/// references are accepted as written, a `list` cannot be a literal, and a
+/// `u32` honours the attribute's `range`.
+fn literal_fits(attr: &AttrDef, value: &str) -> bool {
+    match &attr.kind {
+        AttrKind::Str | AttrKind::Freq | AttrKind::Ref { .. } | AttrKind::PinOrRef => true,
+        AttrKind::Ident => !value.is_empty(),
+        AttrKind::Pin => value.parse::<u8>().is_ok(),
+        AttrKind::Hex => literal_hex(value).is_some(),
+        AttrKind::U32 => value.parse::<u32>().is_ok_and(|number| {
+            attr.range
+                .map_or(true, |(low, high)| (low..=high).contains(&number))
+        }),
+        AttrKind::Bool => matches!(value, "true" | "false"),
+        AttrKind::Choice(choices) => choices.iter().any(|choice| choice == value),
+        AttrKind::List(_) => false,
+    }
+}
+
+/// A `0x..` or decimal byte, as the attribute readers take one.
+fn literal_hex(text: &str) -> Option<u8> {
+    match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        Some(hex) => u8::from_str_radix(hex, 16).ok(),
+        None => text.parse().ok(),
     }
 }
 
