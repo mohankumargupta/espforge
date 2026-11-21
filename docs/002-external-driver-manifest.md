@@ -401,7 +401,7 @@ Inside a `runtime` block there are up to six keys:
       }
   }
   ```
-  The generated code calls each step on the device it just built, in the order written, and a failure is that device's `Init` error, so a half-initialised value never reaches app code. A step names **no receiver** (write `init()`, not `self.init()`), and the only `{holes}` it may use are values the `constructor` already takes. `awaits` is a step of its own and defaults to the runtime's convention: on `runtime "async"` write `awaits #false` for a synchronous `fn`. A deferred device runs the same steps inside `init()`, not at boot. A step is always fallible today; `then { fallible #false }` is not implemented.
+  The generated code calls each step on the device it just built, in the order written, and a failure is that device's `Init` error, so a half-initialised value never reaches app code. A step names **no receiver** (write `init()`, not `self.init()`), and the only `{holes}` it may use are values the `constructor` already takes. `awaits` is a step of its own and defaults to the runtime's convention: on `runtime "async"` write `awaits #false` for a synchronous `fn`. A deferred device runs the same steps inside `init()`, not at boot. A step maps its error by default; write `fallible #false` for a setup call that returns `()` or `&mut Self`. Write `rebind #true` when the call consumes the device and returns the value to keep (`let mut dev = dev.init()?`): that is how a typestate `init(self) -> Result<Ready, E>` becomes the type the `Devices` field declares.
 
 ### 5.3 `map "<attr_name>" { ... }`
 
@@ -677,9 +677,6 @@ order.
   not implemented.
 - **Other transports.** Bus kinds are `i2c`, `spi`, `uart` and `none`. There is
   no `<onewire>`, `<adc>`, or shared UART peripheral yet.
-- **`then` fallibility and rebinding.** Every step is wrapped in
-  `.map_err(..)?`; there is no `then { fallible #false }` and no typestate
-  rebind form.
 - **Manifest constraints and aliases.** No `requires_alloc` and no
   `alias "sht30"` tag aliases.
 - **Deeper composition.** `compose` is one level; a composed driver may not

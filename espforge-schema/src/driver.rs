@@ -105,10 +105,16 @@ struct RuntimeDecl {
     span: Range<usize>,
 }
 
-/// One `then { call "init({delay})" awaits #false }` step.
+/// One `then` step: a call the device runs after its constructor.
+///
+/// `call "init({delay})"` plus its flags: `awaits #false` on the async path,
+/// `rebind #true` when the call hands back the device it consumed, and
+/// `fallible #false` when it returns `()` or `&mut Self`.
 struct StepDecl {
     text: String,
     awaits: bool,
+    rebind: bool,
+    fallible: bool,
     span: Range<usize>,
 }
 
@@ -1639,6 +1645,10 @@ fn parse_step(
     // A blocking step is a plain call; an async one is awaited unless it says
     // the crate's `init` is a synchronous `fn`.
     let mut awaits = asynchronous;
+    // The result is dropped unless the call rebinds the device (a typestate
+    // `init(self)`), and it is mapped to `Init` unless the call has no error.
+    let mut rebind = false;
+    let mut fallible = true;
     for child in children(node) {
         match child.name().value() {
             "call" => {
@@ -1721,6 +1731,26 @@ fn parse_step(
                         .map(|entry| entry.value().as_bool() != Some(false))
                         .unwrap_or(true);
             }
+            // `rebind #true`: the call consumes the device and returns the one
+            // the generated field stores (`let mut dev = dev.init()?`).
+            "rebind" => {
+                rebind = child
+                    .entries()
+                    .iter()
+                    .find(|entry| entry.name().is_none())
+                    .map(|entry| entry.value().as_bool() != Some(false))
+                    .unwrap_or(true);
+            }
+            // `fallible #false`: the call returns `()` or `&mut Self`, so the
+            // generated statement must not map an error that does not exist.
+            "fallible" => {
+                fallible = child
+                    .entries()
+                    .iter()
+                    .find(|entry| entry.name().is_none())
+                    .map(|entry| entry.value().as_bool() != Some(false))
+                    .unwrap_or(true);
+            }
             other => errors.push(err(
                 node_range(child),
                 format!("unknown node `{other}` in `then`"),
@@ -1738,6 +1768,8 @@ fn parse_step(
     call_text.map(|text| StepDecl {
         text,
         awaits,
+        rebind,
+        fallible,
         span,
     })
 }
@@ -1785,6 +1817,8 @@ fn parse_steps(
             steps.push(crate::Step {
                 text: decl.text.clone(),
                 awaits: decl.awaits,
+                rebind: decl.rebind,
+                fallible: decl.fallible,
                 span: decl.span.clone(),
             });
         }
@@ -3298,10 +3332,36 @@ driver "dual" {
         assert_eq!(recipe.steps.len(), 1);
         assert_eq!(recipe.steps[0].text, "set_address({address})");
         assert!(!recipe.steps[0].awaits, "a blocking step is a plain call");
+        assert!(
+            !recipe.steps[0].rebind,
+            "a step keeps the device unless it says otherwise"
+        );
+        assert!(recipe.steps[0].fallible, "a step maps its error by default");
         let call = recipe.steps[0].call().expect("a parsed call");
         assert!(call.text().contains("__espforge_receiver"), "{call:?}");
         assert!(call.text().contains("__espforge_address"), "{call:?}");
         assert!(recipe.async_mode.steps.is_empty());
+    }
+
+    /// A step says how its result is used: `rebind #true` keeps the value a
+    /// typestate `init(self)` returned, and `fallible #false` names a setup
+    /// call that cannot fail.
+    #[test]
+    fn a_then_step_says_whether_it_rebinds_and_is_fallible() {
+        let text = DRIVER.replace(
+            "            endpoint \"demo::Endpoint\"\n",
+            "            endpoint \"demo::Endpoint\"\n            then {\n                call \"init()\"\n                rebind #true\n                fallible #false\n            }\n",
+        );
+        let schema = load(&text).expect("a step loads");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert_eq!(recipe.steps.len(), 1);
+        assert!(recipe.steps[0].rebind);
+        assert!(!recipe.steps[0].fallible);
     }
 
     /// A step reads only what the constructor already takes: a value it cannot

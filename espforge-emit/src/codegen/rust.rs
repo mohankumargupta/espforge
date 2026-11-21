@@ -1336,6 +1336,8 @@ mod tests {
                 boot: RustExpr::parse("__espforge_receiver.init(0x3F)").expect("a step"),
                 factory: RustExpr::parse("__espforge_receiver.init(0x3F)").expect("a step"),
                 awaits: false,
+                rebind: false,
+                fallible: true,
             }];
         }
         board.devices.push(dev);
@@ -1346,6 +1348,35 @@ mod tests {
         assert!(text.contains(".init(0x3F)"), "{text}");
         assert!(text.contains("demo: demo_device"), "{text}");
         assert!(text.contains("espforge_drivers::demo::new("), "{text}");
+    }
+
+    /// `rebind #true` replaces the local with what the step returned, and
+    /// `fallible #false` leaves the call bare: a typestate `init(self)` hands
+    /// back the initialised device, which is what the field stores.
+    #[test]
+    fn a_rebinding_step_replaces_the_device_local() {
+        use espforge_elements::model::{RustExpr, Step};
+
+        let case = case("esp32c3", Runtime::Blocking, true, &[], &[]);
+        let mut board = board_with_i2c(&case);
+        let mut dev = crate::codegen::test_support::device("demo", &[]);
+        if let Device::Bus(bus) = &mut dev {
+            bus.driver.steps = vec![Step {
+                boot: RustExpr::parse("__espforge_receiver.init()").expect("a step"),
+                factory: RustExpr::parse("__espforge_receiver.init()").expect("a step"),
+                awaits: false,
+                rebind: true,
+                fallible: false,
+            }];
+        }
+        board.devices.push(dev);
+        let text = generated(&collect(&board), &case.meta).unwrap();
+        let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            compact.contains("letmutdemo_device=demo_device.init();"),
+            "{text}"
+        );
+        assert!(compact.contains("demo:demo_device"), "{text}");
     }
 
     /// A deferred device runs the same steps inside `init()`, not at boot.
@@ -1368,6 +1399,8 @@ mod tests {
                 boot: RustExpr::parse("__espforge_receiver.init(0x3F)").expect("a step"),
                 factory: RustExpr::parse("__espforge_receiver.init(0x3F)").expect("a step"),
                 awaits: false,
+                rebind: false,
+                fallible: true,
             }];
         }
         board.devices.push(dev);

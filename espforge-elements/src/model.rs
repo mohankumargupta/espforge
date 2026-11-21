@@ -1210,6 +1210,15 @@ pub struct Step {
     pub factory: RustExpr,
     /// Whether the call is awaited (`runtime "async"` only).
     pub awaits: bool,
+    /// Whether the call's return value replaces the device (`rebind #true`).
+    ///
+    /// A typestate `init(self) -> Result<Ready, E>` consumes the value the
+    /// constructor built and hands back the type the field declares.
+    pub rebind: bool,
+    /// Whether the call returns a `Result` (`fallible #false`).
+    ///
+    /// `#false` names a setup call that returns `()` or `&mut Self`.
+    pub fallible: bool,
 }
 
 /// A bus-backed device: a driver for a specific part, plus one concrete bus
@@ -1979,7 +1988,9 @@ fn bus_values(handle: &TokenStream) -> BTreeMap<String, RustExpr> {
 ///
 /// Each one names the device: a failing step is that device's `Init` error,
 /// so a half-initialised value never reaches app code, exactly as a failing
-/// constructor does not.
+/// constructor does not. A `rebind #true` step replaces the local with what
+/// the call returned, so a typestate `init(self)` becomes the stored value;
+/// a `fallible #false` step has no error to map.
 fn step_statements(
     steps: &[Step],
     receiver: &TokenStream,
@@ -1991,7 +2002,7 @@ fn step_statements(
     }
     let receiver =
         RustExpr::parse(&receiver.to_string()).expect("a device local is a Rust expression");
-    let values = BTreeMap::from([(espforge_schema::STEP_RECEIVER.to_string(), receiver)]);
+    let values = BTreeMap::from([(espforge_schema::STEP_RECEIVER.to_string(), receiver.clone())]);
     steps
         .iter()
         .map(|step| {
@@ -2002,11 +2013,23 @@ fn step_statements(
             } else {
                 quote! {}
             };
-            quote! {
-                #call #awaited.map_err(|_| espforge_runtime::DeviceError {
-                    device: #device,
-                    kind: espforge_runtime::DeviceErrorKind::Init,
-                })?;
+            let check = if step.fallible {
+                quote! {
+                    .map_err(|_| espforge_runtime::DeviceError {
+                        device: #device,
+                        kind: espforge_runtime::DeviceErrorKind::Init,
+                    })?
+                }
+            } else {
+                quote! {}
+            };
+            if step.rebind {
+                quote! {
+                    #[allow(unused_mut)]
+                    let mut #receiver = #call #awaited #check;
+                }
+            } else {
+                quote! { #call #awaited #check; }
             }
         })
         .collect()

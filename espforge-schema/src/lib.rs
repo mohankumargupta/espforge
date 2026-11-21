@@ -666,6 +666,16 @@ pub struct Step {
     pub text: String,
     /// Whether the call is awaited. Always `#false` on a blocking runtime.
     pub awaits: bool,
+    /// Whether the call's return value replaces the device (`rebind #true`).
+    ///
+    /// A typestate `init(self) -> Result<Ready, E>` hands back the value the
+    /// `Devices` field stores; without this the step's return value is lost.
+    pub rebind: bool,
+    /// Whether the call returns a `Result` (`fallible #false`).
+    ///
+    /// `#false` names a setup method that returns `()` or `&mut Self`, so
+    /// emission must not map an error that does not exist.
+    pub fallible: bool,
     /// Span of the `then` node in the schema text.
     pub span: Range<usize>,
 }

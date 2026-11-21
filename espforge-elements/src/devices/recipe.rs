@@ -1091,6 +1091,8 @@ fn resolve_steps(
                 boot: call.splice(boot),
                 factory: call.splice(factory),
                 awaits: step.awaits,
+                rebind: step.rebind,
+                fallible: step.fallible,
             })
         })
         .collect()
