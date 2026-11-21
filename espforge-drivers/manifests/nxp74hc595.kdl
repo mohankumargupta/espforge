@@ -1,0 +1,42 @@
+// The external `<nxp74hc595>` driver: a project-local manifest, not a module
+// in espforge-drivers. `codegen.feature` is absent, so the dependency below is
+// written into the generated project's Cargo.toml instead of selecting an
+// espforge-drivers feature.
+//
+// `bus "none"`: the chip has no bus controller of its own, just SER data,
+// SRCLK shift clock, RCLK latch clock, an active-low SRCLR and an active-low
+// OE. `drive_74hc595` 0.2.0's `ShiftRegister::new(oe, ser, srclr, srclk,
+// rclk)` takes those five `embedded-hal` 1.0 `OutputPin`s and never fails,
+// hence `fallible #false`. A busless driver has no bus argument, so the pins
+// may be passed in the crate's own order.
+driver "nxp74hc595" {
+    format_version 2
+    summary "NXP 74HC595 8-bit serial-in, parallel-out shift register"
+    description "Drives an 8-bit 74HC595 latch over five GPIO lines: SER is the serial data input, SRCLK shifts one bit in on each rising edge, RCLK latches the eight shifted bits into the output latches, SRCLR clears the shift register, and OE enables the outputs. `load(byte)` shifts the byte MSB first and pulses RCLK, so the output pins take the byte. The Rust half is the published `drive_74hc595` crate, so this manifest is the whole driver."
+    category "expander"
+
+    dependency "drive_74hc595" { version "0.2.0" }
+
+    bus "none"
+
+    pin "oe" direction="output" default_level="high"
+    pin "ser" direction="output" default_level="low"
+    pin "srclr" direction="output" default_level="high"
+    pin "srclk" direction="output" default_level="low"
+    pin "rclk" direction="output" default_level="low"
+
+    codegen {
+        fallible #false
+        runtime "blocking" {
+            type "drive_74hc595::ShiftRegister<espforge_runtime::OutputPin, espforge_runtime::OutputPin, espforge_runtime::OutputPin, espforge_runtime::OutputPin, espforge_runtime::OutputPin>"
+            constructor "drive_74hc595::ShiftRegister::new({oe}, {ser}, {srclr}, {srclk}, {rclk})"
+        }
+    }
+
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "`boot` claims the five lines and builds the register during `Devices::new`; `deferred` stores the raw pins and constructs it in `init()`."
+    }
+
+    example "minimal" #"<nxp74hc595 id=\"shift\" oe=\"4\" ser=\"3\" srclr=\"5\" srclk=\"6\" rclk=\"7\" />"#
+}

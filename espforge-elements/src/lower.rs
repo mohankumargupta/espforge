@@ -917,6 +917,27 @@ mod tests {
         assert_eq!(&src[errors[0].primary.clone()], "rot");
     }
 
+    /// A misspelled attribute on a pin device is a typo, not a default:
+    /// without the schema check, `activelow="true"` silently took
+    /// `active_low`'s default and the LED lit inverted.
+    #[test]
+    fn a_misspelled_pin_device_attribute_is_refused() {
+        let src = BLINK.replace(
+            "<led id=\"red_led\" gpio=\"$gpio18\" />",
+            "<led id=\"red_led\" gpio=\"$gpio18\" activelow=\"true\" />",
+        );
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::ATTR_UNKNOWN);
+        assert_eq!(errors[0].message, "invalid led");
+        assert!(errors[0].labels[0].text.contains("`activelow`"));
+        assert!(
+            errors[0].labels[0].text.contains("active_low"),
+            "the message names the keys the element does declare: {:?}",
+            errors[0].labels[0].text
+        );
+        assert_eq!(&src[errors[0].primary.clone()], "activelow");
+    }
+
     #[test]
     fn a_bus_pin_on_a_declared_gpio_points_at_the_gpio() {
         let src = I2C.replace(
@@ -1722,6 +1743,120 @@ mod tests {
         assert_eq!(board.driver_deps(), ["embedded-graphics"]);
     }
 
+    /// A crate that takes its own address type: the map turns the element's
+    /// 7-bit address into the expression its constructor wants.
+    const MAPPED_ADDRESS: &str = r##"
+driver "address_probe" {
+    format_version 2
+    summary "test"
+    category "sensor"
+    dependency "address-crate" { version "1.0.0" }
+    bus "i2c" { address allowed="0x20..=0x21" }
+    codegen {
+        map "address" {
+            "0x20" { expr "address_crate::Addr::First" }
+            "0x21" { expr "address_crate::Addr::Second" }
+        }
+        runtime "blocking" {
+            type "address_crate::Probe"
+            constructor "address_crate::Probe::new({bus_device}, address_crate::Addr::from({address}))"
+        }
+    }
+    example "minimal" #"<address_probe id="probe" bus="$i2c0" address="0x21" />"#
+}
+"##;
+
+    #[test]
+    fn a_mapped_address_reaches_the_constructor_as_an_expression() {
+        let session = Session::compose(&[(
+            "address-probe.schema.kdl".to_string(),
+            MAPPED_ADDRESS.to_string(),
+        )])
+        .expect("the address probe loads");
+        let src = "# espforge\n\
+             \x20 <project name=\"mapped\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <address_probe id=\"probe\" bus=\"$i2c0\" address=\"0x21\" />\n\
+             # services\n";
+        let parsed = parse_espf(&src);
+        let section = |name: &str| parsed.sections.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let mut meta = meta();
+        meta.runtime = Runtime::Blocking;
+        let board = lower(
+            meta,
+            section("peripherals"),
+            section("devices"),
+            section("services"),
+            &session,
+        )
+        .expect("the mapped address lowers");
+        let probe = board.devices[0].as_bus().expect("a bus device");
+        assert_eq!(
+            probe.driver.args,
+            [crate::model::RustExpr::parse(
+                "address_crate::Addr::from(address_crate::Addr::Second)"
+            )
+            .unwrap()]
+        );
+    }
+
+    /// A crate that takes the bus after another argument (`sen6x` shape).
+    const LATE_BUS: &str = r##"
+driver "late_bus" {
+    format_version 2
+    summary "test"
+    category "sensor"
+    dependency "late-crate" { version "1.0.0" }
+    bus "i2c" { address fixed="0x44" }
+    codegen {
+        runtime "blocking" {
+            type "late_crate::Probe"
+            constructor "late_crate::Probe::new(&mut espforge_runtime::Delay::new(), {bus_device})"
+        }
+    }
+    example "minimal" #"<late_bus id="probe" bus="$i2c0" address="0x44" />"#
+}
+"##;
+
+    #[test]
+    fn a_bus_may_sit_after_another_argument() {
+        let session =
+            Session::compose(&[("late-bus.schema.kdl".to_string(), LATE_BUS.to_string())])
+                .expect("the late bus schema loads");
+        let src = "# espforge\n\
+             \x20 <project name=\"late\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <late_bus id=\"probe\" bus=\"$i2c0\" address=\"0x44\" />\n\
+             # services\n";
+        let parsed = parse_espf(&src);
+        let section = |name: &str| parsed.sections.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let mut meta = meta();
+        meta.runtime = Runtime::Blocking;
+        let board = lower(
+            meta,
+            section("peripherals"),
+            section("devices"),
+            section("services"),
+            &session,
+        )
+        .expect("the late bus lowers");
+        let probe = board.devices[0].as_bus().expect("a bus device");
+        assert_eq!(probe.driver.bus_index, Some(1));
+        assert_eq!(probe.driver.args.len(), 1);
+        assert_eq!(
+            probe.driver.args[0],
+            crate::model::RustExpr::parse("&mut espforge_runtime::Delay::new()").unwrap()
+        );
+    }
+
     /// A composite and its companion: one spec element, two devices.
     const COMPOSED_DRIVERS: &str = r##"
 driver "panel" {
@@ -2098,6 +2233,7 @@ driver "touch" {
                     fallible: true,
                     pins: Vec::new(),
                     args: vec![crate::model::RustExpr::number(0x3C)],
+                    bus_index: Some(0),
                     factory_args: Vec::new(),
                     steps: Vec::new(),
                     async_steps: Vec::new(),
@@ -2472,8 +2608,11 @@ driver "shared_async" {
         assert_eq!(errors[0].code, codes::CONFLICT_I2C_WIRING);
     }
 
+    /// `<spi>` ids are `spi2` only, so a second controller is a duplicate id,
+    /// refused before it claims a pin. The pin rollback this case used to
+    /// exercise is covered by the i2c and uart cases around it.
     #[test]
-    fn failed_bus_lowering_rolls_back_pins() {
+    fn a_second_spi_controller_is_refused_before_any_pin_is_claimed() {
         let src = "# espforge\n\
             \x20 <project name=\"spi\" />\n\
             \x20 <chip type=\"esp32c3\" />\n\
@@ -2481,19 +2620,14 @@ driver "shared_async" {
             # peripherals\n\
             \x20 <spi id=\"spi2\" sclk=\"8\" mosi=\"7\" miso=\"9\" mode=\"0\" />\n\
             \x20 <spi id=\"spi2\" sclk=\"10\" mosi=\"7\" miso=\"18\" mode=\"0\" />\n\
-            \x20 <spi id=\"spi2\" sclk=\"10\" mosi=\"19\" miso=\"20\" mode=\"0\" />\n\
             # devices\n\
             # services\n";
         let errors = lower_src(src).unwrap_err();
-        // The second bus claimed SCK 10 before MOSI 7 clashed; the third bus
-        // on 10 must not report that leftover claim.
         assert_eq!(errors.len(), 1, "{errors:#?}");
-        // Two `<spi>` nodes share the id text but not its span, so this is the
-        // ordinary pin conflict rather than the sclk/mosi self-clash wording.
-        assert_eq!(errors[0].code, codes::CONFLICT_PIN);
+        assert_eq!(errors[0].code, codes::ID_DUPLICATE);
         assert_eq!(
             errors[0].labels[0].text,
-            "<spi id=\"spi2\"> and <spi id=\"spi2\"> both use GPIO7"
+            "<spi id=\"spi2\">: `spi2` is already the id of <spi id=\"spi2\">"
         );
     }
 
@@ -3069,6 +3203,63 @@ driver "dual_probe" {
         let found: Vec<_> = errors.iter().map(|error| error.code).collect();
         assert!(found.contains(&codes::DEVICE_RESERVED_ID), "{found:?}");
         assert!(found.contains(&codes::COMPONENT_UNKNOWN_GPIO), "{found:?}");
+    }
+
+    // ---- duplicate identifiers ------------------------------------------
+
+    #[test]
+    fn two_devices_cannot_share_an_id() {
+        // The button is never lowered: its id is refused before its pin is
+        // claimed, so the duplicate is the only diagnostic.
+        let src = BLINK.replace(
+            "  <led id=\"red_led\" gpio=\"$gpio18\" />\n",
+            "  <led id=\"red_led\" gpio=\"$gpio18\" />\n  <button id=\"red_led\" gpio=\"$gpio18\" />\n",
+        );
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert_eq!(errors[0].code, codes::ID_DUPLICATE);
+        assert_eq!(errors[0].message, "duplicate device id");
+        assert_eq!(
+            errors[0].labels[0].text,
+            "<button id=\"red_led\">: `red_led` is already the id of <led id=\"red_led\">"
+        );
+        assert_eq!(&src[errors[0].primary.clone()], "red_led");
+    }
+
+    /// A device and a service both emit `__<ID>_STORAGE`, so the same name in
+    /// two sections is one static declared twice.
+    #[test]
+    fn a_service_cannot_share_an_id_with_a_device() {
+        let src = "# espforge\n\
+            \x20 <project name=\"dup\" />\n\
+            \x20 <chip type=\"esp32c3\" />\n\
+            \x20 <runtime type=\"embassy\" />\n\
+            # peripherals\n\
+            \x20 <wifi id=\"radio\" />\n\
+            \x20 <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n\
+            # devices\n\
+            \x20 <led id=\"home\" gpio=\"$gpio18\" />\n\
+            # services\n\
+            \x20 <wifi_station id=\"home\" wifi=\"$radio\" ssid=\"Wokwi-GUEST\" auth=\"open\" />\n";
+        let errors = lower_src_with(src, embassy_meta()).unwrap_err();
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert_eq!(errors[0].code, codes::ID_DUPLICATE);
+        assert_eq!(errors[0].message, "duplicate service id");
+        assert_eq!(
+            errors[0].labels[0].text,
+            "<wifi_station id=\"home\">: `home` is already the id of <led id=\"home\"> in another section"
+        );
+    }
+
+    /// A `<gpio>` id is a reference name only: nothing is emitted from it, so a
+    /// device may reuse it.
+    #[test]
+    fn a_gpio_may_share_an_id_with_a_device() {
+        let src = BLINK.replace(
+            "  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n",
+            "  <gpio id=\"gpio18\" pin=\"18\" direction=\"output\" />\n  <gpio id=\"red_led\" pin=\"19\" direction=\"output\" />\n",
+        );
+        lower_src(&src).unwrap_or_else(|errors| panic!("a gpio id emits nothing: {errors:#?}"));
     }
 
     // ---- WS-D: the chip's pin table ----

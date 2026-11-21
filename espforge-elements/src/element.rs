@@ -84,6 +84,21 @@ impl Section {
     }
 }
 
+/// One id [`LowerCx::checked_ident`] accepted, kept so a later element can be
+/// told its id would be emitted as the same name.
+#[derive(Debug, Clone)]
+struct AcceptedId {
+    /// The section the element came from: a duplicate field only clashes with
+    /// another field of the same section.
+    section: Section,
+    /// The element's tag, for the diagnostic's "already used by" half.
+    tag: String,
+    id: Ident,
+    /// Whether the id reaches generated code. A `<gpio>` id is a reference name
+    /// only, so it cannot collide with a generated field or static.
+    emits: bool,
+}
+
 /// One element tag: reads its node and lowers it onto the board.
 pub trait Element: Sync {
     /// The schema tag this element implements (`gpio`). It must name an
@@ -161,6 +176,8 @@ pub struct LowerCx<'s> {
     services: Vec<Service>,
     /// `<wifi>` radio ids and the station riding on each, in source order.
     radios: Vec<(String, Option<String>)>,
+    /// Every id [`Self::checked_ident`] accepted, in lowering order.
+    idents: Vec<AcceptedId>,
     /// Interfaces each service provides, as `(interface, id)`
     /// (`provides "network"`): the things a service's `network=` reference can
     /// name. A tag is not recorded here — the reference resolves by capability.
@@ -197,6 +214,7 @@ impl<'s> LowerCx<'s> {
             devices: Vec::new(),
             services: Vec::new(),
             radios: Vec::new(),
+            idents: Vec::new(),
             providers: Vec::new(),
             chip: String::new(),
             runtime: crate::model::Runtime::Blocking,
@@ -538,15 +556,65 @@ impl<'s> LowerCx<'s> {
             None
         };
 
-        match problem {
-            Some(label) => Err(self.report(
+        if let Some(label) = problem {
+            return Err(self.report(
                 section.reserved_id_code(),
                 id.span.clone(),
                 format!("reserved {} id", section.noun()),
                 format!("<{} id=\"{}\">: {label}", node.tag_name, id.raw),
-            )),
-            None => Ok(id),
+            ));
         }
+        if let Some(earlier) = self.duplicate_of(&id, section, node.tag_name) {
+            let where_else = if earlier.section == section {
+                ""
+            } else {
+                " in another section"
+            };
+            return Err(self.report(
+                codes::ID_DUPLICATE,
+                id.span.clone(),
+                format!("duplicate {} id", section.noun()),
+                format!(
+                    "<{} id=\"{}\">: `{}` is already the id of <{} id=\"{}\">{where_else}",
+                    node.tag_name,
+                    id.raw,
+                    id.rust_name(),
+                    earlier.tag,
+                    earlier.id.raw
+                ),
+            ));
+        }
+        self.idents.push(AcceptedId {
+            section,
+            tag: node.tag_name.to_string(),
+            id: id.clone(),
+            emits: node.tag_name != "gpio",
+        });
+        Ok(id)
+    }
+
+    /// The accepted id that would be emitted as the same name, if any.
+    ///
+    /// Two spellings of one name collide even when the raw ids differ: the
+    /// emitter binds the field with [`Ident::rust_name`] (`my-led` and `my_led`
+    /// both become `my_led`) and upper-cases it for the storage statics
+    /// (`__MY_LED_STORAGE`). A same-section match is always reported; across
+    /// sections only when both ids reach generated code, because a `<gpio>` id
+    /// is only a reference name.
+    fn duplicate_of(&self, id: &Ident, section: Section, tag: &str) -> Option<&AcceptedId> {
+        let name = id.rust_name();
+        let storage = format!("__{}_STORAGE", name.to_uppercase());
+        let emits = tag != "gpio";
+        self.idents.iter().find(|earlier| {
+            let earlier_name = earlier.id.rust_name();
+            if earlier.section == section {
+                earlier_name == name
+            } else {
+                emits
+                    && earlier.emits
+                    && format!("__{}_STORAGE", earlier_name.to_uppercase()) == storage
+            }
+        })
     }
 
     /// Finish lowering. Every collected problem is returned together; a board

@@ -61,6 +61,12 @@ codes! {
     /// the element does accept, so a typo like `backight=` fails loudly instead
     /// of silently taking the schema default.
     ATTR_UNKNOWN = "E0316";
+    /// Two ids the generated code would emit as one name.
+    ///
+    /// Shared by every stage: the collision is in the name the emitter binds
+    /// (`my-led` and `my_led` both become `my_led`, `__MY_LED_STORAGE`), not in
+    /// one section's own rules.
+    ID_DUPLICATE = "E0317";
 
     /// An option name that is not in the schema.
     OPTION_UNKNOWN = "E0301";
@@ -270,7 +276,7 @@ mod tests {
                         | 201..=212
                         | 301
                         | 302
-                        | 306..=316
+                        | 306..=317
                         | 501..=521
                         | 601..=623
                         | 701..=709

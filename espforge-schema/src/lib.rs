@@ -553,6 +553,9 @@ pub struct DeviceRecipe {
     pub address_default: Option<u8>,
     /// The inclusive range the address must fall in (v2 `bus` allowed).
     pub address_allowed: Option<(u8, u8)>,
+    /// `map "address"`: the crate's own value for each address the bus
+    /// allows, keyed by byte. `None` passes the address as a number.
+    pub address_map: Option<Vec<(u8, String)>>,
     /// The companion drivers this one composes (`compose "<tag>" { .. }`).
     ///
     /// A composite is a driver plus its sub-chips: the parent's own device and
@@ -617,6 +620,12 @@ pub enum PartSource {
 /// address or a fixed value sits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CtorArg {
+    /// `{bus_device}`/`{spi_device}`: the bus endpoint as its own argument.
+    ///
+    /// It keeps the position the manifest wrote it in, so a crate that takes
+    /// the bus after another argument (`Sen6x::new(&mut timer, i2c)`) needs no
+    /// glue crate either.
+    Bus,
     /// `{address}`: the element's I2C address, passed as a number.
     Address,
     /// `{name}`: a slot filled by an attribute's spelling or a claimed pin.
@@ -640,15 +649,16 @@ impl CtorArg {
     pub fn slot(&self) -> Option<&DeviceArg> {
         match self {
             CtorArg::Slot(arg) => Some(arg),
-            CtorArg::Address | CtorArg::Fixed { .. } => None,
+            CtorArg::Bus | CtorArg::Address | CtorArg::Fixed { .. } => None,
         }
     }
 
     /// What this argument contributes, for comparing two constructors: a slot
-    /// name or a fixed expression. The address is the bus's, not a choice.
+    /// name or a fixed expression. The bus and the address are supplied by the
+    /// element, not a per-mode choice.
     pub(crate) fn shape(&self) -> Option<(Option<&str>, Option<&str>)> {
         match self {
-            CtorArg::Address => None,
+            CtorArg::Bus | CtorArg::Address => None,
             CtorArg::Slot(arg) => Some((Some(arg.name.as_str()), None)),
             CtorArg::Fixed { text, .. } => Some((None, Some(text.as_str()))),
         }
@@ -666,6 +676,16 @@ pub struct Step {
     pub text: String,
     /// Whether the call is awaited. Always `#false` on a blocking runtime.
     pub awaits: bool,
+    /// Whether the call's return value replaces the device (`rebind #true`).
+    ///
+    /// A typestate `init(self) -> Result<Ready, E>` hands back the value the
+    /// `Devices` field stores; without this the step's return value is lost.
+    pub rebind: bool,
+    /// Whether the call returns a `Result` (`fallible #false`).
+    ///
+    /// `#false` names a setup method that returns `()` or `&mut Self`, so
+    /// emission must not map an error that does not exist.
+    pub fallible: bool,
     /// Span of the `then` node in the schema text.
     pub span: Range<usize>,
 }
@@ -2113,9 +2133,9 @@ fn parse_device_recipe(
         }
     }
 
-    // A v1 recipe wrote `needs_address`, not a `{address}` placeholder: the
-    // argument sat directly after the bus, which is where it goes here.
-    let mut ctor_args: Vec<CtorArg> = Vec::new();
+    // A v1 recipe wrote `needs_address`, not a `{address}` placeholder, and
+    // always took the bus first: `({bus_device}, [{address}, ..args])`.
+    let mut ctor_args: Vec<CtorArg> = vec![CtorArg::Bus];
     if matches!(&address, AddressNeed::Any | AddressNeed::Fixed(_)) {
         ctor_args.push(CtorArg::Address);
     }
@@ -2134,6 +2154,7 @@ fn parse_device_recipe(
         address,
         address_default: None,
         address_allowed: None,
+        address_map: None,
         parts: Vec::new(),
         dependencies: Vec::new(),
         transports: Vec::new(),
@@ -3566,11 +3587,11 @@ fn check_compositions(schema: &Schema, errors: &mut Vec<SchemaError>) {
             }
 
             for attr in &part.attrs {
-                if !part_element
+                let Some(declared) = part_element
                     .attrs
                     .iter()
-                    .any(|known| known.name == attr.name)
-                {
+                    .find(|known| known.name == attr.name)
+                else {
                     let known: Vec<&str> = part_element
                         .attrs
                         .iter()
@@ -3582,15 +3603,33 @@ fn check_compositions(schema: &Schema, errors: &mut Vec<SchemaError>) {
                         format!("the part declares: {}", known.join(", ")),
                     ));
                     continue;
-                }
-                if let PartSource::From(name) = &attr.source
-                    && !element.attrs.iter().any(|known| known.name == *name)
-                {
-                    errors.push(err(
-                        attr.span.clone(),
-                        format!("`{name}` is not an attribute of `{}`", element.tag),
-                        "`from=` names one of the composite's own `attr`s or `pin`s",
-                    ));
+                };
+                match &attr.source {
+                    PartSource::From(name) => {
+                        if !element.attrs.iter().any(|known| known.name == *name) {
+                            errors.push(err(
+                                attr.span.clone(),
+                                format!("`{name}` is not an attribute of `{}`", element.tag),
+                                "`from=` names one of the composite's own `attr`s or `pin`s",
+                            ));
+                        }
+                    }
+                    // A `value=` literal stands where a spec attribute would,
+                    // so it must be one of that attribute's values: otherwise
+                    // lowering's `unwrap_or(0)` turns `mode="fast"` into the
+                    // first mode instead of refusing it.
+                    PartSource::Value(value) => {
+                        if !literal_fits(declared, value) {
+                            errors.push(err(
+                                attr.span.clone(),
+                                format!(
+                                    "`value=\"{value}\"` is not a valid `{}` for `<{}>`",
+                                    attr.name, part.tag
+                                ),
+                                format!("`{}` takes {}", attr.name, declared.kind.display()),
+                            ));
+                        }
+                    }
                 }
             }
 
@@ -3610,6 +3649,35 @@ fn check_compositions(schema: &Schema, errors: &mut Vec<SchemaError>) {
                 }
             }
         }
+    }
+}
+
+/// Whether `value` is a value of `attr`'s kind, as a `compose` literal must be.
+///
+/// The same rules the readers apply, read from the schema: free text and
+/// references are accepted as written, a `list` cannot be a literal, and a
+/// `u32` honours the attribute's `range`.
+fn literal_fits(attr: &AttrDef, value: &str) -> bool {
+    match &attr.kind {
+        AttrKind::Str | AttrKind::Freq | AttrKind::Ref { .. } | AttrKind::PinOrRef => true,
+        AttrKind::Ident => !value.is_empty(),
+        AttrKind::Pin => value.parse::<u8>().is_ok(),
+        AttrKind::Hex => literal_hex(value).is_some(),
+        AttrKind::U32 => value.parse::<u32>().is_ok_and(|number| {
+            attr.range
+                .map_or(true, |(low, high)| (low..=high).contains(&number))
+        }),
+        AttrKind::Bool => matches!(value, "true" | "false"),
+        AttrKind::Choice(choices) => choices.iter().any(|choice| choice == value),
+        AttrKind::List(_) => false,
+    }
+}
+
+/// A `0x..` or decimal byte, as the attribute readers take one.
+fn literal_hex(text: &str) -> Option<u8> {
+    match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        Some(hex) => u8::from_str_radix(hex, 16).ok(),
+        None => text.parse().ok(),
     }
 }
 

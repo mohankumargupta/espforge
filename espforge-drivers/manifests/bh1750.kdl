@@ -1,0 +1,44 @@
+// The external `<bh1750>` driver. `codegen.feature` is absent, so the
+// dependency below is written into the generated project's Cargo.toml instead
+// of selecting an espforge-drivers feature.
+//
+// `bh1750` 0.1.0's `BH1750::new(i2c, delay, address_pin_high)` returns the
+// sensor directly and powers it on, so `fallible #false`. The address pin is
+// low on the fixture part, which is 0x23; `new_custom_address` exists for
+// boards that strap it high.
+driver "bh1750" {
+    format_version 2
+    summary "ROHM BH1750 ambient light sensor on I2C"
+    description "Reads illuminance from a BH1750 over an I2C bus. The part takes one-byte commands and answers a measurement with two big-endian bytes. The crate's `get_one_time_measurement(Resolution::High)` triggers a high-resolution one-shot, waits the conversion time and converts the raw counts to lux. The Rust half is the published `bh1750` crate, so this manifest is the whole driver."
+    category "sensor"
+
+    dependency "bh1750" { version "0.1.0" }
+
+    bus "i2c" {
+        address fixed="0x23"
+    }
+
+    codegen {
+        fallible #false
+        map "delay" {
+            "runtime" { expr "espforge_runtime::Delay::new()" }
+        }
+        runtime "blocking" {
+            type "bh1750::BH1750<espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>, espforge_runtime::Delay>"
+            constructor "bh1750::BH1750::new({bus_device}, {delay}, false)"
+            endpoint "espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>"
+        }
+    }
+
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "`boot` builds the sensor during `Devices::new`; `deferred` stores the bus and constructs it in `init()`."
+    }
+    attr "delay" kind="choice" default="runtime" {
+        choices "runtime"
+        help "The delay handle the driver takes; espforge always passes the runtime's own."
+    }
+
+    example "minimal" #"<bh1750 id=\"light\" bus=\"$i2c0\" address=\"0x23\" />"#
+    see_also "peripherals/i2c"
+}

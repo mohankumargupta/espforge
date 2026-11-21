@@ -77,6 +77,10 @@ impl Element for I2c {
 
         let span = node_span(node);
         let owner = Owner::new(OwnerKind::I2c, id.clone());
+        // The controller is a physical peripheral like a UART: a second `<i2c>`
+        // must not be able to build a second handle to the same silicon.
+        cx.claim_peripheral(peripheral.clone(), owner.clone(), span.clone())?;
+
         let sda = claim_bus_pin(cx, attrs.sda.value, owner.clone(), span.clone())?;
         let scl = claim_bus_pin(cx, attrs.scl.value, owner, span)?;
 

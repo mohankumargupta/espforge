@@ -1,0 +1,44 @@
+// The external `<sgp30>` driver. `codegen.feature` is absent, so the
+// dependency below is written into the generated project's Cargo.toml instead
+// of selecting an espforge-drivers feature.
+//
+// `sgp30` 1.0.0's `Sgp30::new(i2c, address, delay)` returns the sensor
+// directly, so `fallible #false`. Air-quality measurement must be started with
+// `init()` and then polled once a second with `measure()`; the fixture calls
+// `init()` in `setup`.
+driver "sgp30" {
+    format_version 2
+    summary "Sensirion SGP30 air-quality sensor on I2C"
+    description "Reads equivalent CO2 and total volatile organic compounds from a Sensirion SGP30 over an I2C bus. `init()` starts the air-quality measurement; after that each `measure()` sends the measure-IAQ command and decodes the six-byte answer, eCO2 in ppm and TVOC in ppb, each 16-bit big-endian with a CRC byte. The Rust half is the published `sgp30` crate, so this manifest is the whole driver."
+    category "sensor"
+
+    dependency "sgp30" { version "1.0.0" }
+
+    bus "i2c" {
+        address allowed="0x58..=0x58"
+    }
+
+    codegen {
+        fallible #false
+        map "delay" {
+            "runtime" { expr "espforge_runtime::Delay::new()" }
+        }
+        runtime "blocking" {
+            type "sgp30::Sgp30<espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>, espforge_runtime::Delay>"
+            constructor "sgp30::Sgp30::new({bus_device}, {address}, {delay})"
+            endpoint "espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>"
+        }
+    }
+
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "`boot` builds the sensor during `Devices::new`; `deferred` stores the bus and constructs it in `init()`."
+    }
+    attr "delay" kind="choice" default="runtime" {
+        choices "runtime"
+        help "The delay handle the driver takes; espforge always passes the runtime's own."
+    }
+
+    example "minimal" #"<sgp30 id=\"air\" bus=\"$i2c0\" address=\"0x58\" />"#
+    see_also "peripherals/i2c"
+}

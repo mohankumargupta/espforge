@@ -86,6 +86,15 @@ impl RustExpr {
         syn::parse_str(text).map(|node| Self(Box::new(node)))
     }
 
+    /// Parse a template whose holes are written `{name}`.
+    ///
+    /// Each hole becomes a sentinel path, so `splice` fills the ones lowering
+    /// knows (the address) and emission fills the bus once it exists.
+    pub fn parse_template(text: &str) -> Result<Self, String> {
+        let (substituted, _) = substitute(text).map_err(|(message, _)| message)?;
+        Self::parse(&substituted).map_err(|error| error.to_string())
+    }
+
     /// The parsed node.
     pub fn as_syn(&self) -> &Expr {
         self.0.as_ref()

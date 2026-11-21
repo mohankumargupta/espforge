@@ -76,9 +76,11 @@ fn assert_recipe_eq(tag: &str, v1: &DeviceRecipe, v2: &DeviceRecipe) {
         v1.address_default, v2.address_default,
         "{tag}: address default"
     );
+    assert_eq!(v1.address_map, v2.address_map, "{tag}: address map");
     assert_eq!(v1.args.len(), v2.args.len(), "{tag}: argument count");
     for (left, right) in v1.args.iter().zip(&v2.args) {
         match (left, right) {
+            (CtorArg::Bus, CtorArg::Bus) => {}
             (CtorArg::Address, CtorArg::Address) => {}
             (CtorArg::Slot(left), CtorArg::Slot(right)) => {
                 assert_eq!(left.name, right.name, "{tag}: argument name");

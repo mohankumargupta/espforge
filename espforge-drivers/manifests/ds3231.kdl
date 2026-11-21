@@ -1,0 +1,37 @@
+// The external `<ds3231>` driver. `codegen.feature` is absent, so the
+// dependency below is written into the generated project's Cargo.toml instead
+// of selecting an espforge-drivers feature.
+//
+// `ds323x` 0.7.0's `Ds323x::new_ds3231(i2c)` is infallible and fixes the part
+// at 0x68, so `fallible #false` and the manifest declares `fixed="0x68"`.
+// The typestate is `Ds323x<I2cInterface<I2C>, DS3231>`; date/time comes from
+// the crate's `DateTimeAccess`/`Rtcc` traits.
+driver "ds3231" {
+    format_version 2
+    summary "Maxim DS3231 temperature-compensated real-time clock on I2C"
+    description "Keeps and reads the date and time of a DS3231 over an I2C bus. The seven time registers are binary-coded decimal; the crate converts both ways, exposes `datetime()` and the individual fields, and reads the die temperature in quarter degrees. The Rust half is the published `ds323x` crate, so this manifest is the whole driver."
+    category "time"
+
+    dependency "ds323x" { version "0.7.0" }
+
+    bus "i2c" {
+        address fixed="0x68"
+    }
+
+    codegen {
+        fallible #false
+        runtime "blocking" {
+            type "ds323x::Ds323x<ds323x::interface::I2cInterface<espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>>, ds323x::ic::DS3231>"
+            constructor "ds323x::Ds323x::new_ds3231({bus_device})"
+            endpoint "espforge_runtime::embedded_hal_bus::i2c::CriticalSectionDevice<'static, esp_hal::i2c::master::I2c<'static, esp_hal::Blocking>>"
+        }
+    }
+
+    attr "init" kind="choice" default="boot" {
+        choices "boot" "deferred"
+        help "`boot` builds the clock during `Devices::new`; `deferred` stores the bus and constructs it in `init()`."
+    }
+
+    example "minimal" #"<ds3231 id=\"rtc\" bus=\"$i2c0\" address=\"0x68\" />"#
+    see_also "peripherals/i2c"
+}

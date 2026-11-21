@@ -133,6 +133,25 @@ pub fn unknown_attr(attr: &str, known: &[&str]) -> String {
     }
 }
 
+/// The first attribute `node` writes that `element` does not declare.
+///
+/// A bundled element reads only the attributes it names, so without this check
+/// a typo (`activelow="true"`) would be silently ignored and the schema
+/// default would apply. `id` is one of the declared attributes, so it is never
+/// reported.
+pub fn unknown_attribute<'a>(
+    element: &espforge_schema::Element,
+    node: &'a ParsedNode<'a>,
+) -> Option<Issue<'a>> {
+    node.attributes
+        .iter()
+        .find(|attr| !element.attrs.iter().any(|declared| declared.name == attr.key))
+        .map(|attr| Issue::Unknown {
+            attr: attr.key,
+            known: &[],
+        })
+}
+
 /// The key span of the attribute named `attr`, or the node's tag when it is
 /// (impossibly) absent.
 ///

@@ -99,10 +99,39 @@ pub fn write_assets(out_dir: &Path, assets: &[Asset]) -> Result<()> {
     Ok(())
 }
 
-/// Convenience: [`write`] then [`write_assets`].
+/// The outputs a generation can stop writing: `<ota />` removed, an overlay
+/// file that is no longer beside the `.espf`, or `wokwi` turned off.
+const OPTIONAL_OUTPUTS: &[&str] = &["diagram.json", "partitions.csv", "wokwi.toml"];
+
+/// Remove a known optional output this generation did not write.
+///
+/// `out_dir` is disposable, but an earlier run's file is not: a stale
+/// `partitions.csv` puts `--partition-table partitions.csv` on the next flash
+/// even though the project no longer declares `<ota />`. Only the optional
+/// outputs are considered, so nothing else beside them is touched.
+fn prune_stale(out_dir: &Path, generated: &Generated) -> Result<()> {
+    for path in OPTIONAL_OUTPUTS {
+        if generated
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.path == *path)
+        {
+            continue;
+        }
+        let stale = out_dir.join(path);
+        if stale.is_file() {
+            fs::remove_file(&stale)?;
+        }
+    }
+    Ok(())
+}
+
+/// Convenience: [`write`] then [`write_assets`], after dropping optional
+/// outputs this generation no longer emits.
 ///
 /// Impure: writes under `out_dir`.
 pub fn write_all(out_dir: &Path, generated: &Generated) -> Result<()> {
+    prune_stale(out_dir, generated)?;
     write(out_dir, &generated.artifacts)?;
     write_assets(out_dir, &generated.assets)
 }
@@ -214,6 +243,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), &generate_with(None).artifacts).unwrap();
         write(dir.path(), &generate_with(None).artifacts).unwrap();
+    }
+
+    /// A file an earlier generation wrote is not left behind when the project
+    /// stops declaring it: the stale table would be flashed next time.
+    #[test]
+    fn an_optional_output_this_generation_drops_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut with_ota = generate_with(None);
+        with_ota.artifacts.push(Artifact::new(
+            "partitions.csv",
+            "nvs, data, nvs, 0x9000, 0x6000",
+        ));
+        write_all(dir.path(), &with_ota).unwrap();
+        fs::write(dir.path().join("notes.md"), "mine").unwrap();
+        assert!(dir.path().join("partitions.csv").is_file());
+
+        write_all(dir.path(), &generate_with(None)).unwrap();
+        assert!(!dir.path().join("partitions.csv").exists());
+        assert!(
+            dir.path().join("notes.md").is_file(),
+            "only the known optional outputs are pruned"
+        );
+        assert!(dir.path().join("README.txt").is_file());
     }
 
     /// `build/` is disposable: an edited generated file is simply rewritten.

@@ -276,12 +276,12 @@ fn emit_uart(
         .expect("UART configuration failed")
     };
     if board.meta.runtime == Runtime::Embassy {
+        // No second, exclusive lock: `UartDevice::lock` is what `device!`
+        // awaits, and the port serialises each operation itself.
         cx.device_field(quote! {
-            pub #name: espforge_runtime::AsyncMutex<espforge_runtime::UartDevice<#runtime>>,
+            pub #name: espforge_runtime::UartDevice<#runtime>,
         });
-        cx.device_init(quote! {
-            #name: espforge_runtime::AsyncMutex::new(#init),
-        });
+        cx.device_init(quote! { #name: #init, });
     } else {
         cx.device_field(quote! {
             pub #name: espforge_runtime::UartDevice<#runtime>,

@@ -56,6 +56,10 @@ impl Element for Spi {
 
         let span = node_span(node);
         let owner = Owner::new(OwnerKind::Spi, id.clone());
+        // The controller is a physical peripheral like a UART: a second `<spi>`
+        // must not be able to build a second handle to the same silicon.
+        cx.claim_peripheral("SPI2", owner.clone(), span.clone())?;
+
         let sclk = claim_bus_pin(cx, attrs.sclk.value, owner.clone(), span.clone())?;
         let mosi = claim_bus_pin(cx, attrs.mosi.value, owner.clone(), span.clone())?;
         let miso = match attrs.miso {

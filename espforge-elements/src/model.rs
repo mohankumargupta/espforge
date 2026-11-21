@@ -1210,6 +1210,15 @@ pub struct Step {
     pub factory: RustExpr,
     /// Whether the call is awaited (`runtime "async"` only).
     pub awaits: bool,
+    /// Whether the call's return value replaces the device (`rebind #true`).
+    ///
+    /// A typestate `init(self) -> Result<Ready, E>` consumes the value the
+    /// constructor built and hands back the type the field declares.
+    pub rebind: bool,
+    /// Whether the call returns a `Result` (`fallible #false`).
+    ///
+    /// `#false` names a setup call that returns `()` or `&mut Self`.
+    pub fallible: bool,
 }
 
 /// A bus-backed device: a driver for a specific part, plus one concrete bus
@@ -1257,6 +1266,12 @@ pub struct Driver {
     pub pins: Vec<(String, ClaimedPin)>,
     /// The Rust expressions passed to the constructor after the bus.
     pub args: Vec<RustExpr>,
+    /// Where the endpoint goes among [`Self::args`], when the constructor
+    /// takes the bus as an argument of its own.
+    ///
+    /// `None` when the bus sits inside a wrapper expression, or the device
+    /// has no bus at all.
+    pub bus_index: Option<usize>,
     /// The same arguments as [`Self::args`], split into constants a deferred
     /// factory can recompute and pins it must store.
     pub factory_args: Vec<FactoryArg>,
@@ -1494,6 +1509,9 @@ impl crate::element::Lowered for PinsDevice {
                     }
                 }
             }
+            if let Some(index) = driver.bus_index {
+                call_args.insert(index, quote! { self.endpoint });
+            }
             let construct = quote! { #new(#(#call_args),*) };
             let steps = driver.steps.as_slice();
             let factory_body = if steps.is_empty() {
@@ -1716,9 +1734,6 @@ impl crate::element::Lowered for BusDevice {
             // it splices is the field the factory stored.
             let values = bus_values(&quote! { self.endpoint });
             let mut call_args = Vec::new();
-            if !driver.args.first().is_some_and(RustExpr::has_placeholder) {
-                call_args.push(quote! { self.endpoint });
-            }
             // `factory_args` carries both the pins a factory stores and the
             // constants it passes, in the manifest's order.
             for arg in driver.factory_args.iter() {
@@ -1778,6 +1793,10 @@ impl crate::element::Lowered for BusDevice {
                         call_args.push(quote! { #expression });
                     }
                 }
+            }
+
+            if let Some(index) = driver.bus_index {
+                call_args.insert(index, quote! { self.endpoint });
             }
 
             // An async constructor is awaited unless its manifest says it is a
@@ -1938,9 +1957,9 @@ impl crate::element::Lowered for BusDevice {
 
 /// The constructor's arguments, with the endpoint where the manifest put it.
 ///
-/// A plain recipe passes the bus first. A wrapper recipe
-/// (`I2CExpander::new({bus_device}, {address})`) carries the hole inside its
-/// first argument, and this is the one place that knows how to fill it.
+/// A plain recipe passes the bus as its own argument at [`Driver::bus_index`].
+/// A wrapper recipe (`I2CExpander::new({bus_device}, {address})`) carries the
+/// hole inside its expression, and this is the one place that fills it.
 fn constructor_args(driver: &Driver, handle: Option<&TokenStream>) -> Vec<TokenStream> {
     let Some(handle) = handle else {
         // A busless device has no endpoint: every argument is its own, and the
@@ -1955,14 +1974,17 @@ fn constructor_args(driver: &Driver, handle: Option<&TokenStream>) -> Vec<TokenS
             .collect();
     };
     let values = bus_values(handle);
-    let mut args = Vec::new();
-    if !driver.args.first().is_some_and(RustExpr::has_placeholder) {
-        args.push(quote! { #handle });
+    let mut args: Vec<TokenStream> = driver
+        .args
+        .iter()
+        .map(|arg| {
+            let arg = arg.splice(&values);
+            quote! { #arg }
+        })
+        .collect();
+    if let Some(index) = driver.bus_index {
+        args.insert(index, quote! { #handle });
     }
-    args.extend(driver.args.iter().map(|arg| {
-        let arg = arg.splice(&values);
-        quote! { #arg }
-    }));
     args
 }
 
@@ -1979,7 +2001,9 @@ fn bus_values(handle: &TokenStream) -> BTreeMap<String, RustExpr> {
 ///
 /// Each one names the device: a failing step is that device's `Init` error,
 /// so a half-initialised value never reaches app code, exactly as a failing
-/// constructor does not.
+/// constructor does not. A `rebind #true` step replaces the local with what
+/// the call returned, so a typestate `init(self)` becomes the stored value;
+/// a `fallible #false` step has no error to map.
 fn step_statements(
     steps: &[Step],
     receiver: &TokenStream,
@@ -1991,7 +2015,7 @@ fn step_statements(
     }
     let receiver =
         RustExpr::parse(&receiver.to_string()).expect("a device local is a Rust expression");
-    let values = BTreeMap::from([(espforge_schema::STEP_RECEIVER.to_string(), receiver)]);
+    let values = BTreeMap::from([(espforge_schema::STEP_RECEIVER.to_string(), receiver.clone())]);
     steps
         .iter()
         .map(|step| {
@@ -2002,11 +2026,23 @@ fn step_statements(
             } else {
                 quote! {}
             };
-            quote! {
-                #call #awaited.map_err(|_| espforge_runtime::DeviceError {
-                    device: #device,
-                    kind: espforge_runtime::DeviceErrorKind::Init,
-                })?;
+            let check = if step.fallible {
+                quote! {
+                    .map_err(|_| espforge_runtime::DeviceError {
+                        device: #device,
+                        kind: espforge_runtime::DeviceErrorKind::Init,
+                    })?
+                }
+            } else {
+                quote! {}
+            };
+            if step.rebind {
+                quote! {
+                    #[allow(unused_mut)]
+                    let mut #receiver = #call #awaited #check;
+                }
+            } else {
+                quote! { #call #awaited #check; }
             }
         })
         .collect()
