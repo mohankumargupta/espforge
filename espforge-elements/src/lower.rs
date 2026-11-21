@@ -1804,6 +1804,59 @@ driver "address_probe" {
         );
     }
 
+    /// A crate that takes the bus after another argument (`sen6x` shape).
+    const LATE_BUS: &str = r##"
+driver "late_bus" {
+    format_version 2
+    summary "test"
+    category "sensor"
+    dependency "late-crate" { version "1.0.0" }
+    bus "i2c" { address fixed="0x44" }
+    codegen {
+        runtime "blocking" {
+            type "late_crate::Probe"
+            constructor "late_crate::Probe::new(&mut espforge_runtime::Delay::new(), {bus_device})"
+        }
+    }
+    example "minimal" #"<late_bus id="probe" bus="$i2c0" address="0x44" />"#
+}
+"##;
+
+    #[test]
+    fn a_bus_may_sit_after_another_argument() {
+        let session =
+            Session::compose(&[("late-bus.schema.kdl".to_string(), LATE_BUS.to_string())])
+                .expect("the late bus schema loads");
+        let src = "# espforge\n\
+             \x20 <project name=\"late\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <late_bus id=\"probe\" bus=\"$i2c0\" address=\"0x44\" />\n\
+             # services\n";
+        let parsed = parse_espf(&src);
+        let section = |name: &str| parsed.sections.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let mut meta = meta();
+        meta.runtime = Runtime::Blocking;
+        let board = lower(
+            meta,
+            section("peripherals"),
+            section("devices"),
+            section("services"),
+            &session,
+        )
+        .expect("the late bus lowers");
+        let probe = board.devices[0].as_bus().expect("a bus device");
+        assert_eq!(probe.driver.bus_index, Some(1));
+        assert_eq!(probe.driver.args.len(), 1);
+        assert_eq!(
+            probe.driver.args[0],
+            crate::model::RustExpr::parse("&mut espforge_runtime::Delay::new()").unwrap()
+        );
+    }
+
     /// A composite and its companion: one spec element, two devices.
     const COMPOSED_DRIVERS: &str = r##"
 driver "panel" {
@@ -2180,6 +2233,7 @@ driver "touch" {
                     fallible: true,
                     pins: Vec::new(),
                     args: vec![crate::model::RustExpr::number(0x3C)],
+                    bus_index: Some(0),
                     factory_args: Vec::new(),
                     steps: Vec::new(),
                     async_steps: Vec::new(),

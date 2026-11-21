@@ -434,8 +434,9 @@ mod tests {
             !recipe.async_mode.awaits,
             "`MHZ19::new` is a plain `fn`, not an `async fn`"
         );
-        assert!(
-            recipe.args.is_empty(),
+        assert_eq!(
+            recipe.args,
+            [espforge_schema::CtorArg::Bus],
             "the constructor takes the bus and nothing else"
         );
         let init = mhz19b

@@ -90,6 +90,7 @@ pub fn device(feature: &'static str, deps: &[&str]) -> Device {
             fallible: true,
             pins: Vec::new(),
             args: vec![espforge_elements::model::RustExpr::number(0x3C)],
+            bus_index: Some(0),
             factory_args: Vec::new(),
             steps: Vec::new(),
             async_steps: Vec::new(),

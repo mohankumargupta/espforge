@@ -446,8 +446,8 @@ Entries are expressions; `type` is refused, because an address fills a value. Th
 
 Inside `constructor "..."`, `espforge` replaces `{holes}` from a closed set checked at load time with `syn`:
 
-* `{bus_device}` (or `{spi_device}`): the bus endpoint. It is the first argument of a bus device, or sits inside the first argument when that argument is a wrapper call (`Type::new(Wrapper::new({bus_device}), ..)`). A busless driver refuses it.
-* `{address}`: the I²C 7-bit address as a number (`68` for `0x44`), or the expression a `map "address"` entry names. It may stand as its own argument directly after the bus, inside the wrapped first argument, or inside an argument of its own that directly follows the bus (`hdc302x::I2cAddr::try_from({address}).unwrap()`). It is refused when the bus declares no address, and on a non-I²C bus.
+* `{bus_device}` (or `{spi_device}`): the bus endpoint. It is an argument of its own wherever the manifest writes it (`Sen6x::new(&mut timer, i2c)` puts it second), or sits inside a wrapper call (`Type::new(Wrapper::new({bus_device}), ..)`). It must appear exactly once. A busless driver refuses it.
+* `{address}`: the I²C 7-bit address as a number (`68` for `0x44`), or the expression a `map "address"` entry names. It may stand as its own argument, inside the bus wrapper, or inside an argument of its own (`hdc302x::I2cAddr::try_from({address}).unwrap()`). It is refused when the bus declares no address, and on a non-I²C bus.
 * `{cs_pin}`: the SPI chip-select line as a pin expression. SPI only.
 * `{dc_pin}` or `{dc}`: a claimed `pin "..."` converted into an `Output`, `Input`, `Bidirectional` or `OpenDrainPin` per its `direction`. Both spellings mean the same line.
 * `{any_mapped_attr}`: replaced by whatever `map "any_mapped_attr"` resolves to. Every non-pin attribute used as a hole must have a `map`.
@@ -670,8 +670,8 @@ Loading a manifest checks, before any project is generated:
 - every node and property name, and every duplicate;
 - every `type`, `constructor` and `endpoint` through `syn`, every `map` entry,
   and every `{placeholder}` against the closed set;
-- the constructor's shape: a plain call, the bus first on a bus device, no
-  repeated hole, `{address}` only where the bus has one, `{cs_pin}` only on
+- the constructor's shape: a plain call, the bus exactly once on a bus device,
+  no repeated hole, `{address}` only where the bus has one, `{cs_pin}` only on
   SPI;
 - the composed parts (§8) and the dependency sources;
 - the constructor slots against the declared pins and attributes.

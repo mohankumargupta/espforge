@@ -959,6 +959,7 @@ mod tests {
                 fallible: true,
                 pins: Vec::new(),
                 args: Vec::new(),
+                bus_index: Some(0),
                 factory_args: Vec::new(),
                 steps: Vec::new(),
                 async_steps: Vec::new(),
@@ -1035,6 +1036,7 @@ mod tests {
                 // `sht4x::Sht4x::new` takes no address: the recipe keeps the
                 // fixed one in the element, so neither list carries it.
                 args: Vec::new(),
+                bus_index: Some(0),
                 factory_args: Vec::new(),
                 steps: Vec::new(),
                 async_steps: Vec::new(),
@@ -1121,6 +1123,7 @@ mod tests {
                         .expect("a wrapper argument"),
                     RustExpr::number(0x27),
                 ],
+                bus_index: None,
                 factory_args: Vec::new(),
                 steps: Vec::new(),
                 async_steps: Vec::new(),
@@ -1265,6 +1268,7 @@ mod tests {
                     RustExpr::parse("espforge_drivers::DisplayRotation::Rotate0")
                         .expect("a rotation"),
                 ],
+                bus_index: Some(0),
                 factory_args: Vec::new(),
                 steps: Vec::new(),
                 async_steps: Vec::new(),
@@ -1461,6 +1465,7 @@ mod tests {
                     RustExpr::parse("espforge_drivers::Orientation::Landscape")
                         .expect("an orientation"),
                 ],
+                bus_index: Some(0),
                 factory_args: Vec::new(),
                 steps: Vec::new(),
                 async_steps: Vec::new(),

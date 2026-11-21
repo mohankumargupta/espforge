@@ -91,8 +91,9 @@ Everything after the bus is parsed positionally: a `{hole}` is a slot the
 element fills, and any other expression is passed through verbatim —
 `ads111x::Ads111xConfig::default()`, `&bme680::Configuration::default()`, `20`.
 A fixed argument keeps the position the manifest gave it, for boot, deferred and
-async emission alike, and may not contain a `{placeholder}`. `{address}` still
-has to sit directly after the bus.
+async emission alike; it may carry the bus and address holes. The bus is an
+argument of its own wherever the manifest writes it, and `{address}` follows it
+the same way.
 
 `endpoint` is a Rust *type*, not a path: it names the type the generated bus
 helper returns, so a manifest-only driver can write the real thing

@@ -624,6 +624,14 @@ fn lower_recipe<'s>(
         recipe.async_mode.endpoint.as_deref(),
     )?;
 
+    // Where the endpoint goes among the constructor's values: a plain bus
+    // argument keeps its position, a wrapper carries it inside its own
+    // expression, and a busless driver has none.
+    let bus_index = recipe
+        .args
+        .iter()
+        .position(|arg| matches!(arg, CtorArg::Bus));
+
     // 9. the driver record: everything that is independent of the bus
     // kind, in one place.
     let driver = Driver {
@@ -634,6 +642,7 @@ fn lower_recipe<'s>(
         fallible: recipe.fallible,
         pins,
         args,
+        bus_index,
         factory_args,
         steps,
         async_steps,
@@ -941,6 +950,11 @@ fn slots(
         })
     });
     for arg in &recipe.args {
+        // The endpoint does not exist until the bus is emitted: the model
+        // inserts it at this argument's position, so lowering skips it.
+        if matches!(arg, CtorArg::Bus) {
+            continue;
+        }
         // The address travels to a deferred factory as a constant.
         if matches!(arg, CtorArg::Address) {
             let Some(address) = address else {

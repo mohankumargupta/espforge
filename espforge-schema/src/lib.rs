@@ -620,6 +620,12 @@ pub enum PartSource {
 /// address or a fixed value sits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CtorArg {
+    /// `{bus_device}`/`{spi_device}`: the bus endpoint as its own argument.
+    ///
+    /// It keeps the position the manifest wrote it in, so a crate that takes
+    /// the bus after another argument (`Sen6x::new(&mut timer, i2c)`) needs no
+    /// glue crate either.
+    Bus,
     /// `{address}`: the element's I2C address, passed as a number.
     Address,
     /// `{name}`: a slot filled by an attribute's spelling or a claimed pin.
@@ -643,15 +649,16 @@ impl CtorArg {
     pub fn slot(&self) -> Option<&DeviceArg> {
         match self {
             CtorArg::Slot(arg) => Some(arg),
-            CtorArg::Address | CtorArg::Fixed { .. } => None,
+            CtorArg::Bus | CtorArg::Address | CtorArg::Fixed { .. } => None,
         }
     }
 
     /// What this argument contributes, for comparing two constructors: a slot
-    /// name or a fixed expression. The address is the bus's, not a choice.
+    /// name or a fixed expression. The bus and the address are supplied by the
+    /// element, not a per-mode choice.
     pub(crate) fn shape(&self) -> Option<(Option<&str>, Option<&str>)> {
         match self {
-            CtorArg::Address => None,
+            CtorArg::Bus | CtorArg::Address => None,
             CtorArg::Slot(arg) => Some((Some(arg.name.as_str()), None)),
             CtorArg::Fixed { text, .. } => Some((None, Some(text.as_str()))),
         }
@@ -2126,9 +2133,9 @@ fn parse_device_recipe(
         }
     }
 
-    // A v1 recipe wrote `needs_address`, not a `{address}` placeholder: the
-    // argument sat directly after the bus, which is where it goes here.
-    let mut ctor_args: Vec<CtorArg> = Vec::new();
+    // A v1 recipe wrote `needs_address`, not a `{address}` placeholder, and
+    // always took the bus first: `({bus_device}, [{address}, ..args])`.
+    let mut ctor_args: Vec<CtorArg> = vec![CtorArg::Bus];
     if matches!(&address, AddressNeed::Any | AddressNeed::Fixed(_)) {
         ctor_args.push(CtorArg::Address);
     }

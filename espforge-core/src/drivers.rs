@@ -1522,14 +1522,16 @@ fn migrate_element(element: &Element) -> Result<String, String> {
 }
 
 fn constructor(recipe: &espforge_schema::DeviceRecipe, new: &str) -> String {
-    let mut args = vec!["{bus_device}".to_string()];
-    for arg in &recipe.args {
-        args.push(match arg {
+    let args: Vec<String> = recipe
+        .args
+        .iter()
+        .map(|arg| match arg {
+            espforge_schema::CtorArg::Bus => "{bus_device}".to_string(),
             espforge_schema::CtorArg::Address => "{address}".to_string(),
             espforge_schema::CtorArg::Slot(slot) => format!("{{{}}}", slot.name),
             espforge_schema::CtorArg::Fixed { text, .. } => text.clone(),
-        });
-    }
+        })
+        .collect();
     format!("{new}({})", args.join(", "))
 }
 
