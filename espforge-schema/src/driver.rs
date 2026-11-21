@@ -1933,13 +1933,97 @@ fn build_recipe(
         ));
     }
 
+    // `address` is not an attribute: it belongs to the bus. A map turns each
+    // address the driver allows into the crate's own value
+    // (`pcf857x::SlaveAddr`), so the constructor can take the crate's type
+    // while the element keeps writing a plain 7-bit address.
+    let mut address_map: Option<Vec<(u8, String)>> = None;
+    if let Some(map) = codegen.maps.iter().find(|map| map.name == "address") {
+        match bus.address {
+            AddressNeed::None => errors.push(err(
+                map.span.clone(),
+                format!("`map \"address\"` in `{tag}` names no I2C address"),
+                "add an `address` to `bus \"i2c\"`, or drop the map",
+            )),
+            _ => {
+                let required: Vec<u8> = match bus.address {
+                    AddressNeed::Fixed(fixed) => vec![fixed],
+                    _ => match bus.address_allowed {
+                        Some((low, high)) => (low..=high).collect(),
+                        None => {
+                            errors.push(err(
+                                map.span.clone(),
+                                format!("`map \"address\"` in `{tag}` has no address range"),
+                                "declare `address allowed=\"0x..=0x..\"` so the map can be complete",
+                            ));
+                            Vec::new()
+                        }
+                    },
+                };
+                let mut entries: Vec<(u8, String)> = Vec::new();
+                for (spelling, value) in &map.entries {
+                    let Some(address) = crate::hex_byte(spelling) else {
+                        errors.push(err(
+                            map.span.clone(),
+                            format!("`{spelling}` is not an I2C address"),
+                            "write the address the element declares, for example `\"0x20\"`",
+                        ));
+                        continue;
+                    };
+                    if !required.contains(&address) {
+                        errors.push(err(
+                            map.span.clone(),
+                            format!("`0x{address:02X}` is not an address of `{tag}`"),
+                            match bus.address_allowed {
+                                Some((low, high)) => {
+                                    format!("addresses: 0x{low:02X}..=0x{high:02X}")
+                                }
+                                None => format!("the part is fixed at 0x{address:02X}"),
+                            },
+                        ));
+                        continue;
+                    }
+                    if entries.iter().any(|(known, _)| *known == address) {
+                        errors.push(err(
+                            map.span.clone(),
+                            format!("`0x{address:02X}` is mapped twice"),
+                            "write each address once, in hex or decimal",
+                        ));
+                        continue;
+                    }
+                    let MapValue::Expr(text) = value else {
+                        errors.push(err(
+                            map.span.clone(),
+                            format!("`map \"address\"` entry `{spelling}` is a type"),
+                            "an address fills a value: write `expr \"..\"`",
+                        ));
+                        continue;
+                    };
+                    validate_expr(text, map.span.clone(), errors);
+                    entries.push((address, text.clone()));
+                }
+                for address in required {
+                    if !entries.iter().any(|(known, _)| *known == address) {
+                        errors.push(err(
+                            map.span.clone(),
+                            format!("`map \"address\"` has no entry for `0x{address:02X}`"),
+                            "every address the driver allows needs an entry",
+                        ));
+                    }
+                }
+                address_map = Some(entries);
+            }
+        }
+    }
+
     let maps: BTreeMap<&str, &MapDecl> = codegen
         .maps
         .iter()
+        .filter(|map| map.name != "address")
         .map(|map| (map.name.as_str(), map))
         .collect();
 
-    for map in &codegen.maps {
+    for map in codegen.maps.iter().filter(|map| map.name != "address") {
         let Some(attr) = attrs.iter().find(|attr| attr.name == map.name) else {
             errors.push(err(
                 map.span.clone(),
@@ -2009,10 +2093,15 @@ fn build_recipe(
         errors,
     )?;
     // The address keeps the place the manifest gave it: directly after the
-    // bus, which is what both the crate's `new` and a deferred factory expect.
+    // bus, either in the wrapper that takes the bus or in the argument after
+    // it. `parse_constructor` drops a plain bus argument, so a wrapped bus is
+    // only ever one argument long at the front.
     let address_at = ctor_args.iter().position(|spec| spec.uses("address"));
+    let bus_wrapped = ctor_args
+        .first()
+        .is_some_and(|spec| spec.uses("bus_device") || spec.uses("spi_device"));
     if let Some(index) = address_at {
-        if index != 0 {
+        if index != 0 && !(index == 1 && bus_wrapped) {
             errors.push(err(
                 ctor_args[index].span().clone(),
                 "`{address}` must come directly after the bus argument",
@@ -2038,6 +2127,13 @@ fn build_recipe(
             "add an `address` to `bus \"i2c\"` or drop the argument",
         )),
         _ => {}
+    }
+    if address_map.is_some() && address_at.is_none() {
+        errors.push(err(
+            ctor_span.clone(),
+            format!("`map \"address\"` in `{tag}` is not used"),
+            "the constructor takes no `{address}`, so nothing reads the map",
+        ));
     }
 
     let mut args: Vec<crate::CtorArg> = Vec::new();
@@ -2231,6 +2327,7 @@ fn build_recipe(
         address: bus.address,
         address_default: bus.address_default,
         address_allowed: bus.address_allowed,
+        address_map,
         dependencies: Vec::new(),
         transports: Vec::new(),
         span: codegen.span.clone(),
@@ -2319,13 +2416,10 @@ fn wrapped_argument(argument: &Expr, first: bool) -> Result<Vec<String>, (String
             "write `{bus_device}` once: one bus wrapper per argument".into(),
         ));
     }
-    if buses == 0 {
-        return Err((
-            "`{address}` must come directly after the bus argument".into(),
-            "write `Type::new({bus_device}, {address})`".into(),
-        ));
-    }
-    if !first {
+    // A wrapper around the address alone (`Address::from({address})`) sits
+    // after the bus argument, so it is not the first one: only the argument
+    // that carries the bus has to come first.
+    if buses > 0 && !first {
         return Err((
             "the bus argument must come first".into(),
             "put the wrapper constructor at the front of the constructor".into(),
@@ -3298,18 +3392,143 @@ driver "dual" {
         );
     }
 
-    /// The address rides with the bus, wherever the bus is.
+    /// An address wrapper is an argument of its own, directly after the bus:
+    /// a crate that takes `I2cAddr` needs no glue crate either.
     #[test]
-    fn a_wrapped_address_needs_the_bus_beside_it() {
+    fn an_address_wrapper_sits_directly_after_the_bus() {
+        let wrapped = DRIVER.replace(
+            "constructor \"demo::Demo::new({bus_device}, {address})\"",
+            "constructor \"demo::Demo::new({bus_device}, demo::Address::from({address}), 20)\"",
+        );
+        let schema = load(&wrapped).expect("an address wrapper loads");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert_eq!(recipe.new, "demo::Demo::new");
+        assert_eq!(recipe.args.len(), 2);
+        let text = |arg: &crate::CtorArg| match arg {
+            crate::CtorArg::Fixed { text, .. } => text.clone(),
+            other => panic!("a fixed argument, not {other:?}"),
+        };
+        let wrapper = text(&recipe.args[0]);
+        assert!(wrapper.contains("Address"), "{wrapper}");
+        assert!(wrapper.contains("{address}"), "{wrapper}");
+        assert_eq!(text(&recipe.args[1]), "20");
+    }
+
+    /// The wrapper still belongs right after the bus.
+    #[test]
+    fn an_address_wrapper_must_follow_the_bus() {
         let bad = DRIVER.replace(
             "constructor \"demo::Demo::new({bus_device}, {address})\"",
-            "constructor \"demo::Demo::new({bus_device}, demo::wrap({address}))\"",
+            "constructor \"demo::Demo::new({bus_device}, 20, demo::Address::from({address}))\"",
         );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error
+                .message
+                .contains("must come directly after the bus argument")),
+            "{errors:?}"
+        );
+    }
+
+    /// `map "address"` turns every address the driver allows into the crate's
+    /// own value, so a `SlaveAddr` newtype still comes from the manifest.
+    #[test]
+    fn a_mapped_address_loads() {
+        let mapped = DRIVER
+            .replace(
+                "bus \"i2c\" { address default=\"0x10\" allowed=\"0x08..=0x77\" }",
+                "bus \"i2c\" { address default=\"0x10\" allowed=\"0x10..=0x11\" }",
+            )
+            .replace(
+                "        feature \"demo\"\n",
+                "        feature \"demo\"\n        map \"address\" {\n            \"0x10\" { expr \"demo::Address::First\" }\n            \"0x11\" { expr \"demo::Address::Second\" }\n        }\n",
+            );
+        let schema = load(&mapped).expect("a mapped address loads");
+        let recipe = schema
+            .element("demo")
+            .expect("tag")
+            .device_recipe
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            recipe.address_map,
+            Some(vec![
+                (0x10, "demo::Address::First".to_string()),
+                (0x11, "demo::Address::Second".to_string()),
+            ])
+        );
+    }
+
+    /// The map must cover exactly what the bus allows, or lowering could meet
+    /// an address it has no value for.
+    #[test]
+    fn a_mapped_address_needs_a_complete_range() {
+        let bad = DRIVER
+            .replace(
+                "bus \"i2c\" { address default=\"0x10\" allowed=\"0x08..=0x77\" }",
+                "bus \"i2c\" { address default=\"0x10\" allowed=\"0x10..=0x11\" }",
+            )
+            .replace(
+                "        feature \"demo\"\n",
+                "        feature \"demo\"\n        map \"address\" { \"0x10\" { expr \"demo::Address::First\" } }\n",
+            );
         let errors = load(&bad).unwrap_err();
         assert!(
             errors
                 .iter()
-                .any(|error| error.message.contains("must come directly after the bus argument")),
+                .any(|error| error.message == "`map \"address\"` has no entry for `0x11`"),
+            "{errors:?}"
+        );
+    }
+
+    /// Without an allowed range the address set is all of `0x08..=0x77`, so a
+    /// map would silently cover nothing.
+    #[test]
+    fn a_mapped_address_needs_a_finite_range() {
+        let bad = DRIVER
+            .replace(
+                "bus \"i2c\" { address default=\"0x10\" allowed=\"0x08..=0x77\" }",
+                "bus \"i2c\" { address default=\"0x10\" }",
+            )
+            .replace(
+                "        feature \"demo\"\n",
+                "        feature \"demo\"\n        map \"address\" { \"0x10\" { expr \"demo::Address::First\" } }\n",
+            );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "`map \"address\"` in `demo` has no address range"),
+            "{errors:?}"
+        );
+    }
+
+    /// A map nothing reads is a mistake, even on a part at a fixed address.
+    #[test]
+    fn a_mapped_address_must_reach_the_constructor() {
+        let bad = DRIVER
+            .replace(
+                "bus \"i2c\" { address default=\"0x10\" allowed=\"0x08..=0x77\" }",
+                "bus \"i2c\" { address fixed=\"0x10\" }",
+            )
+            .replace(
+                "constructor \"demo::Demo::new({bus_device}, {address})\"",
+                "constructor \"demo::Demo::new({bus_device})\"",
+            )
+            .replace(
+                "        feature \"demo\"\n",
+                "        feature \"demo\"\n        map \"address\" { \"0x10\" { expr \"demo::Address::First\" } }\n",
+            );
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "`map \"address\"` in `demo` is not used"),
             "{errors:?}"
         );
     }

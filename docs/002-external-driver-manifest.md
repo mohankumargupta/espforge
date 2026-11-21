@@ -421,6 +421,25 @@ map "rotation" {
 
 Then `{size}` can be substituted into both `type "Ssd1306Display<{size}>"` and `constructor "...({size}, {rotation})"`. A `type` map may fill a generic parameter; an `expr` map stands where a value is expected. `map` nodes may appear before or after the `runtime` blocks.
 
+`map "address"` is the one map that does not name an attribute: the address belongs to `bus "i2c"`, and the map gives each address the driver allows the crate's own type. It needs a finite set, so the bus must declare `fixed=` or `allowed="low..=high"`, and every address in that set needs an entry (a range for `pcf857x`, a single address for `hdc302x`):
+
+```kdl
+bus "i2c" { address allowed="0x20..=0x27" }
+codegen {
+    map "address" {
+        "0x20" { expr "pcf857x::SlaveAddr::Alternative(false, false, false)" }
+        "0x21" { expr "pcf857x::SlaveAddr::Alternative(true, false, false)" }
+        ...
+    }
+    runtime "blocking" {
+        constructor "pcf857x::Pcf857x::new({bus_device}, {address})"
+        ...
+    }
+}
+```
+
+Entries are expressions; `type` is refused, because an address fills a value. The element still writes the plain 7-bit address, and lowering turns it into the mapped expression, including inside a wrapper argument (`Address::from({address})`).
+
 *(Clever trick used in `sht31.kdl` / `bme680.kdl`: if a driver needs `espforge_runtime::Delay::new()` as an argument, you can declare `attr "delay" kind="choice" default="runtime" { choices "runtime" }` and map `"runtime" { expr "espforge_runtime::Delay::new()" }` so `{delay}` injects the delay automatically without the user ever writing it in `.espf`.)*
 
 ### 5.4 `{placeholders}` vs fixed values
@@ -428,7 +447,7 @@ Then `{size}` can be substituted into both `type "Ssd1306Display<{size}>"` and `
 Inside `constructor "..."`, `espforge` replaces `{holes}` from a closed set checked at load time with `syn`:
 
 * `{bus_device}` (or `{spi_device}`): the bus endpoint. It is the first argument of a bus device, or sits inside the first argument when that argument is a wrapper call (`Type::new(Wrapper::new({bus_device}), ..)`). A busless driver refuses it.
-* `{address}`: the I²C 7-bit address as a number (`68` for `0x44`). It may stand as its own argument after the bus or inside the same wrapped first argument. It is refused when the bus declares no address, and on a non-I²C bus.
+* `{address}`: the I²C 7-bit address as a number (`68` for `0x44`), or the expression a `map "address"` entry names. It may stand as its own argument directly after the bus, inside the wrapped first argument, or inside an argument of its own that directly follows the bus (`hdc302x::I2cAddr::try_from({address}).unwrap()`). It is refused when the bus declares no address, and on a non-I²C bus.
 * `{cs_pin}`: the SPI chip-select line as a pin expression. SPI only.
 * `{dc_pin}` or `{dc}`: a claimed `pin "..."` converted into an `Output`, `Input`, `Bidirectional` or `OpenDrainPin` per its `direction`. Both spellings mean the same line.
 * `{any_mapped_attr}`: replaced by whatever `map "any_mapped_attr"` resolves to. Every non-pin attribute used as a hole must have a `map`.

@@ -553,6 +553,9 @@ pub struct DeviceRecipe {
     pub address_default: Option<u8>,
     /// The inclusive range the address must fall in (v2 `bus` allowed).
     pub address_allowed: Option<(u8, u8)>,
+    /// `map "address"`: the crate's own value for each address the bus
+    /// allows, keyed by byte. `None` passes the address as a number.
+    pub address_map: Option<Vec<(u8, String)>>,
     /// The companion drivers this one composes (`compose "<tag>" { .. }`).
     ///
     /// A composite is a driver plus its sub-chips: the parent's own device and
@@ -2144,6 +2147,7 @@ fn parse_device_recipe(
         address,
         address_default: None,
         address_allowed: None,
+        address_map: None,
         parts: Vec::new(),
         dependencies: Vec::new(),
         transports: Vec::new(),

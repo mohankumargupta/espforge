@@ -929,15 +929,28 @@ fn slots(
     // boot. Anything else is a manifest error the schema already reported.
     let mut boot_values: BTreeMap<String, RustExpr> = BTreeMap::new();
     let mut factory_values: BTreeMap<String, RustExpr> = BTreeMap::new();
+    // `{address}` is the element's. A recipe that maps it turns each address
+    // into the crate's own value; without a map it is the 7-bit number.
+    let mapped_address = address.and_then(|address| {
+        recipe.address_map.as_ref().map(|entries| {
+            entries
+                .iter()
+                .find(|(known, _)| *known == address)
+                .map(|(_, text)| text.as_str())
+                .unwrap_or_else(|| panic!("`<{tag}>` has no mapping for address 0x{address:02X}"))
+        })
+    });
     for arg in &recipe.args {
-        // `{address}` is filled from the element itself, at the position the
-        // manifest gave it, and travels to a deferred factory as a constant.
+        // The address travels to a deferred factory as a constant.
         if matches!(arg, CtorArg::Address) {
             let Some(address) = address else {
                 // The schema refuses `{address}` on a bus that has none.
                 continue;
             };
-            let expression = RustExpr::number(address as u64);
+            let expression = match mapped_address {
+                Some(text) => rust_expr(cx, node, tag, id, "the mapped address", text)?,
+                None => RustExpr::number(address as u64),
+            };
             args.push(expression.clone());
             factory_args.push(FactoryArg::Constant(expression.clone()));
             boot_values.insert("address".to_string(), expression.clone());
@@ -951,11 +964,22 @@ fn slots(
         // knows it. A `{bus_device}` hole stays a sentinel: the endpoint does
         // not exist until emission builds the bus.
         if let CtorArg::Fixed { text, .. } = arg {
-            let text = match address {
-                Some(address) => text.replace("{address}", &address.to_string()),
-                None => text.clone(),
+            // Parse the template once: `{bus_device}` stays a sentinel for
+            // emission, and `{address}` is spliced here as an expression
+            // rather than text, so a string literal keeps its braces.
+            let template = RustExpr::parse_template(text).map_err(|message| {
+                invalid_recipe(cx, node, tag, id, "a constructor argument", &message)
+            })?;
+            let expression = match address {
+                Some(address) => {
+                    let value = match mapped_address {
+                        Some(text) => rust_expr(cx, node, tag, id, "the mapped address", text)?,
+                        None => RustExpr::number(address as u64),
+                    };
+                    template.splice(&BTreeMap::from([("address".to_string(), value)]))
+                }
+                None => template,
             };
-            let expression = rust_expr(cx, node, tag, id, "a constructor argument", &text)?;
             args.push(expression.clone());
             factory_args.push(FactoryArg::Constant(expression));
             continue;

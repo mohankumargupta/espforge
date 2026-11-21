@@ -1743,6 +1743,67 @@ mod tests {
         assert_eq!(board.driver_deps(), ["embedded-graphics"]);
     }
 
+    /// A crate that takes its own address type: the map turns the element's
+    /// 7-bit address into the expression its constructor wants.
+    const MAPPED_ADDRESS: &str = r##"
+driver "address_probe" {
+    format_version 2
+    summary "test"
+    category "sensor"
+    dependency "address-crate" { version "1.0.0" }
+    bus "i2c" { address allowed="0x20..=0x21" }
+    codegen {
+        map "address" {
+            "0x20" { expr "address_crate::Addr::First" }
+            "0x21" { expr "address_crate::Addr::Second" }
+        }
+        runtime "blocking" {
+            type "address_crate::Probe"
+            constructor "address_crate::Probe::new({bus_device}, address_crate::Addr::from({address}))"
+        }
+    }
+    example "minimal" #"<address_probe id="probe" bus="$i2c0" address="0x21" />"#
+}
+"##;
+
+    #[test]
+    fn a_mapped_address_reaches_the_constructor_as_an_expression() {
+        let session = Session::compose(&[(
+            "address-probe.schema.kdl".to_string(),
+            MAPPED_ADDRESS.to_string(),
+        )])
+        .expect("the address probe loads");
+        let src = "# espforge\n\
+             \x20 <project name=\"mapped\" />\n\
+             \x20 <chip type=\"esp32c3\" />\n\
+             \x20 <runtime type=\"blocking\" />\n\
+             # peripherals\n\
+             \x20 <i2c id=\"i2c0\" sda=\"6\" scl=\"7\" />\n\
+             # devices\n\
+             \x20 <address_probe id=\"probe\" bus=\"$i2c0\" address=\"0x21\" />\n\
+             # services\n";
+        let parsed = parse_espf(&src);
+        let section = |name: &str| parsed.sections.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let mut meta = meta();
+        meta.runtime = Runtime::Blocking;
+        let board = lower(
+            meta,
+            section("peripherals"),
+            section("devices"),
+            section("services"),
+            &session,
+        )
+        .expect("the mapped address lowers");
+        let probe = board.devices[0].as_bus().expect("a bus device");
+        assert_eq!(
+            probe.driver.args,
+            [crate::model::RustExpr::parse(
+                "address_crate::Addr::from(address_crate::Addr::Second)"
+            )
+            .unwrap()]
+        );
+    }
+
     /// A composite and its companion: one spec element, two devices.
     const COMPOSED_DRIVERS: &str = r##"
 driver "panel" {
