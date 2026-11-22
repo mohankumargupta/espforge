@@ -1,0 +1,16 @@
+==========================
+RMT TX EXAMPLE (ASYNC)
+==========================
+
+# espforge
+  <project name="rmt_tx_async" />
+  <chip type="esp32c3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <rmt id="rmt0" />
+
+# devices
+  <rmt_tx id="ir_tx" bus="$rmt0" pin="4" channel="0" />
+
+# services

@@ -47,6 +47,12 @@ scd4x = []
 adxl345 = []
 adxl345-async = ["adxl345", "dep:embedded-hal-async", "espforge-runtime/embassy"]
 
+# The WS2812 / NeoPixel strip driver. `ws2812-rmt` is the blocking wrapper and
+# brings the runtime's RMT endpoints with it; `ws2812-rmt-async` adds the async
+# wrapper and the runtime's embassy feature.
+ws2812-rmt = ["espforge-runtime/rmt"]
+ws2812-rmt-async = ["ws2812-rmt", "espforge-runtime/embassy"]
+
 # Drivers only build for esp targets, so keep esp-hal invisible to host builds.
 [target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
 esp-hal = { version = "1", features = ["unstable"] }

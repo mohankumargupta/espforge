@@ -135,6 +135,12 @@ codes! {
     PIN_CAPS_MISSING = "E0519";
     /// A claim on a strapping pin: the level at boot selects a boot mode.
     GPIO_STRAPPING = "W0520";
+    /// A `<rmt>` on a chip with no RMT peripheral (`esp32c2`, `esp32c61`).
+    RMT_NOT_SUPPORTED = "E0530";
+    /// An `<rmt>` id that is not `rmt0`.
+    RMT_INVALID_ID = "E0531";
+    /// An `<rmt frequency>` that is not a frequency, or is 0.
+    RMT_INVALID_FREQUENCY = "E0532";
 
     /// An `<led>` that cannot be built.
     COMPONENT_INVALID_LED = "E0601";
@@ -221,6 +227,11 @@ codes! {
     /// Two devices of one crate whose blocking and async features are
     /// mutually exclusive: a project cannot enable both halves.
     DEVICE_DRIVER_MODE_CONFLICT = "E0911";
+    /// Every TX (or RX) RMT channel on the block is already claimed.
+    RMT_CHANNEL_UNAVAILABLE = "E0912";
+    /// A requested RMT channel is wrong-direction, already claimed, or out of
+    /// range.
+    RMT_CHANNEL_CONFLICT = "E0913";
 
     /// `env:` with no name, or a name that is not an identifier.
     SUBSTITUTION_INVALID_NAME = "E1201";
@@ -277,11 +288,11 @@ mod tests {
                         | 301
                         | 302
                         | 306..=317
-                        | 501..=521
+                        | 501..=532
                         | 601..=623
                         | 701..=709
                         | 801..=807
-                        | 901..=911
+                        | 901..=913
                         | 1201..=1203
                 ),
                 "{} is outside the codes this slice defines",

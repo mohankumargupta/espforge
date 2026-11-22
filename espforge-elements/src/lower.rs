@@ -150,6 +150,8 @@ fn check_bus_gpio_declarations(cx: &mut LowerCx<'_>) {
                     .collect(),
             ),
             Bus::Uart { id, tx, rx, .. } => ("uart", id, vec![tx.pin().0, rx.pin().0]),
+            // A block-level bus owns no pins; its channels claim their own.
+            Bus::Rmt { .. } => continue,
         };
         for gpio in &gpios {
             if pins.contains(&gpio.pin) {
@@ -264,6 +266,7 @@ fn check_bus_modes(cx: &mut LowerCx<'_>) {
             Some(Bus::I2c { .. }) => "i2c",
             Some(Bus::Spi { .. }) => "spi",
             Some(Bus::Uart { .. }) => "uart",
+            Some(Bus::Rmt { .. }) => "rmt",
             None => "bus",
         };
         let bus_id = cx
@@ -425,7 +428,7 @@ fn known_tags(section: &str, session: &Session) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::Lowered;
+    use crate::element::{EmitCx, Lowered};
     use crate::model::{
         BusDevice, BusTransport, Console, Device, Direction, Driver, I2cTransport, OwnerKind, Pin,
         PinDeviceKind, PinUse, ProtocolService, Runtime, Service,
@@ -620,7 +623,7 @@ mod tests {
         assert_eq!(errors[0].code, codes::PERIPHERAL_UNSUPPORTED);
         assert_eq!(
             errors[0].message,
-            "`<pwm>` is not a known element in `# peripherals`; known: `<gpio>`, `<i2c>`, `<spi>`, `<uart>`, `<wifi>`"
+            "`<pwm>` is not a known element in `# peripherals`; known: `<gpio>`, `<i2c>`, `<spi>`, `<uart>`, `<rmt>`, `<wifi>`"
         );
     }
 
@@ -649,7 +652,7 @@ mod tests {
         assert_eq!(errors[0].code, codes::DEVICE_UNSUPPORTED);
         assert_eq!(
             errors[0].message,
-            "`<pwm>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`, `<sht4x>`, `<ads111x>`, `<bme680>`, `<mhz19b>`, `<hx711>`, `<dht22>`, `<tm1637>`"
+            "`<pwm>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<rmt_tx>`, `<rmt_rx>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`, `<sht4x>`, `<ads111x>`, `<bme680>`, `<mhz19b>`, `<hx711>`, `<dht22>`, `<tm1637>`, `<ws2812_rmt>`"
         );
     }
 
@@ -819,7 +822,7 @@ mod tests {
         assert_eq!(errors[0].code, codes::PERIPHERAL_UNSUPPORTED);
         assert_eq!(
             errors[0].message,
-            "`<button>` is not a known element in `# peripherals`; known: `<gpio>`, `<i2c>`, `<spi>`, `<uart>`, `<wifi>`"
+            "`<button>` is not a known element in `# peripherals`; known: `<gpio>`, `<i2c>`, `<spi>`, `<uart>`, `<rmt>`, `<wifi>`"
         );
     }
 
@@ -1065,6 +1068,375 @@ mod tests {
         assert_eq!(
             board.resources.claim_of(Pin(6)).unwrap().need,
             PinUse::Unspecified
+        );
+    }
+
+    const RMT: &str = "# espforge\n\
+        \x20 <project name=\"rmt\" />\n\
+        \x20 <chip type=\"esp32c3\" />\n\
+        \x20 <runtime type=\"blocking\" />\n\
+        # peripherals\n\
+        \x20 <rmt id=\"rmt0\" />\n\
+        # devices\n\
+        # services\n";
+
+    /// `<rmt>` is a block, not a usable handle: it publishes the bus, claims
+    /// the peripheral, and emits no `Devices` field of its own.
+    #[test]
+    fn rmt_lowers_to_a_bus_and_no_device() {
+        let board = lower_src(RMT).expect("rmt lowers");
+        assert!(board.devices.is_empty(), "`<rmt>` builds no device");
+        let Bus::Rmt {
+            peripheral, khz, ..
+        } = &board.resources.buses()[0]
+        else {
+            panic!("the bus is an RMT block");
+        };
+        assert_eq!(peripheral, "RMT");
+        assert_eq!(*khz, 80_000);
+    }
+
+    /// The source clock is a chip fact: `esp32h2` counts pulse lengths against
+    /// its 32MHz crystal, not the 80MHz APB clock.
+    #[test]
+    fn the_default_rmt_clock_follows_the_chip() {
+        let board = lower_on("esp32h2", RMT).expect("rmt lowers on h2");
+        let Bus::Rmt { khz, .. } = &board.resources.buses()[0] else {
+            panic!("the bus is an RMT block");
+        };
+        assert_eq!(*khz, 32_000);
+    }
+
+    #[test]
+    fn rmt_is_refused_on_a_chip_without_one() {
+        let errors = lower_on("esp32c2", RMT).unwrap_err();
+        assert_eq!(errors[0].code, codes::RMT_NOT_SUPPORTED);
+        assert!(errors[0].labels[0].text.contains("esp32c2"), "{errors:?}");
+    }
+
+    #[test]
+    fn the_rmt_id_is_rmt0_and_its_frequency_is_a_positive_clock() {
+        let errors = lower_src(&RMT.replace("rmt0", "rmt1")).unwrap_err();
+        assert_eq!(errors[0].code, codes::RMT_INVALID_ID);
+
+        let errors =
+            lower_src(&RMT.replace("id=\"rmt0\"", "id=\"rmt0\" frequency=\"0kHz\"")).unwrap_err();
+        assert_eq!(errors[0].code, codes::RMT_INVALID_FREQUENCY);
+    }
+
+    /// A minimal project with one `<rmt>` and the given `# devices` body.
+    fn rmt_source(devices: &str) -> String {
+        format!(
+            "# espforge\n  <project name=\"rmt\" />\n  <chip type=\"esp32c3\" />\n  \
+             <runtime type=\"blocking\" />\n# peripherals\n  <rmt id=\"rmt0\" />\n\
+             # devices\n{devices}\n# services\n"
+        )
+    }
+
+    #[test]
+    fn two_rmt_tx_channels_share_one_block() {
+        let src = rmt_source(
+            "  <rmt_tx id=\"ir_tx\" bus=\"$rmt0\" pin=\"4\" />\n  \
+             <rmt_tx id=\"led_tx\" bus=\"$rmt0\" pin=\"5\" />",
+        );
+        let board = lower_src(&src).expect("both channels lower");
+        assert_eq!(board.devices.len(), 2);
+        assert_eq!(board.resources.buses().len(), 1, "one Rmt block");
+        let mut channels = Vec::new();
+        for device in &board.devices {
+            let Device::Rmt(device) = device else {
+                panic!("a raw channel is Device::Rmt");
+            };
+            assert_eq!(device.transport.direction, crate::model::RmtDirection::Tx);
+            channels.push(device.transport.channel);
+            assert_eq!(
+                board
+                    .resources
+                    .claim_of(device.transport.pin.pin())
+                    .unwrap()
+                    .need,
+                PinUse::Output
+            );
+        }
+        channels.sort_unstable();
+        assert_eq!(
+            channels,
+            [0, 1],
+            "auto-allocation takes the next free channel"
+        );
+    }
+
+    #[test]
+    fn rmt_auto_allocation_skips_a_manually_claimed_channel() {
+        let src = rmt_source(
+            "  <rmt_tx id=\"manual\" bus=\"$rmt0\" pin=\"4\" channel=\"0\" />\n  \
+             <rmt_tx id=\"auto\" bus=\"$rmt0\" pin=\"5\" />",
+        );
+        let board = lower_src(&src).expect("both channels lower");
+        let Device::Rmt(auto) = &board.devices[1] else {
+            panic!("a raw channel is Device::Rmt");
+        };
+        assert_eq!(auto.transport.channel, 1);
+    }
+
+    #[test]
+    fn a_tx_channel_must_be_a_tx_channel_on_the_chip() {
+        // On esp32c3 channel 2 exists, but only as an RX channel.
+        let src = rmt_source("  <rmt_tx id=\"ir_tx\" bus=\"$rmt0\" pin=\"4\" channel=\"2\" />");
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::RMT_CHANNEL_CONFLICT);
+        assert!(
+            errors[0].labels[0].text.contains("not a TX channel"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_duplicate_rmt_channel_is_refused() {
+        let src = rmt_source(
+            "  <rmt_tx id=\"one\" bus=\"$rmt0\" pin=\"4\" channel=\"0\" />\n  \
+             <rmt_tx id=\"two\" bus=\"$rmt0\" pin=\"5\" channel=\"0\" />",
+        );
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::RMT_CHANNEL_CONFLICT);
+    }
+
+    #[test]
+    fn the_rmt_tx_pool_can_be_exhausted() {
+        let devices = (4..9)
+            .map(|pin| format!("  <rmt_tx id=\"tx{pin}\" bus=\"$rmt0\" pin=\"{pin}\" />"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // esp32s3 exposes TX channels 0..=3, so the fifth channel has nowhere
+        // to go even though the pins are free.
+        let errors = lower_on("esp32s3", &rmt_source(&devices)).unwrap_err();
+        assert_eq!(errors[0].code, codes::RMT_CHANNEL_UNAVAILABLE);
+    }
+
+    #[test]
+    fn an_rmt_pin_cannot_be_shared_with_an_led() {
+        let src = rmt_source(
+            "  <led id=\"red\" pin=\"4\" />\n  <rmt_tx id=\"ir_tx\" bus=\"$rmt0\" pin=\"4\" />",
+        );
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::CONFLICT_PIN);
+    }
+
+    #[test]
+    fn an_rmt_tx_pin_must_be_output_capable() {
+        let src = rmt_source("  <rmt_tx id=\"ir_tx\" bus=\"$rmt0\" pin=\"34\" />");
+        let errors = lower_on("esp32", &src).unwrap_err();
+        assert_eq!(errors[0].code, codes::GPIO_NOT_OUTPUT_CAPABLE);
+    }
+
+    #[test]
+    fn an_rmt_rx_rejects_the_transmit_only_attributes() {
+        let src =
+            rmt_source("  <rmt_rx id=\"ir_rx\" bus=\"$rmt0\" pin=\"5\" carrier_hz=\"38000\" />");
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::ATTR_UNKNOWN);
+        assert!(
+            errors[0].labels[0].text.contains("carrier_hz"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn an_rmt_channel_cannot_be_deferred() {
+        let src = rmt_source("  <rmt_tx id=\"ir_tx\" bus=\"$rmt0\" pin=\"4\" init=\"deferred\" />");
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::DEVICE_INVALID);
+        assert!(
+            errors[0].labels[0]
+                .text
+                .contains("remove `init=\"deferred\"`"),
+            "{errors:?}"
+        );
+    }
+
+    /// A channel is claimed before its values are checked, so a rejected
+    /// element must roll the claim back: otherwise the next element asking for
+    /// channel 0 would get `E0913` too.
+    #[test]
+    fn a_rejected_rmt_channel_releases_its_claim() {
+        let src = rmt_source(
+            "  <rmt_tx id=\"bad\" bus=\"$rmt0\" pin=\"4\" channel=\"0\" clk_divider=\"0\" />\n  \
+             <rmt_tx id=\"good\" bus=\"$rmt0\" pin=\"5\" channel=\"0\" />",
+        );
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(
+            errors.len(),
+            1,
+            "only the bad divider is an error: {errors:?}"
+        );
+        assert_eq!(errors[0].code, codes::DEVICE_INVALID);
+    }
+
+    #[test]
+    fn the_carrier_is_kept_for_emission() {
+        let src = rmt_source(
+            "  <rmt_tx id=\"ir_tx\" bus=\"$rmt0\" pin=\"4\" carrier_hz=\"38000\" duty=\"33\" />",
+        );
+        let board = lower_src(&src).expect("the carrier lowers");
+        let Device::Rmt(device) = &board.devices[0] else {
+            panic!("a raw channel is Device::Rmt");
+        };
+        assert_eq!(
+            device.transport.carrier,
+            Some(crate::model::Carrier {
+                hz: 38_000,
+                duty: 33
+            })
+        );
+    }
+
+    /// Two channels emit one `Rmt::new`, before the first channel is moved
+    /// out of the block (plan R4).
+    #[test]
+    fn two_channels_emit_one_rmt_new_before_any_channel_move() {
+        let src = rmt_source(
+            "  <rmt_tx id=\"ir_tx\" bus=\"$rmt0\" pin=\"4\" />\n  \
+             <rmt_tx id=\"led_tx\" bus=\"$rmt0\" pin=\"5\" />",
+        );
+        let board = lower_src(&src).expect("both channels lower");
+        let mut cx = EmitCx::new();
+        for device in &board.devices {
+            device.emit(&board, &mut cx);
+        }
+        let parts = cx.into_parts();
+        let prelude = parts
+            .device_prelude
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(prelude.matches("Rmt :: new").count(), 1, "{prelude}");
+
+        // Each channel is moved out of the block by its own field initialiser,
+        // after the prelude that creates the block. Nothing later touches the
+        // whole `Rmt`, which is what makes the two partial moves legal.
+        let inits = parts
+            .device_inits
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(inits.len(), 2, "one initialiser per channel");
+        assert!(inits[0].contains("channel0"), "{inits:?}");
+        assert!(inits[1].contains("channel1"), "{inits:?}");
+    }
+
+    /// The bundled WS2812 driver lowers through the same `RmtTransport` as a
+    /// raw channel, but keeps its manifest feature and channel settings.
+    #[test]
+    fn the_ws2812_manifest_lowers_to_an_rmt_transport() {
+        let src = rmt_source("  <ws2812_rmt id=\"strip\" bus=\"$rmt0\" pin=\"8\" />");
+        let board = lower_src(&src).expect("the strip lowers");
+        let device = board.devices[0]
+            .as_bus()
+            .expect("the strip is a bus device");
+        let BusTransport::Rmt(transport) = &device.transport else {
+            panic!("the strip rides an RMT transport");
+        };
+        assert_eq!(transport.direction, crate::model::RmtDirection::Tx);
+        assert_eq!(transport.channel, 0, "the lowest free TX channel");
+        assert_eq!(transport.clk_divider, 1);
+        assert_eq!(transport.idle_level, crate::model::RmtLevel::Low);
+        assert_eq!(transport.carrier, None);
+        assert_eq!(board.driver_features(), ["ws2812-rmt"]);
+    }
+
+    #[test]
+    fn an_rmt_bus_device_channel_must_exist_in_its_direction() {
+        let src = rmt_source("  <ws2812_rmt id=\"strip\" bus=\"$rmt0\" pin=\"8\" channel=\"2\" />");
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::RMT_CHANNEL_CONFLICT);
+        assert!(
+            errors[0].labels[0].text.contains("not a TX channel"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn an_rmt_bus_device_rejects_an_address_attribute() {
+        let src =
+            rmt_source("  <ws2812_rmt id=\"strip\" bus=\"$rmt0\" pin=\"8\" address=\"0x3C\" />");
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::ATTR_UNKNOWN);
+        assert!(errors[0].labels[0].text.contains("address"), "{errors:?}");
+    }
+
+    #[test]
+    fn a_strip_pin_cannot_be_shared_with_an_led() {
+        let src = rmt_source(
+            "  <led id=\"red\" pin=\"8\" />\n  <ws2812_rmt id=\"strip\" bus=\"$rmt0\" pin=\"8\" />",
+        );
+        let errors = lower_src(&src).unwrap_err();
+        assert_eq!(errors[0].code, codes::CONFLICT_PIN);
+    }
+
+    /// Two drivers on one RMT block cannot disagree about the block's mode:
+    /// `Rmt::new` is blocking or async for the whole block.
+    const RMT_MODE_PROBE: &str = r##"
+driver "rmt_blocking" {
+    format_version 2
+    summary "blocking strip"
+    category "display"
+    bus "rmt" { direction "tx" }
+    codegen {
+        feature "rmt-blocking"
+        runtime "blocking" {
+            type "demo::BlockingStrip"
+            constructor "demo::BlockingStrip::new({bus_device})"
+            endpoint "espforge_runtime::BlockingRmtTxEndpoint"
+        }
+    }
+    example "minimal" #"<rmt_blocking id="b" bus="$rmt0" pin="4" />"#
+}
+
+driver "rmt_async" {
+    format_version 2
+    summary "async strip"
+    category "display"
+    bus "rmt" { direction "tx" }
+    codegen {
+        feature "rmt-async"
+        runtime "async" {
+            type "demo::AsyncStrip"
+            constructor "demo::AsyncStrip::new({bus_device})"
+            endpoint "espforge_runtime::AsyncRmtTxEndpoint"
+        }
+    }
+    example "minimal" #"<rmt_async id="a" bus="$rmt0" pin="5" />"#
+}
+"##;
+
+    #[test]
+    fn a_blocking_and_an_async_driver_cannot_share_one_rmt_block() {
+        let session = Session::compose(&[(
+            "rmt-mode.schema.kdl".to_string(),
+            RMT_MODE_PROBE.to_string(),
+        )])
+        .expect("the probe schema loads");
+        let src = "# espforge\n  <project name=\"rmt_mode\" />\n  <chip type=\"esp32c3\" />\n  \
+                   <runtime type=\"embassy\" />\n# peripherals\n  <rmt id=\"rmt0\" />\n\
+                   # devices\n  <rmt_blocking id=\"b\" bus=\"$rmt0\" pin=\"4\" />\n  \
+                   <rmt_async id=\"a\" bus=\"$rmt0\" pin=\"5\" />\n# services\n";
+        let parsed = parse_espf(src);
+        let section = |name: &str| parsed.sections.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let mut meta = meta();
+        meta.runtime = Runtime::Embassy;
+        let errors = lower(
+            meta,
+            section("peripherals"),
+            section("devices"),
+            section("services"),
+            &session,
+        )
+        .unwrap_err();
+        assert_eq!(errors[0].code, codes::DEVICE_BUS_MODE_CONFLICT);
+        assert!(
+            errors[0].labels[0].text.contains("<rmt_async id=\"a\">"),
+            "{errors:?}"
         );
     }
 
@@ -2443,7 +2815,7 @@ driver "shared_async" {
         assert_eq!(errors[0].code, codes::DEVICE_UNSUPPORTED);
         assert_eq!(
             errors[0].message,
-            "`<st7789>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`, `<sht4x>`, `<ads111x>`, `<bme680>`, `<mhz19b>`, `<hx711>`, `<dht22>`, `<tm1637>`"
+            "`<st7789>` is not a known element in `# devices`; known: `<led>`, `<button>`, `<rmt_tx>`, `<rmt_rx>`, `<ssd1306>`, `<ili9341>`, `<scd4x>`, `<adxl345>`, `<sht31>`, `<sht4x>`, `<ads111x>`, `<bme680>`, `<mhz19b>`, `<hx711>`, `<dht22>`, `<tm1637>`, `<ws2812_rmt>`"
         );
     }
 
@@ -2562,7 +2934,7 @@ driver "shared_async" {
             .iter()
             .filter_map(|device| match &device.as_bus()?.transport {
                 BusTransport::Spi(spi) => Some(spi.cs.pin().0),
-                BusTransport::I2c(_) | BusTransport::Uart(_) => None,
+                BusTransport::I2c(_) | BusTransport::Uart(_) | BusTransport::Rmt(_) => None,
             })
             .collect();
         assert_eq!(pins, [9, 10]);

@@ -110,6 +110,13 @@ wss-client = ["ws-client", "dep:embedded-tls"]
 # The chip feature is supplied by the generated project, as for `esp-hal`.
 ota = ["dep:esp-hal-ota", "dep:esp-storage"]
 
+# Raw RMT pulse channels (`<rmt>`, `<rmt_tx>`, `<rmt_rx>`). A cargo feature,
+# not a chip cfg: `esp-hal`'s build-script cfgs do not cross crates, and this
+# crate declares no chip features. `esp32c2`/`esp32c61` never enable it because
+# lowering refuses `<rmt>` there, so `esp_hal::rmt` is never named on a chip
+# without the peripheral.
+rmt = []
+
 # The outgoing SNTP client (`NtpClient`). Like the other network services it
 # implies `wifi`: the only network provider today is a station's stack.
 ntp = ["wifi", "dep:sntpc"]

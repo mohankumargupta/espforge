@@ -1,0 +1,19 @@
+==================
+WS2812 RGB STRIP EXAMPLE
+
+A three-pixel NeoPixel strip driven by one blocking RMT channel. The driver
+turns each RGB byte into 24 RMT pulses and latches the frame with a low period.
+==================
+
+# espforge
+  <project name="ws2812" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <rmt id="rmt0" />
+
+# devices
+  <ws2812_rmt id="strip" bus="$rmt0" pin="8" />
+
+# services

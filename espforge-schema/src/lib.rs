@@ -496,14 +496,73 @@ pub enum CsPolarity {
     High,
 }
 
+/// Which way a `bus "rmt"` driver moves pulses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RmtBusDirection {
+    Tx,
+    Rx,
+}
+
+impl RmtBusDirection {
+    /// The schema spelling (`tx`/`rx`).
+    pub fn word(self) -> &'static str {
+        match self {
+            RmtBusDirection::Tx => "tx",
+            RmtBusDirection::Rx => "rx",
+        }
+    }
+}
+
+/// The idle output level of an RMT bus driver's channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RmtBusIdle {
+    Low,
+    High,
+}
+
+/// The `bus "rmt"` block of a driver manifest.
+///
+/// RMT is not one of the address/chip-select buses: a driver states the
+/// direction its channel moves, and the element synthesizes only `pin` and
+/// `channel`. Timings are facts of the driver, not project attributes, so the
+/// block is the one place they can be declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RmtBusConfig {
+    /// Required: a driver that does not say TX or RX cannot allocate a channel.
+    pub direction: RmtBusDirection,
+    /// The channel divider, 1..=255.
+    pub clk_divider: u8,
+    /// TX only: the level the line idles at.
+    pub idle_level: RmtBusIdle,
+    /// TX only: carrier modulation frequency, when the driver needs one.
+    pub carrier_hz: Option<u32>,
+    /// Carrier duty cycle percentage, 1..=100; ignored without `carrier_hz`.
+    pub duty: u8,
+}
+
+impl Default for RmtBusConfig {
+    fn default() -> Self {
+        Self {
+            direction: RmtBusDirection::Tx,
+            clk_divider: 1,
+            idle_level: RmtBusIdle::Low,
+            carrier_hz: None,
+            duty: 50,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceRecipe {
-    /// The bus kind the device binds to: `i2c`, `spi` or `uart`.
+    /// The bus kind the device binds to: `i2c`, `spi`, `uart` or `rmt`.
     ///
     /// The element carries a `bus="$<peripheral id>"` attribute; this word is
     /// the peripheral tag that reference must name, so a display on an SPI bus
     /// is refused at lowering instead of failing in `rustc`.
     pub bus: String,
+    /// The channel settings a `bus "rmt"` driver declared, `None` on every
+    /// other bus kind.
+    pub rmt: Option<RmtBusConfig>,
     /// The `espforge-drivers` feature the generated project names.
     pub feature: String,
     /// The kind word the diagnostics use ("display").
@@ -1937,11 +1996,11 @@ fn parse_device_recipe(
         ));
         return None;
     };
-    if !matches!(bus.as_str(), "i2c" | "spi" | "uart") {
+    if !matches!(bus.as_str(), "i2c" | "spi" | "uart" | "rmt") {
         errors.push(err(
             bus_span,
             format!("`{bus}` is not a bus kind"),
-            "write `bus \"i2c\"`, `bus \"spi\"` or `bus \"uart\"`",
+            "write `bus \"i2c\"`, `bus \"spi\"`, `bus \"uart\"` or `bus \"rmt\"`",
         ));
         return None;
     }
@@ -2143,6 +2202,7 @@ fn parse_device_recipe(
 
     Some(DeviceRecipe {
         bus,
+        rmt: None,
         feature,
         kind,
         ty,
@@ -3745,8 +3805,8 @@ options {
         }
         // The `# devices` elements live beside the drivers that implement
         // them (`espforge-drivers/drivers.schema.kdl`), so this file is the
-        // core vocabulary only: 20 elements.
-        assert_eq!(schema.elements.len(), 20);
+        // core vocabulary only: 23 elements.
+        assert_eq!(schema.elements.len(), 23);
         for tag in [
             "project",
             "chip",
@@ -3759,9 +3819,12 @@ options {
             "i2c",
             "spi",
             "uart",
+            "rmt",
             "wifi",
             "led",
             "button",
+            "rmt_tx",
+            "rmt_rx",
             "wifi_station",
             "http_client",
             "https_client",
@@ -3771,8 +3834,8 @@ options {
         ] {
             assert!(schema.element(tag).is_some(), "{tag}");
         }
-        assert_eq!(schema.elements_in("peripherals").count(), 5);
-        assert_eq!(schema.elements_in("devices").count(), 2);
+        assert_eq!(schema.elements_in("peripherals").count(), 6);
+        assert_eq!(schema.elements_in("devices").count(), 4);
         assert_eq!(schema.elements_in("services").count(), 6);
 
         // A provider declares the interface; a client names it, not a tag.

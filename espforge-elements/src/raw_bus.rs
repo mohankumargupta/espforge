@@ -87,6 +87,12 @@ pub fn emit_raw_buses(board: &Board, cx: &mut EmitCx) {
                 *baud,
                 *framing,
             ),
+            // `<rmt>` with no channel is intentionally field-less: `Rmt` is a
+            // bucket of unconfigured channel creators and cannot own a pin, so
+            // a raw handle would expose nothing usable. Raw pulse access is
+            // always an `<rmt_tx>`/`<rmt_rx>` channel (or a `bus "rmt"`
+            // driver), never `<rmt>` itself.
+            Bus::Rmt { .. } => continue,
         }
     }
 }

@@ -115,6 +115,15 @@ mod hw {
     pub use spi::*;
     pub use uart::*;
 
+    /// Raw RMT pulse channels ([`PulseCode`], [`RmtError`], the channel
+    /// endpoint aliases), behind the `rmt` feature: a project with no RMT
+    /// element never compiles `esp_hal::rmt`, which does not exist on
+    /// `esp32c2`/`esp32c61`.
+    #[cfg(feature = "rmt")]
+    mod rmt;
+    #[cfg(feature = "rmt")]
+    pub use rmt::*;
+
     /// The Wi-Fi station driver ([`Wifi`], [`WifiConfig`], [`WifiError`]),
     /// behind the `wifi` feature: a project with no radio never compiles it.
     #[cfg(feature = "wifi")]

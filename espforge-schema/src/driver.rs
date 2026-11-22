@@ -39,6 +39,14 @@ struct BusDecl {
     mode: Option<String>,
     frequency: Option<String>,
     cs_polarity: CsPolarity,
+    /// `bus "rmt"` settings; `None` for every other bus kind.
+    rmt: Option<RmtBusConfig>,
+    /// Where `direction` was written, so a missing one is located at the block
+    /// and a TX-only child on an RX bus at that child.
+    rmt_direction_span: Option<Range<usize>>,
+    rmt_idle_span: Option<Range<usize>>,
+    rmt_carrier_span: Option<Range<usize>>,
+    rmt_duty_span: Option<Range<usize>>,
     span: Range<usize>,
 }
 
@@ -603,11 +611,11 @@ fn parse_transport(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<Tran
         return None;
     }
     let (kind, kind_span) = names.remove(0);
-    if !matches!(kind.as_str(), "i2c" | "spi" | "uart" | "none") {
+    if !matches!(kind.as_str(), "i2c" | "spi" | "uart" | "rmt" | "none") {
         errors.push(err(
             kind_span,
             format!("`{kind}` is not a bus kind"),
-            "write `transport \"i2c\"`, `\"spi\"`, `\"uart\"` or `\"none\"`",
+            "write `transport \"i2c\"`, `\"spi\"`, `\"uart\"`, `\"rmt\"` or `\"none\"`",
         ));
         return None;
     }
@@ -684,6 +692,26 @@ fn parse_transport(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<Tran
 /// to, and lowering refuses a missing `address` or `cs` then.
 fn add_union_bus_attrs(bus: &BusDecl, attrs: &mut Vec<AttrDef>) {
     match bus.kind.as_str() {
+        "rmt" => {
+            attrs.push(AttrDef {
+                name: "pin".into(),
+                kind: AttrKind::PinOrRef,
+                required: false,
+                default: None,
+                range: None,
+                help: Some("RMT channel GPIO number or a <gpio> reference.".into()),
+                span: bus.span.clone(),
+            });
+            attrs.push(AttrDef {
+                name: "channel".into(),
+                kind: AttrKind::U32,
+                required: false,
+                default: None,
+                range: None,
+                help: Some("Channel number; the lowest free one is used when omitted.".into()),
+                span: bus.span.clone(),
+            });
+        }
         "i2c" => {
             if matches!(bus.address, AddressNeed::None) && bus.address_allowed.is_none() {
                 return;
@@ -781,6 +809,26 @@ fn absorb_dependency(
 
 fn add_bus_attrs(bus: &BusDecl, attrs: &mut Vec<AttrDef>) {
     match bus.kind.as_str() {
+        "rmt" => {
+            attrs.push(AttrDef {
+                name: "pin".into(),
+                kind: AttrKind::PinOrRef,
+                required: true,
+                default: None,
+                range: None,
+                help: Some("RMT channel GPIO number or a <gpio> reference.".into()),
+                span: bus.span.clone(),
+            });
+            attrs.push(AttrDef {
+                name: "channel".into(),
+                kind: AttrKind::U32,
+                required: false,
+                default: None,
+                range: None,
+                help: Some("Channel number; the lowest free one is used when omitted.".into()),
+                span: bus.span.clone(),
+            });
+        }
         "i2c" => {
             if matches!(bus.address, AddressNeed::None) && bus.address_allowed.is_none() {
                 return;
@@ -1017,11 +1065,11 @@ fn parse_bus(
     };
     // `none` is a busless driver: its transport is the pins it claims, so it
     // declares no peripheral and no `bus=` attribute.
-    if !matches!(kind.as_str(), "i2c" | "spi" | "uart" | "none") {
+    if !matches!(kind.as_str(), "i2c" | "spi" | "uart" | "rmt" | "none") {
         errors.push(err(
             kind_span,
             format!("`{kind}` is not a bus kind"),
-            "write `bus \"i2c\"`, `bus \"spi\"`, `bus \"uart\"` or `bus \"none\"`",
+            "write `bus \"i2c\"`, `bus \"spi\"`, `bus \"uart\"`, `bus \"rmt\"` or `bus \"none\"`",
         ));
         return None;
     }
@@ -1035,6 +1083,11 @@ fn parse_bus(
         mode: None,
         frequency: None,
         cs_polarity: CsPolarity::Low,
+        rmt: None,
+        rmt_direction_span: None,
+        rmt_idle_span: None,
+        rmt_carrier_span: None,
+        rmt_duty_span: None,
         span: span.clone(),
     };
 
@@ -1197,12 +1250,165 @@ fn parse_bus(
                 format!("unknown node `{other}` in `bus \"none\"`"),
                 "a busless driver has no bus-level configuration",
             )),
+            ("rmt", "direction") => {
+                let Some((value, at)) = positional_strings(child, errors).into_iter().next() else {
+                    errors.push(err(
+                        node_range(child),
+                        "`direction` takes a string",
+                        "write `direction \"tx\"` or `direction \"rx\"`",
+                    ));
+                    continue;
+                };
+                let direction = match value.as_str() {
+                    "tx" => RmtBusDirection::Tx,
+                    "rx" => RmtBusDirection::Rx,
+                    other => {
+                        errors.push(err(
+                            at.clone(),
+                            format!("`{other}` is not an RMT direction"),
+                            "write `direction \"tx\"` or `direction \"rx\"`",
+                        ));
+                        continue;
+                    }
+                };
+                if bus.rmt_direction_span.is_some() {
+                    errors.push(err(
+                        node_range(child),
+                        "`direction` given twice",
+                        "a channel moves one way",
+                    ));
+                } else {
+                    bus.rmt_direction_span = Some(node_range(child));
+                    bus.rmt.get_or_insert_with(RmtBusConfig::default).direction = direction;
+                }
+            }
+            ("rmt", "clk_divider") => match child_integer(child) {
+                Some(value) if (1..=255).contains(&value) => {
+                    bus.rmt
+                        .get_or_insert_with(RmtBusConfig::default)
+                        .clk_divider = value as u8;
+                }
+                Some(value) => errors.push(err(
+                    node_range(child),
+                    format!("`{value}` is not a channel divider"),
+                    "write an integer in 1..=255",
+                )),
+                None => errors.push(err(
+                    node_range(child),
+                    "`clk_divider` takes an integer",
+                    "write `clk_divider 1`",
+                )),
+            },
+            ("rmt", "idle_level") => {
+                let Some((value, at)) = positional_strings(child, errors).into_iter().next() else {
+                    errors.push(err(
+                        node_range(child),
+                        "`idle_level` takes a string",
+                        "write `idle_level \"low\"` or `\"high\"`",
+                    ));
+                    continue;
+                };
+                let level = match value.as_str() {
+                    "low" => RmtBusIdle::Low,
+                    "high" => RmtBusIdle::High,
+                    other => {
+                        errors.push(err(
+                            at.clone(),
+                            format!("`{other}` is not an idle level"),
+                            "write `idle_level \"low\"` or `\"high\"`",
+                        ));
+                        continue;
+                    }
+                };
+                bus.rmt_idle_span = Some(node_range(child));
+                bus.rmt.get_or_insert_with(RmtBusConfig::default).idle_level = level;
+            }
+            ("rmt", "carrier_hz") => match child_integer(child) {
+                Some(value) if (1..=u32::MAX as i128).contains(&value) => {
+                    bus.rmt_carrier_span = Some(node_range(child));
+                    bus.rmt.get_or_insert_with(RmtBusConfig::default).carrier_hz =
+                        Some(value as u32);
+                }
+                Some(value) => errors.push(err(
+                    node_range(child),
+                    format!("`{value}` is not a carrier frequency"),
+                    "write a positive integer in Hz",
+                )),
+                None => errors.push(err(
+                    node_range(child),
+                    "`carrier_hz` takes an integer",
+                    "write `carrier_hz 38000`",
+                )),
+            },
+            ("rmt", "duty") => match child_integer(child) {
+                Some(value) if (1..=100).contains(&value) => {
+                    bus.rmt_duty_span = Some(node_range(child));
+                    bus.rmt.get_or_insert_with(RmtBusConfig::default).duty = value as u8;
+                }
+                Some(value) => errors.push(err(
+                    node_range(child),
+                    format!("`{value}` is not a duty cycle"),
+                    "write an integer in 1..=100",
+                )),
+                None => errors.push(err(
+                    node_range(child),
+                    "`duty` takes an integer",
+                    "write `duty 50`",
+                )),
+            },
+            ("rmt", other) => errors.push(err(
+                node_range(child),
+                format!("unknown node `{other}` in `bus \"rmt\"`"),
+                "expected direction, clk_divider, idle_level, carrier_hz or duty",
+            )),
             _ => {}
         }
     }
 
     bus.spi_config = bus.mode.is_some() || bus.frequency.is_some();
+
+    if kind == "rmt" {
+        if bus.rmt_direction_span.is_none() {
+            errors.push(err(
+                span.clone(),
+                "`bus \"rmt\"` has no `direction`",
+                "write `direction \"tx\"` or `direction \"rx\"`; a channel cannot be allocated without one",
+            ));
+            bus.rmt = None;
+        } else if let Some(config) = bus.rmt {
+            if config.direction == RmtBusDirection::Rx {
+                for (name, at) in [
+                    ("idle_level", bus.rmt_idle_span.clone()),
+                    ("carrier_hz", bus.rmt_carrier_span.clone()),
+                    ("duty", bus.rmt_duty_span.clone()),
+                ] {
+                    if let Some(at) = at {
+                        errors.push(err(
+                            at,
+                            format!("`{name}` is for an RMT TX bus"),
+                            "an RX channel only captures pulses; drop this setting",
+                        ));
+                    }
+                }
+            } else if config.carrier_hz.is_none() && bus.rmt_duty_span.is_some() {
+                errors.push(err(
+                    bus.rmt_duty_span.clone().unwrap_or_else(|| span.clone()),
+                    "`duty` needs `carrier_hz`",
+                    "name a carrier frequency, or drop the duty cycle",
+                ));
+            }
+        }
+    }
+
     Some(bus)
+}
+
+/// One positional integer child (`clk_divider 2`, `carrier_hz 38000`).
+fn child_integer(node: &KdlNode) -> Option<i128> {
+    node.entries()
+        .iter()
+        .find(|entry| entry.name().is_none())
+        .and_then(|entry| entry.value().as_integer())
 }
 
 fn parse_pin(node: &KdlNode, errors: &mut Vec<SchemaError>) -> Option<PinDecl> {
@@ -2294,6 +2500,7 @@ fn build_recipe(
 
     Some(DeviceRecipe {
         bus: bus.kind.clone(),
+        rmt: bus.rmt,
         feature: codegen.feature.clone().unwrap_or_default(),
         kind: "device".into(),
         ty,
@@ -2463,8 +2670,13 @@ fn parse_constructor(
     let mut allowed: Vec<&str> = if busless {
         Vec::new()
     } else {
-        vec!["bus_device", "cs_pin", "spi_device", "address"]
+        vec!["bus_device"]
     };
+    match ctx.bus.kind.as_str() {
+        "i2c" => allowed.push("address"),
+        "spi" => allowed.extend(["cs_pin", "spi_device"]),
+        _ => {}
+    }
     allowed.extend(ctx.attrs.iter().map(|attr| attr.name.as_str()));
     for pin in ctx.pins {
         allowed.push(pin.name.as_str());
@@ -2935,6 +3147,82 @@ driver "dual" {
     example "spi" #"<dual id="d" bus="$spi2" cs="10" />"#
 }
 "##;
+
+    const RMT: &str = r##"
+driver "rmt_demo" {
+    format_version 2
+    summary "RMT demo"
+    category "display"
+    bus "rmt" {
+        direction "tx"
+        clk_divider 1
+    }
+    codegen {
+        feature "rmt-demo"
+        runtime "blocking" {
+            type "demo::RmtDemo"
+            constructor "demo::RmtDemo::new({bus_device})"
+            endpoint "espforge_runtime::BlockingRmtTxEndpoint"
+        }
+    }
+    example "minimal" #"<rmt_demo id="d" bus="$rmt0" pin="8" />"#
+}
+"##;
+
+    #[test]
+    fn an_rmt_bus_keeps_its_direction_and_synthesizes_pin_and_channel() {
+        let schema = load(RMT).expect("the RMT driver loads");
+        let element = schema.element("rmt_demo").expect("tag");
+        let recipe = element.device_recipe.as_ref().expect("a recipe");
+        let rmt = recipe.rmt.expect("the bus keeps its RMT settings");
+        assert_eq!(rmt.direction, RmtBusDirection::Tx);
+        assert_eq!((rmt.clk_divider, rmt.duty), (1, 50));
+
+        let pin = element
+            .attrs
+            .iter()
+            .find(|attr| attr.name == "pin")
+            .expect("the pin attribute");
+        assert!(pin.required);
+        assert!(matches!(pin.kind, AttrKind::PinOrRef));
+        let channel = element
+            .attrs
+            .iter()
+            .find(|attr| attr.name == "channel")
+            .expect("the channel attribute");
+        assert!(!channel.required);
+        assert!(matches!(channel.kind, AttrKind::U32));
+        assert!(
+            !element.attrs.iter().any(|attr| attr.name == "address"),
+            "an RMT bus takes no address"
+        );
+    }
+
+    #[test]
+    fn an_rmt_rx_bus_rejects_the_transmit_only_settings() {
+        let bad = RMT
+            .replace("direction \"tx\"", "direction \"rx\"")
+            .replace("clk_divider 1", "clk_divider 1\n        carrier_hz 38000");
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("`carrier_hz` is for an RMT TX bus")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn an_rmt_bus_without_a_direction_is_a_load_error() {
+        let bad = RMT.replace("direction \"tx\"", "");
+        let errors = load(&bad).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("has no `direction`")),
+            "{errors:?}"
+        );
+    }
 
     #[test]
     fn a_multi_transport_driver_loads_one_recipe_per_kind() {

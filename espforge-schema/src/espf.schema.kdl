@@ -121,7 +121,7 @@ element "options" section="espforge" {
 // -------------------------------------------------------------- peripherals
 
 section "peripherals" {
-    summary "The chip's hardware blocks you use: gpio, i2c, spi, uart"
+    summary "The chip's hardware blocks you use: gpio, i2c, spi, uart, rmt"
     description "The chip's hardware blocks that your project uses. Each one gets an id that devices refer to with $id."
 }
 
@@ -206,6 +206,19 @@ element "uart" section="peripherals" {
     see_also "services/wifi_station"
 }
 
+element "rmt" section="peripherals" {
+    summary "RMT pulse-train peripheral"
+    description "Declares the chip's RMT block. It builds nothing on its own: add <rmt_tx>/<rmt_rx> channels, or bind a bus=\"rmt\" driver. A project with only <rmt> gets no Devices field."
+    attr "id" kind="ident" required=#true {
+        help "rmt0: the chip has one RMT block."
+    }
+    attr "frequency" kind="freq" {
+        help "Source clock; defaults to 80MHz, or 32MHz on esp32h2."
+    }
+    example "minimal" #"<rmt id="rmt0" />"#
+    example "32MHz source" #"<rmt id="rmt0" frequency="32MHz" />"#
+}
+
 element "wifi" section="peripherals" {
     summary "The on-chip Wi-Fi radio"
     description "Claims the WIFI hardware block. One per chip, and only on a chip that has one."
@@ -267,6 +280,52 @@ element "button" section="devices" {
     example "esp32c3, blocking" "# espforge\n  <project name=\"button\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n# devices\n  <button id=\"button\" pin=\"9\" />\n# services\n"
     example "pull-up" "# espforge\n  <project name=\"button\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n# devices\n  <button id=\"button\" pin=\"9\" pull_up=\"true\" />\n# services\n"
     see_also "peripherals/gpio"
+}
+
+element "rmt_tx" section="devices" {
+    summary "Raw RMT transmit channel"
+    description "Moves a caller-supplied pulse-code sequence out of one RMT channel. It is not a driver: the app supplies the codes."
+    attr "id" kind="ident" required=#true
+    attr "bus" kind="ref" to="rmt" required=#true {
+        help "The <rmt> block the channel is allocated from."
+    }
+    attr "pin" kind="pin" required=#true
+    attr "channel" kind="u32" {
+        help "0-based channel number; auto-allocated when omitted."
+    }
+    attr "clk_divider" kind="u32" default="1" {
+        help "1..=255."
+    }
+    attr "idle_level" kind="choice" default="low" {
+        choices "low" "high"
+    }
+    attr "carrier_hz" kind="u32" {
+        help "Carrier modulation frequency in Hz, e.g. 38000 for IR."
+    }
+    attr "duty" kind="u32" default="50" {
+        help "Carrier duty cycle, percent."
+    }
+    example "esp32c3, blocking" "# espforge\n  <project name=\"ir_tx\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <rmt id=\"rmt0\" />\n# devices\n  <rmt_tx id=\"ir_tx\" bus=\"$rmt0\" pin=\"4\" />\n# services\n"
+    example "38kHz carrier" "# espforge\n  <project name=\"ir_tx\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <rmt id=\"rmt0\" />\n# devices\n  <rmt_tx id=\"ir_tx\" bus=\"$rmt0\" pin=\"4\" carrier_hz=\"38000\" />\n# services\n"
+    see_also "peripherals/rmt"
+}
+
+element "rmt_rx" section="devices" {
+    summary "Raw RMT receive channel"
+    description "Captures a pulse-code sequence into a caller-supplied buffer. Decoding a protocol is application code."
+    attr "id" kind="ident" required=#true
+    attr "bus" kind="ref" to="rmt" required=#true {
+        help "The <rmt> block the channel is allocated from."
+    }
+    attr "pin" kind="pin" required=#true
+    attr "channel" kind="u32" {
+        help "0-based channel number; auto-allocated when omitted."
+    }
+    attr "clk_divider" kind="u32" default="1" {
+        help "1..=255."
+    }
+    example "esp32c3, blocking" "# espforge\n  <project name=\"ir_rx\" />\n  <chip type=\"esp32c3\" />\n  <runtime type=\"blocking\" />\n# peripherals\n  <rmt id=\"rmt0\" />\n# devices\n  <rmt_rx id=\"ir_rx\" bus=\"$rmt0\" pin=\"5\" />\n# services\n"
+    see_also "peripherals/rmt"
 }
 
 element "wifi_station" section="services" {

@@ -83,6 +83,63 @@ pub fn has_wifi(name: &str) -> bool {
     chip_config(name).is_some_and(|chip| chip.contains("soc_has_wifi"))
 }
 
+/// Whether the chip has an RMT (remote control transceiver) block.
+///
+/// Read from `esp-metadata`'s per-chip data (`soc_has_rmt`), like
+/// [`has_wifi`]: a name the catalog does not know has no RMT rather than
+/// panicking, because the chip name itself is validated elsewhere.
+pub fn has_rmt(name: &str) -> bool {
+    chip_config(name).is_some_and(|chip| chip.contains("soc_has_rmt"))
+}
+
+/// The RMT channels a chip exposes, and the clock their pulse lengths are
+/// counted against.
+///
+/// `tx_channels` and `rx_channels` are the **channel numbers** `esp-hal`
+/// exposes, not indices into a per-direction pool. On `esp32` and `esp32s2`
+/// the same numbers appear in both lists because every channel can do either
+/// direction; on the others the two lists are disjoint. A caller must claim
+/// the number itself, never `(number, direction)`.
+pub struct RmtCaps {
+    pub tx_channels: &'static [u8],
+    pub rx_channels: &'static [u8],
+    /// The RMT source clock in MHz: 80 on every supported chip but `esp32h2`.
+    pub base_mhz: u32,
+}
+
+const CH_0_1: &[u8] = &[0, 1];
+const CH_2_3: &[u8] = &[2, 3];
+const CH_0_3: &[u8] = &[0, 1, 2, 3];
+const CH_4_7: &[u8] = &[4, 5, 6, 7];
+const CH_0_7: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7];
+
+/// The RMT table for `chip`, or `None` when the chip has no verified RMT.
+///
+/// Every chip the catalog knows is listed explicitly, including the ones that
+/// deliberately have no answer: a new chip must be added here, with its
+/// channels checked against `esp-metadata`, instead of silently inheriting
+/// another chip's table. `esp32c5`, `esp32s31` and `esp32p4` advertise RMT in
+/// `esp-metadata` but lose it until their channel map is verified — a wrong
+/// table compiles and fails on hardware.
+pub fn rmt_caps(chip: &str) -> Option<RmtCaps> {
+    let caps = match chip {
+        "esp32" => (CH_0_7, CH_0_7, 80),
+        "esp32s2" => (CH_0_3, CH_0_3, 80),
+        "esp32s3" => (CH_0_3, CH_4_7, 80),
+        "esp32c3" | "esp32c6" => (CH_0_1, CH_2_3, 80),
+        // ESP32-H2's default RMT source is XTAL, a 32MHz crystal.
+        "esp32h2" => (CH_0_1, CH_2_3, 32),
+        "esp32c2" | "esp32c61" => return None,
+        "esp32c5" | "esp32s31" | "esp32p4" => return None,
+        _ => return None,
+    };
+    Some(RmtCaps {
+        tx_channels: caps.0,
+        rx_channels: caps.1,
+        base_mhz: caps.2,
+    })
+}
+
 /// How many I2C controllers the chip has.
 ///
 /// Hand-kept, like [`has_usb_serial_jtag`]: esp-metadata's generated data does
@@ -161,6 +218,61 @@ mod tests {
         let err = check_chip(NOT_YET_SUPPORTED[0]).unwrap_err();
         assert!(err.contains("not supported by espforge yet"), "{err}");
         assert!(!err.contains("unknown chip"), "{err}");
+    }
+
+    #[test]
+    fn the_rmt_gate_follows_the_chip() {
+        assert!(!has_rmt("esp32c2"));
+        assert!(!has_rmt("esp32c61"));
+        assert!(has_rmt("esp32c3"));
+        assert!(has_rmt("esp32s3"));
+        assert!(has_rmt("esp32"));
+        assert!(!has_rmt("nonesuch"));
+    }
+
+    /// `esp32h2` counts pulse lengths against a 32MHz crystal, not the 80MHz
+    /// APB clock every other RMT-capable chip uses.
+    #[test]
+    fn the_rmt_source_clock_follows_the_chip() {
+        assert_eq!(rmt_caps("esp32h2").unwrap().base_mhz, 32);
+        assert_eq!(rmt_caps("esp32c3").unwrap().base_mhz, 80);
+        assert_eq!(rmt_caps("esp32s3").unwrap().base_mhz, 80);
+    }
+
+    /// The TX/RX pools overlap exactly where `esp-hal` says they do: esp32 and
+    /// esp32s2 let any channel do either direction.
+    #[test]
+    fn the_shared_channel_chips_are_recorded_as_shared() {
+        for chip in ["esp32", "esp32s2"] {
+            let caps = rmt_caps(chip).unwrap();
+            assert_eq!(caps.tx_channels, caps.rx_channels, "{chip}");
+        }
+        let c3 = rmt_caps("esp32c3").unwrap();
+        assert!(
+            c3.tx_channels.iter().all(|tx| !c3.rx_channels.contains(tx)),
+            "esp32c3's TX and RX pools are disjoint"
+        );
+    }
+
+    #[test]
+    fn every_rmt_answer_is_well_formed() {
+        for chip in offered_chips() {
+            match rmt_caps(chip) {
+                Some(caps) => {
+                    assert!(has_rmt(chip), "{chip} has caps but no RMT");
+                    for channel in caps.tx_channels.iter().chain(caps.rx_channels) {
+                        assert!(*channel < 8, "{chip} names channel {channel}");
+                    }
+                }
+                None => assert!(
+                    matches!(
+                        chip,
+                        "esp32c2" | "esp32c5" | "esp32c61" | "esp32p4" | "esp32s31"
+                    ),
+                    "{chip} has neither RMT caps nor a deliberate `None`"
+                ),
+            }
+        }
     }
 
     #[test]

@@ -16,20 +16,23 @@ use espf::context::ParsedNode;
 use espf::diag::node_span;
 use espforge_diagnostics::codes;
 use espforge_schema::{
-    AddressNeed, CtorArg, DeviceArg, DeviceRecipe, MappedValue, PartSource, RecipePart, RustExpr,
-    RustPath, RustType, TypeTemplate,
+    AddressNeed, CtorArg, DeviceArg, DeviceRecipe, MappedValue, PartSource, RecipePart,
+    RmtBusDirection, RmtBusIdle, RustExpr, RustPath, RustType, TypeTemplate,
 };
 use std::collections::BTreeMap;
 
 use crate::attrs;
+use crate::chips::rmt_caps;
 use crate::devices::{invalid_element, invalid_id, span_of, unknown_gpio, wrong_direction};
 use crate::element::{Element, LowerCx, Reported, Section, is_rust_ident};
 use crate::generated;
 use crate::model::{
-    Bus, BusDevice, BusId, BusTransport, ClaimedPin, CsPolarity, Device, Direction, Driver,
-    FactoryArg, I2cTransport, Ident, Init, Owner, OwnerKind, Pin, PinUse, PinsDevice, Runtime,
-    SpiConfig as DeviceSpiConfig, SpiTransport, Step, UartTransport,
+    Bus, BusDevice, BusId, BusTransport, Carrier, ClaimedPin, CsPolarity, Device, Direction,
+    Driver, FactoryArg, I2cTransport, Ident, Init, Owner, OwnerKind, Pin, PinUse, PinsDevice,
+    RmtDirection, RmtLevel, RmtTransport, Runtime, SpiConfig as DeviceSpiConfig, SpiTransport,
+    Step, UartTransport,
 };
+use crate::rmt::{allocate_rmt_channel, carrier_ticks};
 
 /// The interpreter for one schema element that declares a `device_recipe`.
 ///
@@ -185,6 +188,7 @@ fn lower_recipe<'s>(
                     Some(Bus::I2c { .. }) => "i2c",
                     Some(Bus::Spi { .. }) => "spi",
                     Some(Bus::Uart { .. }) => "uart",
+                    Some(Bus::Rmt { .. }) => "rmt",
                     None => {
                         return Err(cx.report(
                             codes::DEVICE_INVALID,
@@ -223,6 +227,7 @@ fn lower_recipe<'s>(
             Some(Bus::I2c { .. }) => "i2c",
             Some(Bus::Spi { .. }) => "spi",
             Some(Bus::Uart { .. }) => "uart",
+            Some(Bus::Rmt { .. }) => "rmt",
             None => {
                 return Err(cx.report(
                     codes::DEVICE_INVALID,
@@ -469,7 +474,11 @@ fn lower_recipe<'s>(
     } else {
         Init::Boot
     };
-    if init == Init::Boot && recipe.runtimes.async_only() {
+    // An RMT async bus is deferred automatically by emission (the whole
+    // `Rmt` block is switched), so an async-only RMT driver needs no explicit
+    // `init="deferred"`; that spelling is refused later, like every RMT
+    // channel.
+    if init == Init::Boot && recipe.runtimes.async_only() && recipe.bus != "rmt" {
         return Err(cx.report(
             codes::DEVICE_INVALID,
             span_of(node, "init"),
@@ -786,6 +795,145 @@ fn lower_recipe<'s>(
                 async_endpoint: async_endpoint.clone(),
             })
         }
+        "rmt" => {
+            if init == Init::Deferred {
+                return Err(cx.report(
+                    codes::DEVICE_INVALID,
+                    span_of(node, "init"),
+                    format!("invalid {tag}"),
+                    format!(
+                        "<{tag} id=\"{}\"> is built at boot; remove `init=\"deferred\"`",
+                        id.raw
+                    ),
+                ));
+            }
+            let Some(config) = recipe.rmt else {
+                return Err(cx.report(
+                    codes::DEVICE_INVALID,
+                    node_span(node),
+                    format!("invalid {tag}"),
+                    format!(
+                        "<{tag} id=\"{}\"> binds to an RMT bus, but its manifest declares no RMT channel settings",
+                        id.raw
+                    ),
+                ));
+            };
+            let rmt_direction = match config.direction {
+                RmtBusDirection::Tx => RmtDirection::Tx,
+                RmtBusDirection::Rx => RmtDirection::Rx,
+            };
+            let Some(caps) = rmt_caps(cx.chip()) else {
+                let why = if crate::chips::has_rmt(cx.chip()) {
+                    format!(
+                        "espforge has no verified RMT channel table for {} yet",
+                        cx.chip()
+                    )
+                } else {
+                    format!("{} has no RMT peripheral", cx.chip())
+                };
+                return Err(cx.report(
+                    codes::RMT_NOT_SUPPORTED,
+                    node_span(node),
+                    "RMT is not available on this chip",
+                    format!("<{tag} id=\"{}\">: {why}", id.raw),
+                ));
+            };
+            let khz = match cx.bus(bus) {
+                Some(Bus::Rmt { khz, .. }) => *khz,
+                _ => unreachable!("the bus was checked to be an RMT block"),
+            };
+
+            let requested = attrs::opt_number(node, "channel")
+                .map_err(|issue| invalid_element(cx, node, tag, element, issue))?;
+            let requested = match requested {
+                Some(channel) if channel.value <= u32::from(u8::MAX) => Some(channel.value as u8),
+                Some(channel) => {
+                    return Err(cx.report(
+                        codes::RMT_CHANNEL_CONFLICT,
+                        span_of(node, "channel"),
+                        "RMT channel unavailable",
+                        format!(
+                            "<{tag} id=\"{}\"> channel {} does not exist on {}",
+                            id.raw,
+                            channel.value,
+                            cx.chip()
+                        ),
+                    ));
+                }
+                None => None,
+            };
+
+            let wanted = match rmt_direction {
+                RmtDirection::Tx => Direction::Output,
+                RmtDirection::Rx => Direction::Input,
+            };
+            let pin_value = attrs::pin_or_ref(node, "pin")
+                .map_err(|issue| invalid_element(cx, node, tag, element, issue))?;
+            let (pin, declared) = match pin_value {
+                attrs::PinOrRef::Pin(pin) => (pin.value, None),
+                attrs::PinOrRef::Ref(reference) => {
+                    let Some(gpio) = cx.gpio(reference.name).cloned() else {
+                        return Err(unknown_gpio(cx, node, tag, id, "pin", reference.name));
+                    };
+                    (gpio.pin, Some((gpio.id.raw.clone(), gpio.direction)))
+                }
+            };
+            if let Some((name, declared)) = declared
+                && let Some(found) = declared.filter(|found| *found != wanted)
+            {
+                return Err(wrong_direction(
+                    cx, node, tag, id, "pin", &name, wanted, found,
+                ));
+            }
+            let owner = Owner::new(OwnerKind::Device(tag.to_string()), id.clone());
+            let pin_use = match wanted {
+                Direction::Input => PinUse::Input,
+                Direction::Output => PinUse::Output,
+                Direction::Bidirectional => PinUse::Bidirectional,
+            };
+            let pin = cx
+                .claim_pin(Pin(pin), owner.clone(), span_of(node, "pin"), pin_use)
+                .map_err(|refusal| refusal.report(cx))?;
+            let channel =
+                allocate_rmt_channel(cx, &caps, rmt_direction, requested, owner, node_span(node))?;
+
+            let idle_level = match config.idle_level {
+                RmtBusIdle::Low => RmtLevel::Low,
+                RmtBusIdle::High => RmtLevel::High,
+            };
+            let carrier = match config.carrier_hz {
+                Some(hz) => {
+                    if carrier_ticks(khz, config.clk_divider, hz, config.duty).is_none() {
+                        return Err(cx.report(
+                            codes::DEVICE_INVALID,
+                            node_span(node),
+                            format!("invalid {tag}"),
+                            format!(
+                                "<{tag} id=\"{}\"> carrier {hz}Hz at duty {} does not fit the channel clock",
+                                id.raw, config.duty
+                            ),
+                        ));
+                    }
+                    Some(Carrier {
+                        hz,
+                        duty: config.duty,
+                    })
+                }
+                None => None,
+            };
+
+            BusTransport::Rmt(RmtTransport {
+                bus,
+                channel,
+                direction: rmt_direction,
+                pin,
+                clk_divider: config.clk_divider,
+                idle_level,
+                carrier,
+                endpoint: endpoint.clone(),
+                async_endpoint: async_endpoint.clone(),
+            })
+        }
         _ => unreachable!("the bus kind was checked against the recipe"),
     };
 
@@ -812,6 +960,7 @@ fn transport_attrs(recipe: &DeviceRecipe) -> Vec<&'static str> {
         }
         "spi" if recipe.spi_config => vec!["cs", "mode", "frequency"],
         "spi" => vec!["cs"],
+        "rmt" => vec!["pin", "channel"],
         _ => Vec::new(),
     }
 }

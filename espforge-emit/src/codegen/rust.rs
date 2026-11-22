@@ -213,6 +213,14 @@ fn collect(board: &Board) -> EmitParts {
         }
     }
     espforge_elements::raw_bus::emit_raw_buses(board, &mut cx);
+    // A raw RMT channel moves one channel out of the `<rmt>` block. It has no
+    // bus endpoint to share, so it emits after the raw-bus pass (which skips
+    // `<rmt>`) and before the drivers.
+    for device in &board.devices {
+        if let Device::Rmt(device) = device {
+            device.emit(board, &mut cx);
+        }
+    }
     for device in &board.devices {
         if let Device::Bus(device) = device {
             device.emit(board, &mut cx);

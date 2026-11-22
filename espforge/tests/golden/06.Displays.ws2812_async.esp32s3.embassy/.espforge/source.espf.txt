@@ -1,0 +1,19 @@
+==================
+WS2812 ASYNC RGB STRIP EXAMPLE
+
+An embassy project whose strip is driven by one async RMT channel. The device
+is built after boot and lives in an `AsyncMutex`; `device!` yields its guard.
+==================
+
+# espforge
+  <project name="ws2812_async" />
+  <chip type="esp32s3" />
+  <runtime type="embassy" />
+
+# peripherals
+  <rmt id="rmt0" />
+
+# devices
+  <ws2812_rmt id="strip" bus="$rmt0" pin="8" />
+
+# services

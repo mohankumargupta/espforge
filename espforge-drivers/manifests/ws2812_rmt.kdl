@@ -1,0 +1,29 @@
+driver "ws2812_rmt" {
+    format_version 2
+    summary "WS2812 / NeoPixel addressable RGB strip over RMT"
+    description "Sends RGB frames as RMT pulses. The channel divider is fixed here, and the driver computes its timing from the channel's real source clock (32MHz on esp32h2). Both runtimes are supported."
+    category "display"
+
+    bus "rmt" {
+        direction "tx"
+        clk_divider 1
+    }
+
+    codegen {
+        feature "ws2812-rmt"
+        runtime "blocking" {
+            type "espforge_drivers::Ws2812Rmt"
+            constructor "espforge_drivers::Ws2812Rmt::new({bus_device})"
+            endpoint "espforge_runtime::BlockingRmtTxEndpoint"
+        }
+        runtime "async" {
+            feature "ws2812-rmt-async"
+            type "espforge_drivers::AsyncWs2812Rmt"
+            constructor "espforge_drivers::AsyncWs2812Rmt::new({bus_device})"
+            endpoint "espforge_runtime::AsyncRmtTxEndpoint"
+        }
+    }
+
+    example "minimal" #"<ws2812_rmt id="strip" bus="$rmt0" pin="8" />"#
+    see_also "peripherals/rmt"
+}

@@ -342,6 +342,14 @@ impl<'s> LowerCx<'s> {
         self.resources.buses()
     }
 
+    /// Whether a physical peripheral name is already claimed.
+    ///
+    /// The channel allocator asks before claiming a candidate so it can skip
+    /// a used RMT channel without recording a conflict diagnostic for it.
+    pub fn peripheral_claimed(&self, peripheral: &str) -> bool {
+        self.resources.claimed_peripheral(peripheral)
+    }
+
     /// Claim a physical peripheral name (`UART1`), reporting a refusal.
     ///
     /// Two refusals, two wordings: another element with the same name is the

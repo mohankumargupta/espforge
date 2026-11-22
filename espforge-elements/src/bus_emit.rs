@@ -4,7 +4,9 @@ use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote};
 
 use crate::element::EmitCx;
-use crate::model::{Board, Bus, BusId, BusMode, Parity, Runtime, StopBits};
+use crate::model::{
+    Board, Bus, BusId, BusMode, Parity, RmtChannelDevice, RmtDirection, RmtLevel, Runtime, StopBits,
+};
 
 /// The esp-hal driver-mode type for the project's runtime.
 ///
@@ -199,6 +201,124 @@ pub(crate) fn uart_device(cx: &mut EmitCx, board: &Board, bus: BusId) -> TokenSt
         },
     );
     quote! { #handle }
+}
+
+/// Build the RMT block once per `<rmt>` and move one configured channel out
+/// of it, wrapped in the runtime endpoint the element declares.
+///
+/// **Invariants.** `#handle` is a local inside `Devices::new`, never a
+/// `Devices` field: each channel builder moves one `channelN` field out, and
+/// nothing touches the whole `Rmt` afterwards. `device_once` runs before the
+/// first move, so the `let` that creates the block precedes every channel.
+/// Do not debug-print, borrow wholesale, or return `#handle`.
+pub(crate) fn rmt_channel(
+    cx: &mut EmitCx,
+    board: &Board,
+    device: &RmtChannelDevice,
+) -> TokenStream {
+    rmt_endpoint(cx, board, &device.transport)
+}
+
+/// Build an RMT endpoint for a `bus "rmt"` driver.
+///
+/// Shares [`rmt_endpoint`] with the raw channel path, so both move one channel
+/// out of one block and neither can grow a second `Rmt::new`.
+pub(crate) fn rmt_device(
+    cx: &mut EmitCx,
+    board: &Board,
+    transport: &crate::model::RmtTransport,
+) -> TokenStream {
+    rmt_endpoint(cx, board, transport)
+}
+
+fn rmt_endpoint(
+    cx: &mut EmitCx,
+    board: &Board,
+    transport: &crate::model::RmtTransport,
+) -> TokenStream {
+    let Some(Bus::Rmt {
+        id: bus_id,
+        peripheral,
+        khz,
+    }) = board.resources.bus(transport.bus)
+    else {
+        return quote! {};
+    };
+
+    let mode = board.bus_mode(transport.bus);
+    let handle = format_ident!("{}_bus", bus_id.rust_name());
+    let peripheral = peripheral_access(peripheral);
+    let rate = rate(*khz);
+    let clock = int(*khz);
+    let into_async = match mode {
+        BusMode::Blocking => quote! {},
+        BusMode::Async => quote! { .into_async() },
+    };
+    cx.device_once(
+        &handle.to_string(),
+        quote! {
+            let #handle = esp_hal::rmt::Rmt::new(#peripheral, #rate)
+                .expect("RMT configuration failed") #into_async;
+        },
+    );
+
+    let channel = format_ident!("channel{}", transport.channel);
+    let pin = gpio(transport.pin.pin().0);
+    let divider = Literal::u8_unsuffixed(transport.clk_divider);
+    let direction = transport.direction;
+    let config = match direction {
+        RmtDirection::Tx => {
+            let level = match transport.idle_level {
+                RmtLevel::Low => quote! { esp_hal::gpio::Level::Low },
+                RmtLevel::High => quote! { esp_hal::gpio::Level::High },
+            };
+            let mut config = quote! {
+                espforge_runtime::TxChannelConfig::default()
+                    .with_clk_divider(#divider)
+                    .with_idle_output(true)
+                    .with_idle_output_level(#level)
+            };
+            if let Some(carrier) = transport.carrier {
+                let (high, low) = crate::rmt::carrier_ticks(
+                    *khz,
+                    transport.clk_divider,
+                    carrier.hz,
+                    carrier.duty,
+                )
+                .expect("lowering validated the carrier timing");
+                let high = Literal::u16_unsuffixed(high);
+                let low = Literal::u16_unsuffixed(low);
+                config = quote! {
+                    #config
+                        .with_carrier_modulation(true)
+                        .with_carrier_high(#high)
+                        .with_carrier_low(#low)
+                        .with_carrier_level(esp_hal::gpio::Level::Low)
+                };
+            }
+            quote! {
+                esp_hal::rmt::TxChannelCreator::configure_tx(#handle.#channel, &#config)
+                    .expect("RMT TX channel configuration failed")
+                    .with_pin(#pin)
+            }
+        }
+        RmtDirection::Rx => quote! {
+            esp_hal::rmt::RxChannelCreator::configure_rx(
+                #handle.#channel,
+                &espforge_runtime::RxChannelConfig::default().with_clk_divider(#divider),
+            )
+            .expect("RMT RX channel configuration failed")
+            .with_pin(#pin)
+        },
+    };
+    match direction {
+        RmtDirection::Tx => quote! {
+            espforge_runtime::RmtTxChannel::with_clock(#config, #clock, #divider)
+        },
+        RmtDirection::Rx => quote! {
+            espforge_runtime::RmtRxChannel::new(#config)
+        },
+    }
 }
 
 /// Build the SPI bus once per bus inside `Devices::new`, and return the

@@ -1,0 +1,16 @@
+====================
+RMT TX EXAMPLE
+====================
+
+# espforge
+  <project name="rmt_tx" />
+  <chip type="esp32c3" />
+  <runtime type="blocking" />
+
+# peripherals
+  <rmt id="rmt0" />
+
+# devices
+  <rmt_tx id="ir_tx" bus="$rmt0" pin="4" carrier_hz="38000" />
+
+# services

@@ -494,6 +494,9 @@ fn runtime_dependency(
     if embassy || wifi || ota || !service_features.is_empty() {
         features.push("embassy");
     }
+    if board.uses_rmt() && !features.contains(&"rmt") {
+        features.push("rmt");
+    }
     if wifi {
         features.push("wifi");
     }

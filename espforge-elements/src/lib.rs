@@ -18,6 +18,7 @@ pub mod peripherals;
 pub mod pin_caps;
 pub mod raw_bus;
 pub mod registry;
+pub mod rmt;
 pub mod schema;
 
 /// One `Attrs` struct per element in `espf.schema.kdl`, written by `build.rs`.
@@ -37,10 +38,11 @@ pub use element::{Element, EmitCx, LowerCx, Lowered, MainCtx, PinRefusal, Report
 pub use espforge_schema::{Compat, Kind, OptValue, OptionDef, Requires, Schema};
 pub use lower::lower;
 pub use model::{
-    Board, BusDevice, BusId, BusMode, BusTransport, Claim, ClaimedPin, Conflict, ConflictKind,
-    Console, Device, Direction, Driver, FlashSize, GpioDecl, HeldClash, HeldResource, I2cTransport,
-    Ident, LogLevel, LoggerConfig, Meta, OtaMeta, Owner, OwnerKind, PeripheralRefusal, Pin,
-    PinDevice, PinDeviceKind, PinUse, ProtocolService, ResourceGraph, Runtime, RuntimeSet, Service,
+    Board, BusDevice, BusId, BusMode, BusTransport, Carrier, Claim, ClaimedPin, Conflict,
+    ConflictKind, Console, Device, Direction, Driver, FlashSize, GpioDecl, HeldClash, HeldResource,
+    I2cTransport, Ident, LogLevel, LoggerConfig, Meta, OtaMeta, Owner, OwnerKind,
+    PeripheralRefusal, Pin, PinDevice, PinDeviceKind, PinUse, ProtocolService, ResourceGraph,
+    RmtChannelDevice, RmtDirection, RmtLevel, RmtTransport, Runtime, RuntimeSet, Service,
     SpiTransport,
 };
 pub use options::{

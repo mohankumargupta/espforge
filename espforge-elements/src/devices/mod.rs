@@ -14,6 +14,7 @@
 
 pub mod pin;
 pub mod recipe;
+pub mod rmt;
 
 use espf::context::ParsedNode;
 use espf::diag::node_span;

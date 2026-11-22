@@ -66,6 +66,10 @@ pub const MANIFESTS: &[(&str, &str)] = &[
         "espforge-drivers/manifests/tm1637.kdl",
         include_str!("../manifests/tm1637.kdl"),
     ),
+    (
+        "espforge-drivers/manifests/ws2812_rmt.kdl",
+        include_str!("../manifests/ws2812_rmt.kdl"),
+    ),
 ];
 
 /// The concatenation of [`MANIFESTS`], for callers that take one schema text.
@@ -97,6 +101,8 @@ pub const DRIVERS_SCHEMA_KDL: &str = concat!(
     "\n",
     include_str!("../manifests/tm1637.kdl"),
     "\n",
+    include_str!("../manifests/ws2812_rmt.kdl"),
+    "\n",
 );
 
 /// Every bundled tag, in manifest order.
@@ -119,6 +125,7 @@ pub const TAGS: &[&str] = &[
     "hx711",
     "dht22",
     "tm1637",
+    "ws2812_rmt",
 ];
 
 #[cfg(all(
@@ -168,3 +175,19 @@ pub mod adxl345;
     feature = "adxl345"
 ))]
 pub use adxl345::*;
+
+/// The pure WS2812 timing table is always available so its host tests run;
+/// the channel wrappers inside are target- and feature-gated.
+pub mod ws2812;
+
+#[cfg(all(
+    any(target_arch = "riscv32", target_arch = "xtensa"),
+    feature = "ws2812-rmt"
+))]
+pub use ws2812::Ws2812Rmt;
+
+#[cfg(all(
+    any(target_arch = "riscv32", target_arch = "xtensa"),
+    feature = "ws2812-rmt-async"
+))]
+pub use ws2812::AsyncWs2812Rmt;

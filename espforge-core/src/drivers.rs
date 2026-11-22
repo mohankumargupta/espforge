@@ -540,7 +540,7 @@ pub fn resolve_package_paths(board: &mut Board, project_dir: &Path) -> Result<()
         espforge_elements::Device::Pins(device) => {
             Some((&mut device.driver, device.tag.as_str()))
         }
-        espforge_elements::Device::Pin(_) => None,
+        espforge_elements::Device::Pin(_) | espforge_elements::Device::Rmt(_) => None,
     }) {
         let base = driver
             .manifest

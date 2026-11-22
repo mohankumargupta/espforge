@@ -417,6 +417,8 @@ pub enum OwnerKind {
     I2c,
     Spi,
     Uart,
+    /// The RMT pulse block (`<rmt>`), which claims the single `RMT` peripheral.
+    Rmt,
     /// A device driving its auxiliary pins (`<ili9341>`); carries its schema
     /// tag.
     Device(String),
@@ -433,6 +435,7 @@ impl OwnerKind {
             OwnerKind::I2c => "i2c",
             OwnerKind::Spi => "spi",
             OwnerKind::Uart => "uart",
+            OwnerKind::Rmt => "rmt",
             OwnerKind::Device(tag) => tag,
             OwnerKind::Wifi => "wifi",
         }
@@ -554,13 +557,28 @@ pub enum Bus {
         /// Framing for direct raw-bus use.
         framing: Framing,
     },
+    /// The chip's RMT block.
+    ///
+    /// It owns no pins: a channel claims the pin it needs, so `<rmt>` alone is
+    /// only the block and its source clock. It deliberately emits no raw
+    /// handle — see `raw_bus::emit_raw_buses`.
+    Rmt {
+        id: Ident,
+        /// The esp-hal peripheral name (`RMT`); there is one block per chip.
+        peripheral: String,
+        /// The RMT source clock in kHz (80MHz, or 32MHz on `esp32h2`).
+        khz: u32,
+    },
 }
 
 impl Bus {
     /// The bus id as the user wrote it.
     pub fn id(&self) -> &Ident {
         match self {
-            Bus::I2c { id, .. } | Bus::Spi { id, .. } | Bus::Uart { id, .. } => id,
+            Bus::I2c { id, .. }
+            | Bus::Spi { id, .. }
+            | Bus::Uart { id, .. }
+            | Bus::Rmt { id, .. } => id,
         }
     }
 }
@@ -824,6 +842,11 @@ impl ResourceGraph {
         self.pins.iter().map(|(&pin, claim)| (pin, claim))
     }
 
+    /// Whether `name` is already claimed by an element.
+    pub fn claimed_peripheral(&self, name: &str) -> bool {
+        self.peripherals.contains_key(name)
+    }
+
     /// Every peripheral claim, in name order.
     pub fn peripheral_claims(&self) -> impl Iterator<Item = (&str, &PeripheralClaim)> {
         self.peripherals
@@ -928,6 +951,11 @@ pub enum Device {
     Bus(BusDevice),
     /// A driver bound to pins only (`bus "none"`).
     Pins(PinsDevice),
+    /// A raw RMT pulse channel (`<rmt_tx>` / `<rmt_rx>`).
+    ///
+    /// It is neither a driver nor a bus: it owns one channel and one pin, and
+    /// the endpoint it becomes is named by an alias, not a recipe.
+    Rmt(RmtChannelDevice),
 }
 
 impl Device {
@@ -937,6 +965,7 @@ impl Device {
             Device::Pin(device) => &device.id,
             Device::Bus(device) => &device.id,
             Device::Pins(device) => &device.id,
+            Device::Rmt(device) => &device.id,
         }
     }
 
@@ -946,32 +975,34 @@ impl Device {
             Device::Pin(device) => &device.tag,
             Device::Bus(device) => &device.tag,
             Device::Pins(device) => &device.tag,
+            Device::Rmt(device) => &device.tag,
         }
     }
 
     pub fn as_pin(&self) -> Option<&PinDevice> {
         match self {
             Device::Pin(device) => Some(device),
-            Device::Bus(_) | Device::Pins(_) => None,
+            Device::Bus(_) | Device::Pins(_) | Device::Rmt(_) => None,
         }
     }
 
     pub fn as_bus(&self) -> Option<&BusDevice> {
         match self {
             Device::Bus(device) => Some(device),
-            Device::Pin(_) | Device::Pins(_) => None,
+            Device::Pin(_) | Device::Pins(_) | Device::Rmt(_) => None,
         }
     }
 
     /// The driver record, for every device that is a driver: bus and busless.
     ///
     /// A `<led>` has none: its recipe names one runtime type, not a crate,
-    /// a feature and a dependency set.
+    /// a feature and a dependency set. A raw RMT channel has none either: it
+    /// is an endpoint, not a part driver.
     pub fn driver(&self) -> Option<&Driver> {
         match self {
             Device::Bus(device) => Some(&device.driver),
             Device::Pins(device) => Some(&device.driver),
-            Device::Pin(_) => None,
+            Device::Pin(_) | Device::Rmt(_) => None,
         }
     }
 }
@@ -986,13 +1017,14 @@ impl crate::element::Lowered for Device {
             Device::Pin(device) => device.emit(board, cx),
             Device::Bus(device) => device.emit(board, cx),
             Device::Pins(device) => device.emit(board, cx),
+            Device::Rmt(device) => device.emit(board, cx),
         }
     }
 
     fn overlay_attr(&self, attr: &str) -> Option<String> {
         match self {
             Device::Pin(device) => device.overlay_attr(attr),
-            Device::Bus(_) | Device::Pins(_) => None,
+            Device::Bus(_) | Device::Pins(_) | Device::Rmt(_) => None,
         }
     }
 }
@@ -1318,6 +1350,7 @@ pub enum BusTransport {
     I2c(I2cTransport),
     Spi(SpiTransport),
     Uart(UartTransport),
+    Rmt(RmtTransport),
 }
 
 impl BusTransport {
@@ -1327,6 +1360,7 @@ impl BusTransport {
             BusTransport::I2c(transport) => transport.bus,
             BusTransport::Spi(transport) => transport.bus,
             BusTransport::Uart(transport) => transport.bus,
+            BusTransport::Rmt(transport) => transport.bus,
         }
     }
 
@@ -1346,6 +1380,10 @@ impl BusTransport {
                 transport.endpoint.as_ref(),
                 transport.async_endpoint.as_ref(),
             ),
+            BusTransport::Rmt(transport) => (
+                transport.endpoint.as_ref(),
+                transport.async_endpoint.as_ref(),
+            ),
         };
         if asynchronous {
             async_endpoint.or(blocking)
@@ -1353,6 +1391,77 @@ impl BusTransport {
             blocking
         }
     }
+}
+
+/// Which way a raw RMT channel moves pulses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RmtDirection {
+    Tx,
+    Rx,
+}
+
+impl RmtDirection {
+    /// The schema tag and field prefix for this direction.
+    pub fn tag(self) -> &'static str {
+        match self {
+            RmtDirection::Tx => "rmt_tx",
+            RmtDirection::Rx => "rmt_rx",
+        }
+    }
+
+    /// The channel numbers this direction can use on `caps`.
+    pub fn channels(self, caps: &crate::chips::RmtCaps) -> &'static [u8] {
+        match self {
+            RmtDirection::Tx => caps.tx_channels,
+            RmtDirection::Rx => caps.rx_channels,
+        }
+    }
+}
+
+/// A channel's idle output level (TX only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RmtLevel {
+    Low,
+    High,
+}
+
+/// Carrier modulation for a raw TX channel.
+///
+/// The lowering validates and keeps the requested frequency and duty; emission
+/// turns them into the high/low tick counts `esp-hal` wants, using the block's
+/// source clock and the channel divider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Carrier {
+    pub hz: u32,
+    pub duty: u8,
+}
+
+/// A raw RMT channel: one channel number, one pin, one direction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RmtTransport {
+    /// The `<rmt>` block this channel was allocated from.
+    pub bus: BusId,
+    pub channel: u8,
+    pub direction: RmtDirection,
+    pub pin: ClaimedPin,
+    pub clk_divider: u8,
+    /// TX only; RX has no idle output.
+    pub idle_level: RmtLevel,
+    /// TX only.
+    pub carrier: Option<Carrier>,
+    /// The blocking endpoint type, when a deferred factory would store it.
+    pub endpoint: Option<RustType>,
+    /// The async endpoint type.
+    pub async_endpoint: Option<RustType>,
+}
+
+/// A raw RMT channel device (`<rmt_tx>` / `<rmt_rx>`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RmtChannelDevice {
+    pub id: Ident,
+    /// The schema tag that built this (`rmt_tx` or `rmt_rx`).
+    pub tag: String,
+    pub transport: RmtTransport,
 }
 
 /// A device on an I2C bus: the address is part of the connection.
@@ -1672,6 +1781,7 @@ impl crate::element::Lowered for BusDevice {
             // A UART port has one peer, so the device takes the whole port and
             // emission builds it once: lowering already refused a second bind.
             BusTransport::Uart(uart) => crate::bus_emit::uart_device(cx, board, uart.bus),
+            BusTransport::Rmt(rmt) => crate::bus_emit::rmt_device(cx, board, rmt),
         };
 
         // The endpoint is the constructor's first argument, unless the manifest
@@ -2122,9 +2232,26 @@ impl Board {
     fn device_is_async(&self, device: &Device) -> bool {
         match device {
             Device::Bus(bus) => self.bus_mode(bus.bus()) == BusMode::Async,
+            Device::Rmt(rmt) => self.bus_mode(rmt.transport.bus) == BusMode::Async,
             Device::Pin(_) => false,
             Device::Pins(_) => self.meta.runtime == Runtime::Embassy,
         }
+    }
+
+    /// Whether the project declares an RMT block or any raw RMT channel.
+    ///
+    /// The generated `Cargo.toml` enables the runtime's `rmt` feature from
+    /// this answer; a project that only has `<rmt>` still needs it so the
+    /// feature gate is exercised even before a channel exists.
+    pub fn uses_rmt(&self) -> bool {
+        self.resources
+            .buses()
+            .iter()
+            .any(|bus| matches!(bus, Bus::Rmt { .. }))
+            || self
+                .devices
+                .iter()
+                .any(|device| matches!(device, Device::Rmt(_)))
     }
 
     /// The mode one bus is driven in, resolved from the drivers bound to it.
