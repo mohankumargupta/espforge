@@ -3,7 +3,9 @@ RMT TX EXAMPLE
 
 One raw RMT transmit channel sends "hello\n" as a 115200 8N1 pulse train on
 GPIO 4: a low start bit, eight data bits least significant first and a high
-stop bit. UART1 is the receive side, its RX on GPIO 5 and its TX on GPIO 6, and
+stop bit. The channel keeps the RMT block's raw 80 MHz clock, so one tick is
+12.5 ns and a 115200 baud bit is 694 ticks; no divider sits between the two.
+UART1 is the receive side, its RX on GPIO 5 and its TX on GPIO 6, and
 diagram.json wires GPIO 4 to GPIO 5. The firmware prints what its own UART
 received, so the console shows the text the waveform carried and the example
 proves the pulse timing, not just that a transmit finished.
@@ -19,6 +21,6 @@ proves the pulse timing, not just that a transmit finished.
   <uart id="uart1" uart="UART1" tx="6" rx="5" baud_rate="115200" />
 
 # devices
-  <rmt_tx id="uart_tx" bus="$rmt0" pin="4" channel="0" clk_divider="50" idle_level="high" />
+  <rmt_tx id="uart_tx" bus="$rmt0" pin="4" channel="0" clk_divider="1" idle_level="high" />
 
 # services

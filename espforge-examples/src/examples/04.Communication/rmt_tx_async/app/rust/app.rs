@@ -1,10 +1,18 @@
 //! The esp-hal `rmt_tx` example, read back through a UART.
 //!
-//! `uart_tx` is the raw `<rmt_tx>` channel: GPIO 4, clock divider 50, idle
-//! high. At 80 MHz / 50 one tick is 625 ns, so a 115200 baud bit is 14 ticks
-//! (8.75 µs, 0.8% from the ideal 8.68 µs) and a byte is a low start bit, eight
-//! data bits least significant first and a high stop bit. The app builds the
-//! pulses; the channel does not know UART.
+//! `uart_tx` is the raw `<rmt_tx>` channel: GPIO 4, no clock divider, idle
+//! high. The channel counts the block's raw 80 MHz clock, so one tick is
+//! 12.5 ns and a 115200 baud bit is 694 ticks (8.675 µs, 0.06% from the ideal
+//! 8.68 µs); a byte is a low start bit, eight data bits least significant first
+//! and a high stop bit. The app builds the pulses; the channel does not know
+//! UART.
+//!
+//! Divider 1 is deliberate. Every RMT consumer has to honour 80 MHz ticks to
+//! drive a WS2812 strip, while a channel divider is easy to leave unimplemented
+//! in a simulator, and a divider that is silently ignored makes every bit
+//! shorter by that factor: the frame then decodes to nothing and the console
+//! stays empty, which is indistinguishable from a transmit that never ran.
+//! That is why the transmit logs before the read does.
 //!
 //! `uart1` is the chip's own second UART, its RX on GPIO 5. `diagram.json`
 //! wires GPIO 4 to GPIO 5, the wire an RMT-to-UART loopback needs, so the port
@@ -17,8 +25,8 @@ use espforge_runtime::PulseCode;
 
 use crate::Context;
 
-/// 80 MHz / 50 = 1.6 MHz (1 tick = 625 ns), 115200 baud -> 14 ticks a bit.
-const BIT_TICKS: u16 = 14;
+/// 80 MHz (1 tick = 12.5 ns), 115200 baud -> 694 ticks a bit.
+const BIT_TICKS: u16 = 694;
 
 /// 6 bytes ("hello\n") * 5 PulseCodes + 1 end marker = 31 symbols.
 const FRAME_LEN: usize = 31;
@@ -62,9 +70,12 @@ pub async fn setup(ctx: &'static Context, _spawner: Spawner) {
 pub async fn forever(ctx: &'static Context) {
     {
         let mut tx = device!(ctx, uart_tx);
-        if tx.transmit(&hello_frame()).await.is_err() {
-            ctx.logger.error("TEST: rmt hello failed");
-            return;
+        match tx.transmit(&hello_frame()).await {
+            Ok(()) => ctx.logger.info("TEST: rmt hello sent"),
+            Err(_) => {
+                ctx.logger.error("TEST: rmt hello failed");
+                return;
+            }
         }
     }
 

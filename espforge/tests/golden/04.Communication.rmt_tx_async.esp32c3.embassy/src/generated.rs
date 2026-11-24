@@ -46,7 +46,7 @@ impl Devices {
                     esp_hal::rmt::TxChannelCreator::configure_tx(
                             rmt0_bus.channel0,
                             &espforge_runtime::TxChannelConfig::default()
-                                .with_clk_divider(50)
+                                .with_clk_divider(1)
                                 .with_idle_output(true)
                                 .with_idle_output_level(esp_hal::gpio::Level::High),
                         )
@@ -55,7 +55,7 @@ impl Devices {
                             registry.peripherals.GPIO4.clone_unchecked()
                         }),
                     80000,
-                    50,
+                    1,
                 ),
             ),
         })
