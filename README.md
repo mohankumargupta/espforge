@@ -1,19 +1,19 @@
 # Espforge
 
-A scaffolding++ tool: start with a `.espf` file and a simple `src/app.rs`, and it
-generates an esp32 `no_std` esp-hal based rust project with the boilerplate taken
-care of for you.
+A scaffolding++ tool: start with a `.espf.txt` file and a simple `src/app.rs`, and it
+generates an esp32 `no_std` esp-hal based rust project with the tedious boilerplate taken
+care of.
 
 ## Features
 - instead of esphome style yaml, use a custom format that combines markdown headers
-  with xml self-closing tags (see espf file format https://github.com/mohankumargupta/espf)
+  with xml self-closing tags (see espf file format https://github.com/mohankumargupta/espforge/tree/main/docs/003-espf-file-format.md)
 - Pre-built components and devices that sit on top of esphal https://github.com/esp-rs/esp-hal
 - Supports both bare-metal blocking execution and async execution using the embassy framework.
 - Wokwi integration and working examples
 
 ## Essence of espforge - blink example
 
-Given blink.espf
+Given blink.espf.txt
 
 ```xml
 ====================
@@ -52,34 +52,61 @@ pub fn forever(ctx: &mut Context) {
 when you run
 
 ```sh
-espforge build blink.espf
+espforge build
 ```
 
-then you should have an esp32 no_std rust project ready to upload. `espforge build` writes the
-project to `build/` (change it with `--out`) and compiles it.
+then you should have an esp32 no_std rust project ready to go.
 
-`build/` is disposable output: everything in it is rewritten on every build, so you can
-delete it (or `.gitignore` it) at any time. Everything you control lives next to the
-`.espf` instead: `src/app.rs`, `diagram.json` / `wokwi.toml`, `partitions.csv`,
-`rust-toolchain.toml`, `.cargo/*.toml`, and `Cargo.extra.toml` (extra `[dependencies]`,
-`[patch]`, `[profile]` and `[lints]` merged into the generated manifest).
+## Project Structure
 
-Values that do not belong in the spec — Wi-Fi credentials, a bench-specific pin — can be
-written as `env:NAME` in any attribute. `espforge` replaces them with `NAME` from
-`substitutions.env` beside the `.espf`, or from the process environment (which wins), and
-reports a missing name at the attribute instead of failing later inside `cargo`.
-`substitutions.env` is git-ignored rather than copied into `build/`; `espforge new` starts
-one with a commented example. See [research/09-substitutions.md](research/09-substitutions.md).
+Everything you author and version-control lives at the root of your project. The `build/` directory is **100% disposable generated output**—delete it anytime, and `espforge build` will recreate it.
+
+```text
+my-project/                        <-- YOUR SOURCE OF TRUTH (commit this)
+├── my-project.espf                <-- Hardware spec (also accepts *.espf.txt)
+├── src/
+│   └── app.rs                     <-- Your Rust setup() / forever() code
+│                                      (also supports app/rust/app.rs)
+├── substitutions.env              <-- Optional env:NAME secrets/pins (git-ignored)
+├── .gitignore                     <-- Ignores /substitutions.env (and build/)
+│
+├── drivers/                       <-- Optional project-local driver manifests (*.kdl)
+├── .espforge/
+│   └── drivers.lock               <-- Lockfile for local/fetched driver manifests
+│
+├── Cargo.extra.toml               <-- Optional extra crates, [patch], [lints], [profile]
+├── diagram.json                   <-- Optional Wokwi circuit (supports {{ board }}, {{ led.pin }})
+├── wokwi.toml                     <-- Optional Wokwi config (plus chip.json / chip.wasm)
+├── partitions.csv                 <-- Optional custom flash partition table
+├── rust-toolchain.toml            <-- Optional toolchain override
+├── .cargo/
+│   ├── config.toml                <-- Optional runner/rustflags override
+│   └── esp-config.toml            <-- Optional ESP_LOG / env override (or ./esp-config.toml)
+│
+└── build/                         <-- DISPOSABLE OUTPUT (regenerated on every gen/build)
+    ├── Cargo.toml                 <-- Generated + merged with Cargo.extra.toml
+    ├── build.rs
+    ├── rust-toolchain.toml
+    ├── diagram.json / wokwi.toml
+    ├── partitions.csv             <-- Emitted when <ota /> or overlay is used
+    ├── .cargo/{config.toml, esp-config.toml}
+    ├── .espforge/source.espf.txt  <-- Snapshot of the spec used for this build
+    └── src/
+        ├── app.rs                 <-- Copied from your src/app.rs
+        ├── generated.rs           <-- PeripheralRegistry, Devices, Services
+        ├── lib.rs                 <-- Context, device!(), service!(), signal!()
+        └── bin/main.rs            <-- Entry point (#[esp_hal::main] or #[esp_rtos::main])
+```
 
 If you want to see the examples in this repo in action, click [here](https://github.com/mohankumargupta/espforge_wokwi)
 
-If you want to see what is the generated rust no_std examples look like,
+If you want to see the generated rust no_std examples look like,
 click [here](https://github.com/mohankumargupta/espforge-extras/tree/main/espforge-examples-generated)
 
 ## Drivers(advanced)
 
 Bundled drivers live in `espforge-drivers/manifests/<tag>.kdl`; a project can
-add its own under `drivers/`, or fetch one and keep it in the cache:
+add its own under `drivers/`:
 
 ```sh
 espforge driver add drivers/my_sensor.kdl
@@ -88,7 +115,6 @@ espforge driver add git+https://example.com/my_sensor#<commit>
 espforge driver add my_sensor@0.1.0 --registry https://example.com/index.json
 espforge driver list
 espforge driver verify
-espforge driver migrate old_driver.kdl --write
 ```
 see https://github.com/mohankumargupta/espforge-building-blocks for working examples
 
