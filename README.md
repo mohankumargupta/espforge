@@ -57,46 +57,69 @@ espforge build
 
 then you should have an esp32 no_std rust project ready to go.
 
-## Project Structure
-
-Everything you author and version-control lives at the root of your project. The `build/` directory is **100% disposable generated output**—delete it anytime, and `espforge build` will recreate it.
+## How `espforge` Works
 
 ```text
-my-project/                        <-- YOUR SOURCE OF TRUTH (commit this)
-├── my-project.espf                <-- Hardware spec (also accepts *.espf.txt)
-├── src/
-│   └── app.rs                     <-- Your Rust setup() / forever() code
-│                                      (also supports app/rust/app.rs)
-├── substitutions.env              <-- Optional env:NAME secrets/pins (git-ignored)
-├── .gitignore                     <-- Ignores /substitutions.env (and build/)
-│
-├── drivers/                       <-- Optional project-local driver manifests (*.kdl)
-├── .espforge/
-│   └── drivers.lock               <-- Lockfile for local/fetched driver manifests
-│
-├── Cargo.extra.toml               <-- Optional extra crates, [patch], [lints], [profile]
-├── diagram.json                   <-- Optional Wokwi circuit (supports {{ board }}, {{ led.pin }})
-├── wokwi.toml                     <-- Optional Wokwi config (plus chip.json / chip.wasm)
-├── partitions.csv                 <-- Optional custom flash partition table
-├── rust-toolchain.toml            <-- Optional toolchain override
-├── .cargo/
-│   ├── config.toml                <-- Optional runner/rustflags override
-│   └── esp-config.toml            <-- Optional ESP_LOG / env override (or ./esp-config.toml)
-│
-└── build/                         <-- DISPOSABLE OUTPUT (regenerated on every gen/build)
-    ├── Cargo.toml                 <-- Generated + merged with Cargo.extra.toml
-    ├── build.rs
-    ├── rust-toolchain.toml
-    ├── diagram.json / wokwi.toml
-    ├── partitions.csv             <-- Emitted when <ota /> or overlay is used
-    ├── .cargo/{config.toml, esp-config.toml}
-    ├── .espforge/source.espf.txt  <-- Snapshot of the spec used for this build
-    └── src/
-        ├── app.rs                 <-- Copied from your src/app.rs
-        ├── generated.rs           <-- PeripheralRegistry, Devices, Services
-        ├── lib.rs                 <-- Context, device!(), service!(), signal!()
-        └── bin/main.rs            <-- Entry point (#[esp_hal::main] or #[esp_rtos::main])
+  YOUR PROJECT (Source of Truth)                ESPFORGE PIPELINE                GENERATED CRATE (Disposable)
+  ──────────────────────────────                ─────────────────                ────────────────────────────
+  project.espf / *.espf.txt  ───┐                                           ┌──► build/Cargo.toml
+  src/app.rs (or app/rust/)  ───┼──► parse ─► check ─► lower ─► emit ───────┼──► build/src/generated.rs
+  substitutions.env          ───┤     (espf)  (chips,   (pins,   (rust,     ├──► build/src/bin/main.rs
+  drivers/*.kdl              ───┤              buses,    modes,   cargo,    ├──► build/src/app.rs
+  Cargo.extra.toml / overlays───┘              traits)   ota)     wokwi)    └──► build/diagram.json & wokwi.toml
 ```
+
+- **You own** your `.espf` spec, `src/app.rs`, `substitutions.env`, `drivers/`, and any overlay files (`Cargo.extra.toml`, `diagram.json`, `partitions.csv`).
+- **`espforge` owns `build/`**—it is regenerated cleanly on every `espforge gen` or `espforge build` and can be deleted or git-ignored at any time.
+
+---
+
+## User Project Structure
+
+A minimal project needs only two files (`.espf`/`.espf.txt` and `src/app.rs`). Optional files next to the spec customize Cargo, Wokwi, partitions, secrets, and external drivers:
+
+```text
+my-esp-app/
+│
+├── REQUIRED
+│   ├── my-esp-app.espf          # Hardware spec (or *.espf.txt)
+│   └── src/
+│       └── app.rs               # setup() and forever() (or app/rust/app.rs)
+│
+├── OPTIONAL: SECRETS & DRIVERS
+│   ├── substitutions.env        # Key=value pairs for env:NAME attributes (never copied to build/)
+│   ├── drivers/                 # Local v2 driver manifests (*.kdl)
+│   └── .espforge/
+│       └── drivers.lock         # SHA-256 lockfile for local and cached drivers
+│
+├── OPTIONAL: BUILD & TOOLCHAIN OVERLAYS (layered over generated defaults)
+│   ├── Cargo.extra.toml         # Merged into build/Cargo.toml (dependencies, patch, lints, profiles)
+│   ├── partitions.csv           # Custom flash partition table (auto-passed to espflash)
+│   ├── rust-toolchain.toml      # Custom Rust toolchain channel/targets
+│   └── .cargo/
+│       ├── config.toml          # Custom runner / rustflags
+│       └── esp-config.toml      # Custom ESP_LOG / [env] config (or ./esp-config.toml)
+│
+├── OPTIONAL: WOKWI SIMULATION OVERLAYS
+│   ├── diagram.json             # Custom circuit ({{ board }}, {{ serialMonitor }}, {{ <id>.pin }})
+│   ├── wokwi.toml               # Custom Wokwi config
+│   ├── chip.json / chip.wasm    # Custom Wokwi chip binary (+ chip/ Zig sources if enabled)
+│
+└── GENERATED (disposable — do not edit)
+    └── build/                   # Output directory (--out <dir> to change)
+        ├── Cargo.toml
+        ├── build.rs
+        ├── rust-toolchain.toml
+        ├── diagram.json / wokwi.toml / partitions.csv
+        ├── README.txt
+        ├── .cargo/{config.toml, esp-config.toml}
+        ├── .espforge/source.espf.txt
+        └── src/{app.rs, generated.rs, lib.rs, bin/main.rs}
+```
+
+> **Path discovery rules:** When you run `espforge check`, `gen`, or `build` with no path argument, `espforge` looks for the single `.espf` or `.espf.txt` file in the current directory, and looks for app logic at `src/app.rs` first, then `app/rust/app.rs`.
+
+---
 
 If you want to see the examples in this repo in action, click [here](https://github.com/mohankumargupta/espforge_wokwi)
 
