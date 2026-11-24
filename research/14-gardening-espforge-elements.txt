@@ -1,0 +1,20 @@
+To slim down espforge-elements after the manifest-only driver rewrite, keep it strictly focused on cross-component validation (ResourceGraph) and # services lowering, while pushing all device-specific instantiation and pin-mapping logic out to .kdl manifests in espforge-drivers.
+In a manifest-first architecture, espforge-elements often accumulates leftover "glue" from before drivers were declarative. Stripping it down to a thin semantic IR makes the codebase much safer for AI agents to edit without breaking driver logic.
+
+1. Audit & Move Out of espforge-elements
+
+• Hardcoded Device Structs & Enums: Any device-specific configuration types (e.g., sensor resolutions, display orientations, I2C default addresses) that still live in espforge-elements should be deleted and expressed as typed attributes in espforge-drivers/manifests/*.kdl.
+• Per-Device Pin & Bus Resolution: Instead of espforge-elements knowing that "an SSD1306 needs an I2C bus and optional reset pin," let the .kdl manifest declare its required capabilities/slots. espforge-elements should only resolve generic capability requirements against the ResourceGraph.
+• Code-Generation Hints: Remove any Rust type names, crate paths, or esp-hal constructor snippets stored inside espforge-elements models. Those belong either in the .kdl manifest or in espforge-emit.
+
+2. Keep Strictly Inside espforge-elements
+
+• ResourceGraph & Conflict Detection: Single-owner pin/peripheral claiming (GPIO18 can't be both an LED and an SPI clock), bus sharing rules (multiple I2C devices on one bus vs. exclusive SPI CS pins), and chip capability checks via esp-metadata-generated.
+• # services Lowering: System-level primitives that cross-cut the whole firmware image rather than representing a physical chip peripheral—such as Wi-Fi station/AP state, Embassy executor sizing, heap allocation (esp-alloc), and logging.
+• Normalized Lowered IR: A generic DeviceNode struct (ID, resolved bus/pin handles, validated attribute map, and manifest reference) that hands espforge-emit a flat, already-validated dependency order.
+
+3. Enforce the Slim Boundary with Lints (Lauren Tan Style)
+
+Once you trim espforge-elements, lock the boundary in place so future PRs don't re-introduce device glue:
+• Dependency Lint: Forbid espforge-elements from depending on device-specific crates or containing string literals matching driver crate names.
+• Exhaustiveness Check: Add a test or lint verifying that adding a new .kdl driver in espforge-drivers requires zero file changes in espforge-elements (and ideally zero changes in espforge-emit).
