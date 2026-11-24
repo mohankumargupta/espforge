@@ -10,7 +10,8 @@ impl PeripheralRegistry {
 }
 /// Constructed devices.
 pub struct Devices {
-    pub ir_tx: espforge_runtime::BlockingRmtTxEndpoint,
+    pub uart1: espforge_runtime::UartDevice<esp_hal::Blocking>,
+    pub uart_tx: espforge_runtime::BlockingRmtTxEndpoint,
 }
 impl Devices {
     /// Build every declared device.
@@ -27,22 +28,30 @@ impl Devices {
             )
             .expect("RMT configuration failed");
         Ok(Self {
-            ir_tx: espforge_runtime::RmtTxChannel::with_clock(
+            uart1: espforge_runtime::UartDevice::build(
+                    unsafe { registry.peripherals.UART1.clone_unchecked() },
+                    unsafe { registry.peripherals.GPIO6.clone_unchecked() },
+                    unsafe { registry.peripherals.GPIO5.clone_unchecked() },
+                    espforge_runtime::UartConfig {
+                        baudrate: 115200,
+                        data_bits: esp_hal::uart::DataBits::_8,
+                        parity: esp_hal::uart::Parity::None,
+                        stop_bits: esp_hal::uart::StopBits::_1,
+                    },
+                )
+                .expect("UART configuration failed"),
+            uart_tx: espforge_runtime::RmtTxChannel::with_clock(
                 esp_hal::rmt::TxChannelCreator::configure_tx(
                         rmt0_bus.channel0,
                         &espforge_runtime::TxChannelConfig::default()
-                            .with_clk_divider(1)
+                            .with_clk_divider(50)
                             .with_idle_output(true)
-                            .with_idle_output_level(esp_hal::gpio::Level::Low)
-                            .with_carrier_modulation(true)
-                            .with_carrier_high(1052)
-                            .with_carrier_low(1053)
-                            .with_carrier_level(esp_hal::gpio::Level::Low),
+                            .with_idle_output_level(esp_hal::gpio::Level::High),
                     )
                     .expect("RMT TX channel configuration failed")
                     .with_pin(unsafe { registry.peripherals.GPIO4.clone_unchecked() }),
                 80000,
-                1,
+                50,
             ),
         })
     }
