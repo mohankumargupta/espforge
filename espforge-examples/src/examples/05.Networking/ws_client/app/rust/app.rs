@@ -15,7 +15,10 @@ pub async fn forever(ctx: &'static Context) {
     let mut conn_buf = [0u8; 4096];
     let mut rx_buf = [0u8; 512];
 
-    match ws.connect("ws://echo.websocket.events/", &mut conn_buf).await {
+    // Not `echo.websocket.org`: it answers port 80 with a 301 to TLS and the
+    // upgrade checks the reply's status. Not `echo.websocket.events`: that host
+    // no longer resolves, so the client reports a DNS error.
+    match ws.connect("ws://websocket-echo.com/", &mut conn_buf).await {
         Ok(mut session) => {
             ctx.logger.info("Upgraded to WebSocket. Sending greeting...");
             if let Err(e) = session.send_text("Hello from ESP32!").await {

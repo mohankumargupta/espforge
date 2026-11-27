@@ -1,15 +1,41 @@
 //! WS2812 / NeoPixel addressable RGB strip over an RMT channel.
 //!
-//! A pixel is 24 bits, sent most-significant bit first: a short high pulse is a
-//! zero, a long one a one. The line then stays low for at least 50 µs to latch
-//! the frame. Pulse lengths are datasheet nanoseconds converted with the
-//! channel's **actual** divided clock: `esp32h2` clocks RMT at 32 MHz, not
-//! 80 MHz, so the same bit is 40 ticks there and 100 ticks on the other
-//! supported chips.
+//! A pixel is 24 bits in **GRB** order (the strips take green, red, blue), sent
+//! most-significant bit first: a short high pulse is a zero, a long one a one.
+//! The line then stays low for at least 50 µs to latch the frame. Pulse lengths
+//! are datasheet nanoseconds converted with the channel's **actual** divided
+//! clock: `esp32h2` clocks RMT at 32 MHz, not 80 MHz, so the same bit is 40
+//! ticks there and 100 ticks on the other supported chips.
 //!
-//! The timing table is pure and host-tested; the channel wrappers are built
-//! only for ESP targets and only when the generated project enables the
-//! matching `espforge-drivers` feature.
+//! One `write` is one `transmit`: every pixel's codes, the latch and the end
+//! marker go into a single slice. A gap between pixels would latch the strip
+//! early, and the next pixel would land on LED 0 instead of shifting down the
+//! strip.
+//!
+//! The timing table and the GRB packing are pure and host-tested; the channel
+//! wrappers are built only for ESP targets and only when the generated project
+//! enables the matching `espforge-drivers` feature.
+
+/// The most pixels one frame can carry.
+///
+/// The frame is built in a stack buffer, not on the heap: 24 codes per pixel
+/// plus the latch and its end marker. A longer strip needs a caller-owned
+/// buffer, which this API does not have yet.
+pub const MAX_PIXELS: usize = 16;
+
+/// The codes of one frame: 24 per pixel, then the latch and its end marker.
+// Used by the target-only channel wrappers and by the host tests; a host
+// library build has neither.
+#[cfg_attr(
+    not(all(
+        any(target_arch = "riscv32", target_arch = "xtensa"),
+        feature = "ws2812-rmt"
+    )),
+    allow(dead_code)
+)]
+const fn frame_codes(pixels: usize) -> usize {
+    pixels * 24 + 2
+}
 
 /// The four data-bit phases and the latch gap, in channel-clock ticks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,12 +66,28 @@ pub fn timings(clock_hz: u32) -> Timings {
     }
 }
 
+/// One pixel as a 24-bit GRB word, most-significant bit first.
+///
+/// The app talks RGB; a WS2812B strip takes the three bytes in GRB order.
+// Same story as `frame_codes`: the encoder is only built for ESP targets.
+#[cfg_attr(
+    not(all(
+        any(target_arch = "riscv32", target_arch = "xtensa"),
+        feature = "ws2812-rmt"
+    )),
+    allow(dead_code)
+)]
+fn grb(pixel: [u8; 3]) -> u32 {
+    let [red, green, blue] = pixel;
+    (u32::from(green) << 16) | (u32::from(red) << 8) | u32::from(blue)
+}
+
 #[cfg(all(
     any(target_arch = "riscv32", target_arch = "xtensa"),
     feature = "ws2812-rmt"
 ))]
 mod device {
-    use super::timings;
+    use super::{MAX_PIXELS, frame_codes, grb, timings};
     use esp_hal::gpio::Level;
     use esp_hal::rmt::PulseCode;
     use espforge_runtime::{DeviceErrorKind, RmtError};
@@ -64,16 +106,12 @@ mod device {
             Ok(Self { channel })
         }
 
-        /// Send one frame and latch it.
+        /// Send `pixels` as one frame and latch it.
         pub fn write(&mut self, pixels: &[[u8; 3]]) -> Result<(), RmtError> {
             let timings = timings(self.channel.clock_hz());
-            let mut frame = [PulseCode::end_marker(); 24];
-            for pixel in pixels {
-                encode(*pixel, timings, &mut frame);
-                self.channel.transmit(&frame)?;
-            }
-            self.channel.transmit(&[latch(timings)])?;
-            Ok(())
+            let mut frame = [PulseCode::end_marker(); frame_codes(MAX_PIXELS)];
+            let codes = encode(pixels, timings, &mut frame)?;
+            self.channel.transmit(&frame[..codes])
         }
     }
 
@@ -93,36 +131,46 @@ mod device {
             Ok(Self { channel })
         }
 
-        /// Send one frame, awaiting each channel transaction, then latch it.
+        /// Send `pixels` as one frame and latch it.
         pub async fn write(&mut self, pixels: &[[u8; 3]]) -> Result<(), RmtError> {
             let timings = timings(self.channel.clock_hz());
-            let mut frame = [PulseCode::end_marker(); 24];
-            for pixel in pixels {
-                encode(*pixel, timings, &mut frame);
-                self.channel.transmit(&frame).await?;
-            }
-            self.channel.transmit(&[latch(timings)]).await?;
-            Ok(())
+            let mut frame = [PulseCode::end_marker(); frame_codes(MAX_PIXELS)];
+            let codes = encode(pixels, timings, &mut frame)?;
+            self.channel.transmit(&frame[..codes]).await
         }
     }
 
-    /// Encode one GRB-independent RGB pixel as 24 high/low pulse codes.
-    fn encode(pixel: [u8; 3], timings: super::Timings, codes: &mut [PulseCode; 24]) {
-        for (index, bit) in (0..24)
-            .map(|index| {
-                let byte = pixel[index / 8];
-                let shift = 7 - (index % 8);
-                (byte >> shift) & 1 == 1
-            })
-            .enumerate()
-        {
-            let (high, low) = if bit {
-                (timings.t1h, timings.t1l)
-            } else {
-                (timings.t0h, timings.t0l)
-            };
-            codes[index] = PulseCode::new(Level::High, high, Level::Low, low);
+    /// Encode `pixels` into `frame`, returning the frame's length.
+    ///
+    /// The frame ends with the latch (a low pulse of at least `reset` ticks)
+    /// followed by a real end marker: `esp-hal` refuses a slice that does not
+    /// end on one, which is what per-pixel `PulseCode` tables without a marker
+    /// got wrong.
+    fn encode(
+        pixels: &[[u8; 3]],
+        timings: super::Timings,
+        frame: &mut [PulseCode],
+    ) -> Result<usize, RmtError> {
+        if pixels.len() > MAX_PIXELS || frame.len() < frame_codes(pixels.len()) {
+            return Err(RmtError::InvalidArgument);
         }
+        let mut codes = 0;
+        for pixel in pixels {
+            let bits = grb(*pixel);
+            for index in 0..24 {
+                let (high, low) = if (bits >> (23 - index)) & 1 == 1 {
+                    (timings.t1h, timings.t1l)
+                } else {
+                    (timings.t0h, timings.t0l)
+                };
+                frame[codes] = PulseCode::new(Level::High, high, Level::Low, low);
+                codes += 1;
+            }
+        }
+        frame[codes] = latch(timings);
+        codes += 1;
+        frame[codes] = PulseCode::end_marker();
+        Ok(codes + 1)
     }
 
     /// The low period that latches a frame.
@@ -162,5 +210,25 @@ mod tests {
         assert_eq!(h2.t0h + h2.t0l, 40);
         assert_eq!(h2.t1h + h2.t1l, 40);
         assert_eq!(h2.reset, 1_600);
+    }
+
+    #[test]
+    fn a_pixel_word_is_green_then_red_then_blue() {
+        assert_eq!(grb([32, 0, 0]), 0x00_20_00);
+        assert_eq!(grb([0, 32, 0]), 0x20_00_00);
+        assert_eq!(grb([0, 0, 32]), 0x00_00_20);
+        assert_eq!(grb([0x12, 0x34, 0x56]), 0x34_12_56);
+    }
+
+    #[test]
+    fn a_frame_has_24_codes_a_pixel_plus_the_latch_and_its_end_marker() {
+        assert_eq!(frame_codes(3), 74);
+        assert_eq!(frame_codes(1), 26);
+        assert_eq!(frame_codes(0), 2);
+    }
+
+    #[test]
+    fn the_stack_buffer_covers_the_biggest_allowed_frame() {
+        assert_eq!(frame_codes(MAX_PIXELS), 386);
     }
 }
